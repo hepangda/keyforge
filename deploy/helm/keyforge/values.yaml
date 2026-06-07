@@ -1,0 +1,101 @@
+# Default values for keyforge.
+#
+# All overridable knobs live here so values-*.yaml files in overlays
+# can stay short.
+
+image:
+  repository: ghcr.io/hepangda/keyforge
+  tag: ""           # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+  adminPort: 9090
+  mtlsPort: 8443
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: auth.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [auth.example.com]
+      secretName: keyforge-tls
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # Set targetTokenRate to also scale on keyforge_token_issued_total via
+  # an external-metric. Empty disables the rule.
+  targetTokenRate: ""
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  postgresCidr: ""
+  smtpCidr: ""
+  otlpCidr: ""
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Configuration passed into the container as KEYFORGE_* env vars.
+config:
+  issuer: https://auth.example.com
+  logLevel: info
+  logFormat: json
+  database:
+    url: ""        # Set in values-*.yaml or via secret reference
+  jwks:
+    masterKeySecret:
+      name: keyforge-master-key
+      key: master_key
+  smtp:
+    enabled: false
+    host: ""
+
+# Database migrations are applied via a helm pre-install/pre-upgrade
+# Job that runs the migrate target against the same image.
+migrateJob:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  namespace: ""

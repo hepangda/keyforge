@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F172A">
+  <title>{{.Title}} — keyforge</title>
+  {{template "_styles" .}}
+</head>
+<body>
+  <div class="auth">
+    {{template "_brand_panel" .}}
+    <main class="auth__panel">
+      <div class="card">
+        <div class="card__eyebrow">Sign in</div>
+        <h1>Welcome back</h1>
+        <p class="muted">Authenticate to continue to {{if .Tenant}}{{.Tenant.DisplayName}}{{else}}your tenant{{end}}.</p>
+
+        {{if .Error}}
+        <div class="alert alert--error">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>{{.Error}}</span>
+        </div>
+        {{end}}
+
+        {{if .IdPs}}
+          <div class="idp-list">
+            {{range .IdPs}}<a class="idp-button" href="/oauth/federation/{{.Slug}}/start?ar={{$.AuthRequestID}}">Continue with {{.DisplayName}}</a>{{end}}
+          </div>
+          <div class="divider">or continue with email</div>
+        {{end}}
+
+        <form method="POST" action="/oauth/login" autocomplete="on">
+          <input type="hidden" name="auth_request_id" value="{{.AuthRequestID}}">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="email" value="{{.Email}}" placeholder="you@example.com">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="••••••••">
+          <button type="submit" class="btn btn--primary">
+            Continue
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </form>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

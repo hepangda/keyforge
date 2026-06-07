@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F172A">
+  <title>{{.Title}} — keyforge</title>
+  {{template "_styles" .}}
+</head>
+<body>
+  <div class="auth">
+    {{template "_brand_panel" .}}
+    <main class="auth__panel">
+      <div class="card">
+        <div class="error-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div class="card__eyebrow">Authorization error</div>
+        <h1>{{.Title}}</h1>
+        <p style="margin: 4px 0 16px; line-height: 1.6;">{{.Message}}</p>
+        {{if .Detail}}<p class="muted">{{.Detail}}</p>{{end}}
+      </div>
+    </main>
+  </div>
+</body>
+</html>

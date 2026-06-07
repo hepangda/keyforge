@@ -1,0 +1,6 @@
+{{template "layout" .}}
+{{define "body"}}
+  <h1>{{.Title}}</h1>
+  <p>{{.Message}}</p>
+  {{if .Detail}}<p class="muted">{{.Detail}}</p>{{end}}
+{{end}}

@@ -1,0 +1,64 @@
+# keyforge example configuration
+# Override any field with KEYFORGE_<SECTION>__<KEY>, e.g.
+#   KEYFORGE_SERVER__ADDR=:8081
+#   KEYFORGE_DATABASE__URL=postgres://...
+
+server:
+  addr: :8080
+  admin_addr: :9090
+  # Optional: enable a second listener that requires TLS client certs.
+  # mtls_addr: :8443
+  read_header_timeout: 10s
+  idle_timeout: 120s
+  shutdown_timeout: 30s
+
+database:
+  url: postgres://keyforge:keyforge@localhost:5432/keyforge?sslmode=disable
+  max_open_conns: 20
+  max_idle_conns: 5
+  conn_max_lifetime: 30m
+
+jwks:
+  # 32 bytes, base64-encoded. Generate with: openssl rand -base64 32
+  master_key: changeme-changeme-changeme-changeme-changeme
+  rotate_after: 2160h     # 90 days
+  retain_after_rotate: 720h  # 30 days
+  default_alg: RS256
+
+oidc:
+  issuer: http://localhost:8080
+  access_token_ttl: 15m
+  refresh_token_ttl: 720h   # 30 days
+  id_token_ttl: 15m
+  authorize_code_ttl: 60s
+  par_request_uri_ttl: 90s
+  device_code_ttl: 10m
+  dpop_proof_max_skew: 60s
+  session_ttl: 24h
+  session_cookie_name: __Host-kf_sid
+
+logging:
+  level: info
+  format: json
+  source: false
+
+tracing:
+  enabled: false
+  service_name: keyforge
+  endpoint: localhost:4317
+  sample_ratio: 0.1
+
+security:
+  trusted_proxies: []
+  webauthn_origins:
+    - http://localhost:8080
+  # When non-empty, client certificates are read from this request header
+  # rather than the direct TLS connection. Requires trusted_proxies to be set.
+  # mtls_header_name: X-Forwarded-Client-Cert
+  # mtls_header_format: xfcc
+
+mail:
+  smtp_addr: localhost:1025
+  from: noreply@keyforge.local
+  starttls: false
+  insecure: true

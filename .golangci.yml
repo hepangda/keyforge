@@ -1,0 +1,89 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - contextcheck
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - sqlclosecheck
+    - staticcheck
+    - unparam
+    - unused
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+        - name: package-comments
+          disabled: true
+    gosec:
+      excludes:
+        - G104
+        - G304
+  exclusions:
+    paths:
+      - web
+      - internal/storage/postgres/db
+      - migrations
+      - sqlc
+      - tools
+      - deploy
+      - testdata
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - unparam
+          - noctx
+          - contextcheck
+      - path: internal/testsupport/
+        linters:
+          - contextcheck
+      - path: internal/oauth/authflow/
+        linters:
+          - contextcheck
+      - path: internal/oauth/authflow/
+        text: G710
+        linters:
+          - gosec
+      - path: internal/oauth/tokenapi/
+        linters:
+          - contextcheck
+      - path: internal/auth/federation/federationhttp/
+        linters:
+          - contextcheck
+      - path: internal/auth/federation/federationhttp/
+        text: G710
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/hepangda/keyforge
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

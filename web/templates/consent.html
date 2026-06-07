@@ -1,0 +1,16 @@
+{{template "layout" .}}
+{{define "body"}}
+  <h1>{{.Client.Name}} wants to access your account</h1>
+  <p class="muted">Signed in as <strong>{{.User.Email}}</strong>.</p>
+  <ul class="scope-list">
+    {{range .Scopes}}<li><strong>{{.Name}}</strong><br><span class="muted">{{.Description}}</span></li>{{end}}
+  </ul>
+  <form method="POST" action="/oauth/consent">
+    <input type="hidden" name="auth_request_id" value="{{.AuthRequestID}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="actions">
+      <button type="submit" name="decision" value="deny" class="secondary">Cancel</button>
+      <button type="submit" name="decision" value="allow">Allow</button>
+    </div>
+  </form>
+{{end}}

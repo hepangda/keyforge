@@ -1,0 +1,58 @@
+version: "2"
+
+sql:
+  - engine: postgresql
+    queries: sqlc/queries
+    schema: migrations
+    gen:
+      go:
+        package: db
+        out: internal/storage/postgres/db
+        sql_package: pgx/v5
+        emit_json_tags: false
+        emit_db_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+        emit_prepared_queries: false
+        emit_exact_table_names: false
+        emit_methods_with_db_argument: false
+        emit_result_struct_pointers: true
+        emit_params_struct_pointers: false
+        emit_enum_valid_method: true
+        emit_all_enum_values: true
+        output_db_file_name: db.go
+        output_models_file_name: models.go
+        output_querier_file_name: querier.go
+        output_files_suffix: _gen
+        rename:
+          tenant_id: TenantID
+          client_id: ClientID
+          user_id: UserID
+          kid: KID
+          dek_ciphertext: DEKCiphertext
+          jwks_uri: JWKSURI
+          dpop_bound_access_tokens: DPoPBoundAccessTokens
+          require_dpop: RequireDPoP
+          require_par: RequirePAR
+          tls_client_certificate_bound_access_tokens: TLSClientCertificateBoundAccessTokens
+          tls_client_auth_subject_dn: TLSClientAuthSubjectDN
+        overrides:
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - db_type: "text[]"
+            go_type:
+              type: "[]string"
+              slice: false
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "jsonb"
+            go_type:
+              type: "RawMessage"
+              import: "encoding/json"
+          - db_type: "bytea"
+            go_type:
+              type: "[]byte"

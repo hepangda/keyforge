@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F172A">
+  <title>{{.Title}} — keyforge</title>
+  {{template "_styles" .}}
+</head>
+<body>
+  <div class="auth">
+    {{template "_brand_panel" .}}
+    <main class="auth__panel">
+      <div class="card">
+        <div class="card__eyebrow">Authorization request</div>
+        <h1>Authorize {{.Client.Name}}</h1>
+        <div class="signed-as">
+          <span class="signed-as__avatar">{{slice .User.Email 0 1}}</span>
+          Signed in as <strong>{{.User.Email}}</strong>
+        </div>
+        <p class="muted">{{.Client.Name}} is requesting the following access to your account.</p>
+        <ul class="scope-list">
+          {{range .Scopes}}
+          <li>
+            <svg class="scope-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <div>
+              <strong>{{.Name}}</strong>
+              <span class="scope-desc">{{.Description}}</span>
+            </div>
+          </li>
+          {{end}}
+        </ul>
+        <form method="POST" action="/oauth/consent">
+          <input type="hidden" name="auth_request_id" value="{{.AuthRequestID}}">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <div class="actions">
+            <button type="submit" name="decision" value="deny" class="btn btn--secondary">Cancel</button>
+            <button type="submit" name="decision" value="allow" class="btn btn--primary">Allow access</button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

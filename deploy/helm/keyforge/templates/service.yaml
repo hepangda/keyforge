@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keyforge.fullname" . }}
+  labels: {{- include "keyforge.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: public
+      port: {{ .Values.service.port }}
+      targetPort: public
+    - name: admin
+      port: {{ .Values.service.adminPort }}
+      targetPort: admin
+    - name: mtls
+      port: {{ .Values.service.mtlsPort }}
+      targetPort: mtls
+  selector: {{- include "keyforge.selectorLabels" . | nindent 4 }}

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keyforge.fullname" . }}
+  labels: {{- include "keyforge.labels" . | nindent 4 }}
+data:
+  issuer: {{ .Values.config.issuer | quote }}
+  log_level: {{ .Values.config.logLevel | quote }}
+  log_format: {{ .Values.config.logFormat | quote }}

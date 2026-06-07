@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F172A">
+  <title>{{.Title}} — keyforge</title>
+  {{template "_styles" .}}
+</head>
+<body>
+  <div class="auth">
+    {{template "_brand_panel" .}}
+    <main class="auth__panel">
+      <div class="card">
+        <div class="card__eyebrow">Two-factor required</div>
+        <h1>{{.Title}}</h1>
+        {{if .Error}}
+        <div class="alert alert--error">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>{{.Error}}</span>
+        </div>
+        {{end}}
+        {{if .HelpText}}<p class="muted">{{.HelpText}}</p>{{end}}
+        <form method="POST" action="{{.Action}}" autocomplete="off">
+          <input type="hidden" name="auth_request_id" value="{{.AuthRequestID}}">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <label for="mfa-input">{{.InputLabel}}</label>
+          <input id="mfa-input" name="{{.InputName}}" type="{{.InputType}}" required autocomplete="one-time-code" inputmode="numeric" class="otp" placeholder="••••••">
+          <button type="submit" class="btn btn--primary">
+            Verify
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </form>
+        {{if .OtherFactors}}
+          <ul class="other-factors">
+            <li class="muted muted--tight" style="margin-bottom:4px;">Use another method</li>
+            {{range .OtherFactors}}<li><a href="{{.HREF}}">{{.Label}}</a></li>{{end}}
+          </ul>
+        {{end}}
+      </div>
+    </main>
+  </div>
+</body>
+</html>

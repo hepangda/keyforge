@@ -1,0 +1,76 @@
+name: keyforge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keyforge
+      POSTGRES_PASSWORD: keyforge
+      POSTGRES_DB: keyforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keyforge -d keyforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+
+  step-ca:
+    image: smallstep/step-ca:0.28.4
+    restart: unless-stopped
+    environment:
+      DOCKER_STEPCA_INIT_NAME: keyforge-local
+      DOCKER_STEPCA_INIT_DNS_NAMES: localhost,step-ca,keyforge.local
+      DOCKER_STEPCA_INIT_PROVISIONER_NAME: admin
+      DOCKER_STEPCA_INIT_PASSWORD_FILE: /home/step/secrets/password
+      DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT: "true"
+    volumes:
+      - step-ca-data:/home/step
+      - ./deploy/compose/step-ca/password:/home/step/secrets/password:ro
+    ports:
+      - "9000:9000"
+
+  keyforge:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    environment:
+      KEYFORGE_DATABASE__URL: postgres://keyforge:keyforge@postgres:5432/keyforge?sslmode=disable
+      KEYFORGE_JWKS__MASTER_KEY: dev-master-key-32-bytes-minimum-aaaa
+      KEYFORGE_OIDC__ISSUER: http://localhost:8080
+      KEYFORGE_SERVER__ADDR: ":8080"
+      KEYFORGE_SERVER__ADMIN_ADDR: ":9090"
+      KEYFORGE_LOGGING__LEVEL: debug
+      KEYFORGE_LOGGING__FORMAT: text
+      KEYFORGE_MAIL__SMTP_ADDR: mailhog:1025
+      KEYFORGE_MAIL__FROM: noreply@keyforge.local
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - .:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    working_dir: /src
+    command: ["air", "-c", ".air.toml"]
+
+volumes:
+  postgres-data:
+  step-ca-data:
+  go-mod-cache:
+  go-build-cache:

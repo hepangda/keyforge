@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>keyforge — Modern Security Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #11141a;
+    --surface-2: #161a21;
+    --border: #1f242c;
+    --border-strong: #2a313b;
+    --text: #e6e8eb;
+    --text-dim: #b4b9c1;
+    --muted: #7a808a;
+    --accent: #6366f1;
+    --accent-2: #818cf8;
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --info: #38bdf8;
+    --radius: 6px;
+    --radius-lg: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    font-feature-settings: 'cv11', 'ss01', 'cv02';
+    -webkit-font-smoothing: antialiased;
+  }
+  code, .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  a { color: inherit; text-decoration: none; }
+
+  /* ===== Layout ===== */
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+
+  /* ===== Sidebar ===== */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 18px 12px;
+    display: flex; flex-direction: column; gap: 18px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px;
+  }
+  .brand__mark {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent), #4f46e5 60%, #0ea5e9);
+    display: grid; place-items: center;
+    font-weight: 700; color: white; font-size: 13px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.05) inset;
+  }
+  .brand__name { font-weight: 600; letter-spacing: -.01em; }
+  .brand__env {
+    margin-left: auto;
+    font-size: 10px; text-transform: uppercase;
+    color: var(--muted); letter-spacing: .08em;
+    border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px;
+  }
+
+  .tenant {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    cursor: pointer;
+  }
+  .tenant:hover { border-color: var(--border-strong); }
+  .tenant__avatar {
+    width: 22px; height: 22px; border-radius: 5px;
+    background: #1e293b; color: var(--info);
+    display: grid; place-items: center; font-weight: 600; font-size: 11px;
+  }
+  .tenant__name { font-weight: 500; }
+  .tenant__chev { margin-left: auto; color: var(--muted); }
+
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav__group { padding: 10px 8px 4px; font-size: 10px; text-transform: uppercase;
+                color: var(--muted); letter-spacing: .1em; }
+  .nav__item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px; border-radius: var(--radius);
+    color: var(--text-dim); cursor: pointer;
+  }
+  .nav__item:hover { background: rgba(255,255,255,.03); color: var(--text); }
+  .nav__item--active {
+    background: rgba(99,102,241,.10);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(99,102,241,.25);
+  }
+  .nav__icon { width: 14px; height: 14px; opacity: .8; }
+  .nav__count {
+    margin-left: auto; font-size: 11px; color: var(--muted);
+    background: var(--surface-2); padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+
+  .sidebar__foot { margin-top: auto; display: flex; gap: 10px; align-items: center;
+                   padding: 8px 10px; border-top: 1px solid var(--border); }
+  .avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg, #f472b6, #f59e0b);
+    color: white; font-weight: 600; display: grid; place-items: center; font-size: 11px;
+  }
+
+  /* ===== Topbar ===== */
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,12,16,.7);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .crumbs { color: var(--muted); font-size: 12px; }
+  .crumbs span { margin: 0 6px; opacity: .5; }
+  .crumbs b { color: var(--text-dim); font-weight: 500; }
+
+  .search {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: var(--radius);
+    width: 320px; color: var(--muted);
+    cursor: text;
+  }
+  .search input {
+    background: transparent; border: 0; outline: 0;
+    color: var(--text); font: inherit; flex: 1;
+  }
+  .kbd {
+    border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px;
+    font-size: 10.5px; color: var(--muted);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  .icon-btn {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text-dim); background: var(--surface-2); cursor: pointer;
+  }
+  .icon-btn:hover { border-color: var(--border-strong); color: var(--text); }
+
+  /* ===== Page ===== */
+  .page { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+  .page__head { display: flex; align-items: flex-end; gap: 16px; }
+  .page__title { display: flex; flex-direction: column; gap: 6px; }
+  .page__title h1 {
+    margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.015em;
+  }
+  .page__title p { margin: 0; color: var(--muted); font-size: 13px; }
+  .page__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text); font: inherit; font-weight: 500; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--border-strong); }
+  .btn--primary {
+    background: var(--accent); border-color: var(--accent);
+    color: white;
+    box-shadow: 0 1px 0 rgba(255,255,255,.15) inset, 0 1px 2px rgba(0,0,0,.4);
+  }
+  .btn--primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+  .btn--ghost { background: transparent; }
+
+  /* ===== Stat cards ===== */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .stat__label { color: var(--muted); font-size: 12px;
+                 display: flex; align-items: center; gap: 6px; }
+  .stat__value { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+  .stat__delta { font-size: 11px; color: var(--muted); }
+  .stat__delta--up { color: var(--ok); }
+  .stat__delta--down { color: var(--danger); }
+  .spark {
+    margin-top: 4px; height: 28px; width: 100%;
+    overflow: hidden;
+  }
+
+  /* ===== Card ===== */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .card__head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card__title { font-weight: 600; }
+  .card__sub { color: var(--muted); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tab {
+    padding: 5px 10px; border-radius: var(--radius);
+    color: var(--muted); cursor: pointer; font-size: 12px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab--active {
+    background: var(--surface-2); color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+
+  /* ===== Table ===== */
+  .table { width: 100%; border-collapse: collapse; }
+  .table th, .table td {
+    text-align: left; padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .table th {
+    color: var(--muted); font-weight: 500; font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .06em;
+    background: var(--surface-2);
+  }
+  .table tbody tr:last-child td { border-bottom: 0; }
+  .table tbody tr:hover { background: rgba(255,255,255,.025); }
+  .row-name { display: flex; align-items: center; gap: 10px; }
+  .row-icon {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    display: grid; place-items: center; color: var(--text-dim); font-size: 12px;
+  }
+  .row-name strong { font-weight: 500; }
+  .row-name .muted { font-size: 11.5px; }
+
+  /* ===== Chip ===== */
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: var(--surface-2);
+  }
+  .chip::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
+  .chip--ok      { color: var(--ok);     border-color: color-mix(in srgb, var(--ok) 35%, transparent); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+  .chip--warn    { color: var(--warn);   border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+  .chip--danger  { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+  .chip--info    { color: var(--info);   border-color: color-mix(in srgb, var(--info) 35%, transparent); background: color-mix(in srgb, var(--info) 8%, transparent); }
+  .chip--neutral { color: var(--muted); }
+
+  .muted { color: var(--muted); }
+
+  /* ===== Right column ===== */
+  .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .activity { padding: 6px 0; }
+  .activity__item {
+    display: grid; grid-template-columns: 22px 1fr auto; gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .activity__item:last-child { border-bottom: 0; }
+  .activity__dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    margin-top: 7px; justify-self: center;
+    background: var(--muted);
+  }
+  .activity__dot--ok { background: var(--ok); }
+  .activity__dot--warn { background: var(--warn); }
+  .activity__dot--danger { background: var(--danger); }
+  .activity__title { font-weight: 500; }
+  .activity__meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .activity__time { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+
+  /* ===== Banner ===== */
+  .banner {
+    display: flex; gap: 12px; align-items: center;
+    border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+    background: color-mix(in srgb, var(--warn) 6%, var(--surface));
+    padding: 10px 14px; border-radius: var(--radius-lg);
+  }
+  .banner__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+  .banner__body { flex: 1; }
+  .banner__body b { color: var(--warn); }
+  .banner__body small { color: var(--muted); }
+
+  ::selection { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+  /* small screens */
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { position: relative; height: auto; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid { grid-template-columns: 1fr; }
+    .search { width: 200px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand__mark">k</div>
+      <div class="brand__name">keyforge</div>
+      <span class="brand__env">prod</span>
+    </div>
+
+    <div class="tenant" title="Switch tenant">
+      <div class="tenant__avatar">A</div>
+      <div>
+        <div class="tenant__name">acme-corp</div>
+        <div class="muted" style="font-size:11px">tenant_8f2ab41c</div>
+      </div>
+      <svg class="tenant__chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 10l5 5 5-5"/></svg>
+    </div>
+
+    <nav class="nav">
+      <div class="nav__group">Identity</div>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Overview
+      </a>
+      <a class="nav__item nav__item--active">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/></svg>
+        OAuth clients <span class="nav__count">24</span>
+      </a>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+        Users <span class="nav__count">3,182</span>
+      </a>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Sessions
+      </a>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 5-4 9-9 9s-9-4-9-9 4-9 9-9c2 0 4 .7 5.5 2"/></svg>
+        Consents
+      </a>
+
+      <div class="nav__group">Security</div>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>
+        MFA policies
+      </a>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.2-1.6l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2.8-1.6L13 2h-2l-.6 2.8a7 7 0 0 0-2.8 1.6l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .6.1 1.1.2 1.6l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2.8 1.6L11 22h2l.6-2.8a7 7 0 0 0 2.8-1.6l2.4 1 2-3.4-2-1.6c.1-.5.2-1 .2-1.6z"/></svg>
+        Keys & JWKS
+      </a>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4z"/><path d="M4 14h16v6H4z"/><circle cx="8" cy="7" r="1"/><circle cx="8" cy="17" r="1"/></svg>
+        Audit log
+      </a>
+
+      <div class="nav__group">Settings</div>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        Branding
+      </a>
+      <a class="nav__item">
+        <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9 9-5-5"/></svg>
+        Compliance
+      </a>
+    </nav>
+
+    <div class="sidebar__foot">
+      <div class="avatar">Z</div>
+      <div style="line-height:1.2">
+        <div style="font-size:12.5px">Zehao Lou</div>
+        <div class="muted" style="font-size:11px">admin@keyforge.local</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <div class="main">
+
+    <header class="topbar">
+      <div class="crumbs">Admin <span>/</span> <b>OAuth clients</b></div>
+
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input placeholder="Search clients, users, sessions…" />
+        <span class="kbd">⌘K</span>
+      </div>
+
+      <button class="icon-btn" title="Notifications">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+      </button>
+      <button class="icon-btn" title="Docs">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 9a3 3 0 1 1 5 2c-1 1-2 1-2 3"/><circle cx="12" cy="17" r="1"/></svg>
+      </button>
+    </header>
+
+    <div class="page">
+
+      <!-- Page head -->
+      <div class="page__head">
+        <div class="page__title">
+          <h1>OAuth clients</h1>
+          <p>Applications registered to request tokens from this tenant.</p>
+        </div>
+        <div class="page__actions">
+          <button class="btn btn--ghost">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Import
+          </button>
+          <button class="btn btn--primary">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New client
+          </button>
+        </div>
+      </div>
+
+      <!-- Banner -->
+      <div class="banner">
+        <span class="banner__dot"></span>
+        <div class="banner__body">
+          <b>Signing key rotation in 6 days.</b>
+          <small> &nbsp;Two clients haven't refetched JWKS since the last rotation. </small>
+        </div>
+        <button class="btn">Review</button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats">
+        <div class="stat">
+          <div class="stat__label">Tokens issued (24h)</div>
+          <div class="stat__value num">128,402</div>
+          <div class="stat__delta stat__delta--up">▲ 8.4% vs yesterday</div>
+        </div>
+        <div class="stat">
+          <div class="stat__label">Active sessions</div>
+          <div class="stat__value num">4,219</div>
+          <div class="stat__delta">— stable</div>
+        </div>
+        <div class="stat">
+          <div class="stat__label">MFA challenges</div>
+          <div class="stat__value num">812</div>
+          <div class="stat__delta stat__delta--up">▲ 12 WebAuthn</div>
+        </div>
+        <div class="stat">
+          <div class="stat__label">Failed auth (1h)</div>
+          <div class="stat__value num">37</div>
+          <div class="stat__delta stat__delta--down">▼ 22% from peak</div>
+        </div>
+      </div>
+
+      <!-- Two-column grid -->
+      <div class="grid">
+
+        <!-- Clients table -->
+        <section class="card">
+          <header class="card__head">
+            <div>
+              <div class="card__title">Registered clients</div>
+              <div class="card__sub">24 total · 3 inactive</div>
+            </div>
+            <div class="tabs">
+              <div class="tab tab--active">All</div>
+              <div class="tab">Confidential</div>
+              <div class="tab">Public</div>
+              <div class="tab">Service</div>
+            </div>
+          </header>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Client ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Last token</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="row-name">
+                    <div class="row-icon">IP</div>
+                    <div>
+                      <strong>Internal Portal</strong>
+                      <div class="muted">web · grants: code, refresh</div>
+                    </div>
+                  </div>
+                </td>
+                <td><code>cli_8f2a…b41c</code></td>
+                <td>Confidential</td>
+                <td><span class="chip chip--ok">Active</span></td>
+                <td class="num">2m ago</td>
+                <td><a class="muted" href="#">Manage →</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="row-name">
+                    <div class="row-icon">MA</div>
+                    <div>
+                      <strong>Mobile App (iOS)</strong>
+                      <div class="muted">native · PKCE required</div>
+                    </div>
+                  </div>
+                </td>
+                <td><code>cli_3d91…77af</code></td>
+                <td>Public</td>
+                <td><span class="chip chip--warn">Key rotating</span></td>
+                <td class="num">1h ago</td>
+                <td><a class="muted" href="#">Manage →</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="row-name">
+                    <div class="row-icon">CI</div>
+                    <div>
+                      <strong>CI Runner</strong>
+                      <div class="muted">service · client_credentials</div>
+                    </div>
+                  </div>
+                </td>
+                <td><code>cli_a012…ee93</code></td>
+                <td>Service</td>
+                <td><span class="chip chip--ok">Active</span></td>
+                <td class="num">just now</td>
+                <td><a class="muted" href="#">Manage →</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="row-name">
+                    <div class="row-icon">DS</div>
+                    <div>
+                      <strong>Data Studio</strong>
+                      <div class="muted">web · device_code</div>
+                    </div>
+                  </div>
+                </td>
+                <td><code>cli_77d4…0c12</code></td>
+                <td>Confidential</td>
+                <td><span class="chip chip--info">Pending review</span></td>
+                <td class="num">3d ago</td>
+                <td><a class="muted" href="#">Manage →</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="row-name">
+                    <div class="row-icon">LB</div>
+                    <div>
+                      <strong>Legacy Billing</strong>
+                      <div class="muted">web · deprecated grants</div>
+                    </div>
+                  </div>
+                </td>
+                <td><code>cli_5e90…aa31</code></td>
+                <td>Confidential</td>
+                <td><span class="chip chip--danger">Disabled</span></td>
+                <td class="num">14d ago</td>
+                <td><a class="muted" href="#">Manage →</a></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="row-name">
+                    <div class="row-icon">PT</div>
+                    <div>
+                      <strong>Partner Tunnel</strong>
+                      <div class="muted">service · mTLS bound</div>
+                    </div>
+                  </div>
+                </td>
+                <td><code>cli_2b18…61f0</code></td>
+                <td>Service</td>
+                <td><span class="chip chip--ok">Active</span></td>
+                <td class="num">11m ago</td>
+                <td><a class="muted" href="#">Manage →</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- Activity feed -->
+        <section class="card">
+          <header class="card__head">
+            <div>
+              <div class="card__title">Recent activity</div>
+              <div class="card__sub">Audit stream (last hour)</div>
+            </div>
+            <a class="muted" href="#" style="font-size:12px">View all →</a>
+          </header>
+          <div class="activity">
+            <div class="activity__item">
+              <span class="activity__dot activity__dot--ok"></span>
+              <div>
+                <div class="activity__title">Token issued · <span class="mono muted">Internal Portal</span></div>
+                <div class="activity__meta">user <code>u_91ad</code> · scope <code>openid profile</code></div>
+              </div>
+              <div class="activity__time">2m</div>
+            </div>
+            <div class="activity__item">
+              <span class="activity__dot activity__dot--warn"></span>
+              <div>
+                <div class="activity__title">MFA step-up required</div>
+                <div class="activity__meta">user <code>u_5c12</code> · WebAuthn · IP 10.0.4.18</div>
+              </div>
+              <div class="activity__time">7m</div>
+            </div>
+            <div class="activity__item">
+              <span class="activity__dot activity__dot--danger"></span>
+              <div>
+                <div class="activity__title">Refresh token reuse detected</div>
+                <div class="activity__meta">client <code>cli_5e90</code> · session revoked</div>
+              </div>
+              <div class="activity__time">14m</div>
+            </div>
+            <div class="activity__item">
+              <span class="activity__dot"></span>
+              <div>
+                <div class="activity__title">Consent granted</div>
+                <div class="activity__meta">user <code>u_a48f</code> → <span class="mono">Mobile App</span></div>
+              </div>
+              <div class="activity__time">22m</div>
+            </div>
+            <div class="activity__item">
+              <span class="activity__dot activity__dot--ok"></span>
+              <div>
+                <div class="activity__title">Signing key rotated</div>
+                <div class="activity__meta">kid <code>kf_2026_06</code> · 6 clients refetched JWKS</div>
+              </div>
+              <div class="activity__time">48m</div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

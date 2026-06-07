@@ -1,0 +1,27 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/keyforge ./cmd/keyforge"
+  bin = "./tmp/keyforge"
+  full_bin = "./tmp/keyforge -config configs/keyforge.example.yaml"
+  include_ext = ["go", "yaml", "yml", "html", "tmpl", "sql"]
+  exclude_dir = [
+    "tmp",
+    "bin",
+    "web/node_modules",
+    "web/dist",
+    "deploy",
+    "testdata",
+    ".git",
+  ]
+  exclude_regex = ["_test\\.go$", ".*_gen\\.go$"]
+  delay = 800
+  stop_on_error = true
+  log = "build-errors.log"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true

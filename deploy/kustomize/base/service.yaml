@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: keyforge
+  namespace: keyforge
+spec:
+  type: ClusterIP
+  ports:
+    - { name: public, port: 8080, targetPort: public }
+    - { name: admin,  port: 9090, targetPort: admin }
+  selector: { app.kubernetes.io/name: keyforge }

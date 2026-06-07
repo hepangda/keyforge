@@ -1,0 +1,7 @@
+BEGIN;
+
+DROP TABLE IF EXISTS user_consents;
+DROP TABLE IF EXISTS auth_requests;
+DROP TABLE IF EXISTS sessions;
+
+COMMIT;

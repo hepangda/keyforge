@@ -1,0 +1,11 @@
+BEGIN;
+
+DROP TABLE IF EXISTS schema_meta;
+DROP TABLE IF EXISTS jwks_keys;
+DROP TABLE IF EXISTS client_redirect_uris;
+DROP TABLE IF EXISTS clients;
+DROP TABLE IF EXISTS user_credentials;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS tenants;
+
+COMMIT;

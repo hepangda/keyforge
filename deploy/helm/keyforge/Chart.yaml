@@ -1,0 +1,12 @@
+apiVersion: v2
+name: keyforge
+description: Multi-tenant OAuth 2.1 / OpenID Connect authorization server
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/hepangda/keyforge
+sources:
+  - https://github.com/hepangda/keyforge
+maintainers:
+  - name: keyforge maintainers
+kubeVersion: ">=1.27.0"

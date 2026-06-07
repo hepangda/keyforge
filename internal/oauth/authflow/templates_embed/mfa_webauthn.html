@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F172A">
+  <title>{{.Title}} — keyforge</title>
+  {{template "_styles" .}}
+</head>
+<body>
+  <div class="auth">
+    {{template "_brand_panel" .}}
+    <main class="auth__panel">
+      <div class="card">
+        <div class="card__eyebrow">Two-factor required</div>
+        <h1>{{.Title}}</h1>
+        <p class="muted">Touch your security key, biometric sensor, or device passkey when prompted.</p>
+        <div class="webauthn-cta">
+          <div class="webauthn-cta__icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12C2 6 6 4 12 4s10 2 10 8c0 4-2 6-5 6"/><path d="M7 22c0-4 5-6 5-10"/><path d="M12 4v8"/></svg>
+          </div>
+          <button type="button" id="kf-webauthn-go" class="btn btn--primary" style="max-width: 260px; margin-top: 0;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Use passkey
+          </button>
+        </div>
+        <div id="kf-webauthn-err" class="alert alert--error" style="display:none"></div>
+        {{if .OtherFactors}}
+          <ul class="other-factors">
+            <li class="muted muted--tight" style="margin-bottom:4px;">Use another method</li>
+            {{range .OtherFactors}}<li><a href="{{.HREF}}">{{.Label}}</a></li>{{end}}
+          </ul>
+        {{end}}
+        <script>
+          const AR   = {{.AuthRequestID}};
+          const CSRF = {{.CSRFToken}};
+          const b64uToBuf = s => {
+            s = s.replace(/-/g, '+').replace(/_/g, '/');
+            while (s.length % 4) s += '=';
+            const bin = atob(s);
+            const buf = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            return buf.buffer;
+          };
+          const bufToB64u = buf => {
+            const bytes = new Uint8Array(buf);
+            let bin = '';
+            for (const b of bytes) bin += String.fromCharCode(b);
+            return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          };
+          const showErr = msg => {
+            const el = document.getElementById('kf-webauthn-err');
+            el.textContent = msg;
+            el.style.display = 'block';
+          };
+          document.getElementById('kf-webauthn-go').addEventListener('click', async () => {
+            showErr('');
+            try {
+              const beginResp = await fetch('/oauth/mfa/webauthn/begin?ar=' + encodeURIComponent(AR), {
+                method: 'POST', credentials: 'same-origin'
+              });
+              if (!beginResp.ok) throw new Error('begin failed: ' + beginResp.status);
+              const begin = await beginResp.json();
+              const opts = begin.publicKey;
+              opts.challenge = b64uToBuf(opts.challenge);
+              (opts.allowCredentials || []).forEach(c => c.id = b64uToBuf(c.id));
+
+              const assertion = await navigator.credentials.get({ publicKey: opts });
+              if (!assertion) throw new Error('user cancelled');
+              const cred = {
+                id:    assertion.id,
+                rawId: bufToB64u(assertion.rawId),
+                type:  assertion.type,
+                response: {
+                  authenticatorData: bufToB64u(assertion.response.authenticatorData),
+                  clientDataJSON:    bufToB64u(assertion.response.clientDataJSON),
+                  signature:         bufToB64u(assertion.response.signature),
+                  userHandle:        assertion.response.userHandle ? bufToB64u(assertion.response.userHandle) : null,
+                },
+              };
+
+              const finishResp = await fetch('/oauth/mfa/webauthn/finish?ar=' + encodeURIComponent(AR), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+                body: JSON.stringify({ challenge_id: begin.challenge_id, credential: cred }),
+              });
+              if (finishResp.redirected) {
+                window.location.href = finishResp.url;
+                return;
+              }
+              if (!finishResp.ok) {
+                const txt = await finishResp.text();
+                throw new Error('finish failed: ' + finishResp.status + ' ' + txt);
+              }
+              window.location.href = '/oauth/consent?ar=' + encodeURIComponent(AR);
+            } catch (e) {
+              showErr(String(e.message || e));
+            }
+          });
+        </script>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

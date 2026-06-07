@@ -1,0 +1,40 @@
+{{- if .Values.migrateJob.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "keyforge.fullname" . }}-migrate
+  labels: {{- include "keyforge.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrateJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrateJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels: {{- include "keyforge.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext: {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "keyforge.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # The keyforge binary applies migrations on boot; running it
+          # with the --migrate-only flag exits after the migration
+          # completes so the Job's success/failure semantics are clean.
+          args: ["--migrate-only"]
+          env:
+            - name: KEYFORGE_DATABASE__URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keyforge.fullname" . }}-db
+                  key: url
+            - name: KEYFORGE_JWKS__MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.jwks.masterKeySecret.name }}
+                  key:  {{ .Values.config.jwks.masterKeySecret.key }}
+{{- end }}

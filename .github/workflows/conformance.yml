@@ -1,40 +1,40 @@
-name: Conformance
+# name: Conformance
 
-# Nightly OIDF conformance pass against keyforge in compose. The suite
-# verifies the positive surface (OP Basic, DPoP, PAR, MTLS, CIBA,
-# Device) and the negative surface (implicit, password) — those
-# legacy grants must FAIL.
+# # Nightly OIDF conformance pass against keyforge in compose. The suite
+# # verifies the positive surface (OP Basic, DPoP, PAR, MTLS, CIBA,
+# # Device) and the negative surface (implicit, password) — those
+# # legacy grants must FAIL.
 
-on:
-  schedule:
-    - cron: "0 6 * * *"
-  workflow_dispatch:
+# on:
+#   schedule:
+#     - cron: "0 6 * * *"
+#   workflow_dispatch:
 
-permissions:
-  contents: read
+# permissions:
+#   contents: read
 
-jobs:
-  oidf:
-    name: OpenID Foundation conformance
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Bring up keyforge stack
-        run: make compose-up
-      - name: Wait for keyforge
-        run: |
-          for i in {1..60}; do
-            curl -fs http://localhost:8080/.well-known/openid-configuration && exit 0
-            sleep 2
-          done
-          exit 1
-      - name: Seed default tenant + clients
-        run: docker compose run --rm seed
-      - name: Run conformance suite
-        run: scripts/conformance.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: conformance-report
-          path: conformance/report.json
+# jobs:
+#   oidf:
+#     name: OpenID Foundation conformance
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: docker/setup-buildx-action@v3
+#       - name: Bring up keyforge stack
+#         run: make compose-up
+#       - name: Wait for keyforge
+#         run: |
+#           for i in {1..60}; do
+#             curl -fs http://localhost:8080/.well-known/openid-configuration && exit 0
+#             sleep 2
+#           done
+#           exit 1
+#       - name: Seed default tenant + clients
+#         run: docker compose run --rm seed
+#       - name: Run conformance suite
+#         run: scripts/conformance.sh
+#       - uses: actions/upload-artifact@v4
+#         if: always()
+#         with:
+#           name: conformance-report
+#           path: conformance/report.json

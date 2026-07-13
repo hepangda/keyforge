@@ -22,12 +22,12 @@ MAINTENANCE_LEASE_SECONDS = "900"
 [[d1_databases]]
 binding = "DB"
 database_name = "keyforge"
-database_id = "33d95d31-26d2-4b2a-8544-f7d9ff05b17c"
+database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "8aac98a37ae74ed78b966444d79aa413"
+id = "00000000000000000000000000000000"
 
 [[queues.producers]]
 binding = "AUDIT_QUEUE"
@@ -198,12 +198,12 @@ required = [
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "keyforge"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "33d95d31-26d2-4b2a-8544-f7d9ff05b17c"
 migrations_dir = "migrations"
 
 [[env.production.kv_namespaces]]
 binding = "KV"
-id = "00000000000000000000000000000000"
+id = "8aac98a37ae74ed78b966444d79aa413"
 
 [[env.production.queues.producers]]
 binding = "AUDIT_QUEUE"

@@ -73,7 +73,6 @@ describe("health", () => {
       runtime_configuration: { status: "ok" },
       database: { status: "ok" },
       signing_keys: { status: "ok" },
-      audit_archive: { status: "ok" },
       audit_queue: { status: "ok" },
       email_queue: { status: "ok" },
       durable_objects: { status: "ok" },

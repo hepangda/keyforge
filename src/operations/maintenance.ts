@@ -7,38 +7,15 @@ import { nowSeconds } from "../utils/time"
 import { getRuntimeConfig, SECONDS_PER_DAY } from "./runtime-config"
 
 const JOB_NAME = "scheduled-maintenance"
-const ARCHIVE_SCHEMA_VERSION = 2
-const PRUNABLE_ARCHIVE_SCHEMA_VERSIONS = [1, ARCHIVE_SCHEMA_VERSION] as const
 // Keep the whole invocation below D1's 50-query Free-plan budget. Running
-// hourly provides 28,800 archived rows/day at the maximum batch size.
-const MAX_ARCHIVE_BATCHES_PER_RUN = 12
-const MAX_ARCHIVE_LIST_PAGES_PER_RUN = 10
+// hourly provides 28,800 expired-audit-row deletions/day at the maximum batch size.
+const MAX_AUDIT_DELETE_BATCHES_PER_RUN = 12
 const MAX_CLEANUP_BATCHES_PER_TABLE = 2
-const ARCHIVE_CURSOR_KEY = "audit_archive_prune_cursor"
-
-type AuditArchiveRow = {
-  readonly id: string
-  readonly event_type: string
-  readonly actor_user_id: string | null
-  readonly actor_client_id: string | null
-  readonly user_id: string | null
-  readonly client_id: string | null
-  readonly resource_uri: string | null
-  readonly request_id: string | null
-  readonly ip_hash: string | null
-  readonly user_agent_hash: string | null
-  readonly scope: string | null
-  readonly success: number | null
-  readonly detail: string | null
-  readonly metadata_json: string | null
-  readonly created_at: number
-}
 
 export type MaintenanceResult = {
   readonly status: "completed" | "skipped"
   readonly signingKeyRotated: boolean
-  readonly archivedAuditRows: number
-  readonly deletedArchiveObjects: number
+  readonly deletedAuditRows: number
   readonly deletedRows: Readonly<Record<string, number>>
   readonly auditBacklogRemaining: number
   readonly oldestEligibleAuditAt: number | null
@@ -90,144 +67,27 @@ async function rotateSigningKeyWhenDue(
   return true
 }
 
-function safeSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "_")
-}
-
-function archiveObjectKey(env: Env, rows: readonly AuditArchiveRow[]): string {
-  const first = rows[0]
-  const last = rows.at(-1)
-  if (first === undefined || last === undefined) {
-    throw new Error("cannot construct an audit archive key for an empty batch")
-  }
-  const date = new Date(first.created_at * 1000).toISOString().slice(0, 10).replaceAll("-", "/")
-  return [
-    "audit",
-    `v${ARCHIVE_SCHEMA_VERSION}`,
-    safeSegment(env.ENVIRONMENT),
-    date,
-    `${first.created_at}-${last.created_at}-${safeSegment(first.id)}-${safeSegment(last.id)}.json`,
-  ].join("/")
-}
-
-async function deleteArchivedRows(env: Env, rows: readonly AuditArchiveRow[]): Promise<number> {
-  if (rows.length === 0) return 0
-  const placeholders = rows.map(() => "?").join(",")
-  const result = await env.DB.prepare(`DELETE FROM audit_logs WHERE id IN (${placeholders})`)
-    .bind(...rows.map((row) => row.id))
-    .run()
-  return result.meta.changes
-}
-
-async function archiveAuditLogs(
+async function deleteExpiredAuditLogs(
   env: Env,
   cutoff: number,
   batchSize: number,
-  archivedAt: number,
 ): Promise<number> {
-  let archived = 0
-  for (let batch = 0; batch < MAX_ARCHIVE_BATCHES_PER_RUN; batch += 1) {
+  let deleted = 0
+  for (let batch = 0; batch < MAX_AUDIT_DELETE_BATCHES_PER_RUN; batch += 1) {
     const result = await env.DB.prepare(
-      `SELECT id, event_type, actor_user_id, actor_client_id, user_id, client_id,
-              resource_uri, request_id, ip_hash, user_agent_hash, scope, success,
-              detail, metadata_json, created_at
-       FROM audit_logs
-       WHERE created_at < ?
-       ORDER BY created_at ASC, id ASC
-       LIMIT ?`,
+      `DELETE FROM audit_logs
+       WHERE id IN (
+         SELECT id
+         FROM audit_logs
+         WHERE created_at < ?
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?
+       )`,
     )
       .bind(cutoff, batchSize)
-      .all<AuditArchiveRow>()
-    if (result.results.length === 0) break
-
-    // Keep every object in one UTC-date partition even when a query crosses
-    // midnight; later iterations pick up the remaining rows.
-    const firstDate = new Date((result.results[0]?.created_at ?? 0) * 1000)
-      .toISOString()
-      .slice(0, 10)
-    const rows = result.results.filter(
-      (row) => new Date(row.created_at * 1000).toISOString().slice(0, 10) === firstDate,
-    )
-    const key = archiveObjectKey(env, rows)
-    const payload = JSON.stringify({
-      schema_version: ARCHIVE_SCHEMA_VERSION,
-      environment: env.ENVIRONMENT,
-      archived_at: archivedAt,
-      row_count: rows.length,
-      records: rows,
-    })
-    await env.ARCHIVE.put(key, payload, {
-      httpMetadata: { contentType: "application/json; charset=utf-8" },
-      customMetadata: {
-        schemaVersion: String(ARCHIVE_SCHEMA_VERSION),
-        rowCount: String(rows.length),
-        firstCreatedAt: String(rows[0]?.created_at ?? ""),
-        lastCreatedAt: String(rows.at(-1)?.created_at ?? ""),
-      },
-    })
-    archived += await deleteArchivedRows(env, rows)
-    if (result.results.length < batchSize) break
-  }
-  return archived
-}
-
-function archiveCursorKey(schemaVersion: number): string {
-  return schemaVersion === 1 ? ARCHIVE_CURSOR_KEY : `${ARCHIVE_CURSOR_KEY}_v${schemaVersion}`
-}
-
-async function pruneAuditArchiveVersion(
-  env: Env,
-  cutoffMilliseconds: number,
-  schemaVersion: number,
-  pageBudget: number,
-): Promise<number> {
-  const prefix = `audit/v${schemaVersion}/${safeSegment(env.ENVIRONMENT)}/`
-  const cursorKey = archiveCursorKey(schemaVersion)
-  const saved = await env.DB.prepare("SELECT value FROM maintenance_state WHERE key = ?")
-    .bind(cursorKey)
-    .first<{ value: string }>()
-  let cursor = saved?.value || undefined
-  let deleted = 0
-  for (let page = 0; page < pageBudget; page += 1) {
-    const listed = await env.ARCHIVE.list(
-      cursor === undefined ? { prefix, limit: 1000 } : { prefix, cursor, limit: 1000 },
-    )
-    const expired = listed.objects
-      .filter((object) => object.uploaded.getTime() < cutoffMilliseconds)
-      .map((object) => object.key)
-    if (expired.length > 0) {
-      await env.ARCHIVE.delete(expired)
-      deleted += expired.length
-    }
-    if (!listed.truncated) {
-      cursor = undefined
-      break
-    }
-    cursor = listed.cursor
-  }
-  if (cursor === undefined) {
-    await env.DB.prepare("DELETE FROM maintenance_state WHERE key = ?").bind(cursorKey).run()
-  } else {
-    await env.DB.prepare(
-      `INSERT INTO maintenance_state (key, value, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    )
-      .bind(cursorKey, cursor, nowSeconds())
       .run()
-  }
-  return deleted
-}
-
-async function pruneAuditArchive(env: Env, cutoffMilliseconds: number): Promise<number> {
-  // Split the fixed list-page budget so legacy v1 archives and actor-aware v2
-  // archives both continue aging out during a long-running migration period.
-  const pageBudget = Math.max(
-    1,
-    Math.floor(MAX_ARCHIVE_LIST_PAGES_PER_RUN / PRUNABLE_ARCHIVE_SCHEMA_VERSIONS.length),
-  )
-  let deleted = 0
-  for (const schemaVersion of PRUNABLE_ARCHIVE_SCHEMA_VERSIONS) {
-    deleted += await pruneAuditArchiveVersion(env, cutoffMilliseconds, schemaVersion, pageBudget)
+    deleted += result.meta.changes
+    if (result.meta.changes < batchSize) break
   }
   return deleted
 }
@@ -433,8 +293,7 @@ export async function runScheduledMaintenance(
     return {
       status: "skipped",
       signingKeyRotated: false,
-      archivedAuditRows: 0,
-      deletedArchiveObjects: 0,
+      deletedAuditRows: 0,
       deletedRows: {},
       auditBacklogRemaining: 0,
       oldestEligibleAuditAt: null,
@@ -448,15 +307,10 @@ export async function runScheduledMaintenance(
       config.keyRotationIntervalSeconds,
     )
     const auditCutoff = scheduledAt - config.auditD1RetentionDays * SECONDS_PER_DAY
-    const archivedAuditRows = await archiveAuditLogs(
+    const deletedAuditRows = await deleteExpiredAuditLogs(
       env,
       auditCutoff,
       config.maintenanceBatchSize,
-      scheduledAt,
-    )
-    const deletedArchiveObjects = await pruneAuditArchive(
-      env,
-      (scheduledAt - config.auditArchiveRetentionDays * SECONDS_PER_DAY) * 1000,
     )
     const deletedRows = await cleanupTerminalRows(
       env,
@@ -474,8 +328,7 @@ export async function runScheduledMaintenance(
     return {
       status: "completed",
       signingKeyRotated,
-      archivedAuditRows,
-      deletedArchiveObjects,
+      deletedAuditRows,
       deletedRows,
       auditBacklogRemaining: backlog.count,
       oldestEligibleAuditAt: backlog.oldest,

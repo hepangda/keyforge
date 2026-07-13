@@ -22,16 +22,10 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM users WHERE id = 'usr_maintenance_test'"),
   ])
   await Promise.all([env.KV.delete("signing:active"), env.KV.delete("signing:keys")])
-  for (const version of [1, 2]) {
-    const archived = await env.ARCHIVE.list({ prefix: `audit/v${version}/local/` })
-    if (archived.objects.length > 0) {
-      await env.ARCHIVE.delete(archived.objects.map((object) => object.key))
-    }
-  }
 })
 
 describe("scheduled maintenance", () => {
-  it("rotates signing keys, archives old audit rows, and removes terminal data", async () => {
+  it("rotates signing keys, directly deletes expired audit rows, and removes terminal data", async () => {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO users
@@ -129,10 +123,13 @@ describe("scheduled maintenance", () => {
         NOW - 100 * DAY,
       ),
       env.DB.prepare(
-        `INSERT INTO audit_logs
-           (id, event_type, actor_user_id, actor_client_id, detail, created_at)
-         VALUES (?, 'user.logout', 'usr_archive_actor', 'svc_archive_actor', 'old row', ?)`,
-      ).bind("aud_maintenance_old", NOW - 91 * DAY),
+        `INSERT INTO audit_logs (id, event_type, detail, created_at)
+         VALUES (?, 'user.logout', 'expired row', ?)`,
+      ).bind("aud_maintenance_expired", NOW - 90 * DAY - 1),
+      env.DB.prepare(
+        `INSERT INTO audit_logs (id, event_type, detail, created_at)
+         VALUES (?, 'user.logout', 'boundary row', ?)`,
+      ).bind("aud_maintenance_boundary", NOW - 90 * DAY),
       env.DB.prepare(
         `INSERT INTO audit_logs (id, event_type, detail, created_at)
          VALUES (?, 'user.logout', 'fresh row', ?)`,
@@ -143,7 +140,7 @@ describe("scheduled maintenance", () => {
 
     expect(result.status).toBe("completed")
     expect(result.signingKeyRotated).toBe(true)
-    expect(result.archivedAuditRows).toBe(1)
+    expect(result.deletedAuditRows).toBe(1)
     expect(result.deletedRows["sessions"]).toBe(1)
     expect(result.deletedRows["refresh_tokens"]).toBe(1)
     expect(result.deletedRows["authorization_grants"]).toBe(1)
@@ -157,40 +154,50 @@ describe("scheduled maintenance", () => {
       await env.DB.prepare("SELECT id FROM sessions WHERE id = 'ses_maintenance_fresh'").first(),
     ).not.toBeNull()
     expect(
-      await env.DB.prepare("SELECT id FROM audit_logs WHERE id = 'aud_maintenance_old'").first(),
+      await env.DB.prepare(
+        "SELECT id FROM audit_logs WHERE id = 'aud_maintenance_expired'",
+      ).first(),
     ).toBeNull()
+    expect(
+      await env.DB.prepare(
+        "SELECT id FROM audit_logs WHERE id = 'aud_maintenance_boundary'",
+      ).first(),
+    ).not.toBeNull()
     expect(
       await env.DB.prepare("SELECT id FROM audit_logs WHERE id = 'aud_maintenance_fresh'").first(),
     ).not.toBeNull()
-
-    const archived = await env.ARCHIVE.list({ prefix: "audit/v2/local/" })
-    expect(archived.objects).toHaveLength(1)
-    const object = await env.ARCHIVE.get(archived.objects[0]?.key ?? "")
-    const payload = await object?.json<{
-      row_count: number
-      schema_version: number
-      records: Array<{ id: string; actor_user_id: string; actor_client_id: string }>
-    }>()
-    expect(payload?.row_count).toBe(1)
-    expect(payload?.schema_version).toBe(2)
-    expect(payload?.records[0]?.id).toBe("aud_maintenance_old")
-    expect(payload?.records[0]?.actor_user_id).toBe("usr_archive_actor")
-    expect(payload?.records[0]?.actor_client_id).toBe("svc_archive_actor")
   })
 
-  it("continues pruning legacy v1 and actor-aware v2 audit archives", async () => {
-    const legacyKey = "audit/v1/local/2020/01/01/legacy.json"
-    const currentKey = "audit/v2/local/2020/01/01/current.json"
-    await Promise.all([
-      env.ARCHIVE.put(legacyKey, JSON.stringify({ schema_version: 1 })),
-      env.ARCHIVE.put(currentKey, JSON.stringify({ schema_version: 2 })),
-    ])
+  it("bounds each audit deletion run and reports the remaining backlog", async () => {
+    await env.DB.prepare(
+      `WITH digits(d) AS (
+         VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)
+       ), sequence(n) AS (
+         SELECT ones.d + 10 * tens.d + 100 * hundreds.d + 1000 * thousands.d
+         FROM digits AS ones
+         CROSS JOIN digits AS tens
+         CROSS JOIN digits AS hundreds
+         CROSS JOIN digits AS thousands
+       )
+       INSERT INTO audit_logs (id, event_type, detail, created_at)
+       SELECT printf('aud_maintenance_bulk_%04d', n), 'user.logout', 'expired row', ?
+       FROM sequence
+       WHERE n < 1201`,
+    )
+      .bind(NOW - 90 * DAY - 1)
+      .run()
 
-    const result = await runScheduledMaintenance(env, Math.floor(Date.now() / 1000) + 8 * 365 * DAY)
+    const first = await runScheduledMaintenance(env, NOW)
 
-    expect(result.deletedArchiveObjects).toBe(2)
-    expect(await env.ARCHIVE.head(legacyKey)).toBeNull()
-    expect(await env.ARCHIVE.head(currentKey)).toBeNull()
+    expect(first.deletedAuditRows).toBe(1200)
+    expect(first.auditBacklogRemaining).toBe(1)
+    expect(first.oldestEligibleAuditAt).toBe(NOW - 90 * DAY - 1)
+
+    const second = await runScheduledMaintenance(env, NOW + 1)
+
+    expect(second.deletedAuditRows).toBe(1)
+    expect(second.auditBacklogRemaining).toBe(0)
+    expect(second.oldestEligibleAuditAt).toBeNull()
   })
 
   it("removes non-expired rows through each secondary terminal-state branch", async () => {

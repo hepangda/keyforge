@@ -16,7 +16,6 @@ ALLOW_SELF_SIGNUP = "false"
 KEY_ROTATION_INTERVAL_SECONDS = "604800"
 TERMINAL_DATA_RETENTION_DAYS = "30"
 AUDIT_D1_RETENTION_DAYS = "90"
-AUDIT_ARCHIVE_RETENTION_DAYS = "2555"
 MAINTENANCE_BATCH_SIZE = "100"
 MAINTENANCE_LEASE_SECONDS = "900"
 
@@ -51,10 +50,6 @@ max_batch_size = 10
 max_batch_timeout = 2
 max_retries = 5
 dead_letter_queue = "keyforge-email-local-dlq"
-
-[[r2_buckets]]
-binding = "ARCHIVE"
-bucket_name = "keyforge-archive-local"
 
 [[durable_objects.bindings]]
 name = "AUTHORIZATION_CODE"
@@ -106,10 +101,17 @@ EMAIL_DELIVERY_MODE = "resend"
 ALLOW_SELF_SIGNUP = "false"
 KEY_ROTATION_INTERVAL_SECONDS = "604800"
 TERMINAL_DATA_RETENTION_DAYS = "14"
-AUDIT_D1_RETENTION_DAYS = "30"
-AUDIT_ARCHIVE_RETENTION_DAYS = "365"
+AUDIT_D1_RETENTION_DAYS = "90"
 MAINTENANCE_BATCH_SIZE = "100"
 MAINTENANCE_LEASE_SECONDS = "900"
+
+[env.staging.secrets]
+required = [
+  "RESEND_API_KEY",
+  "EMAIL_FROM",
+  "REQUEST_HASH_SECRET",
+  "READINESS_PROBE_TOKEN",
+]
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -142,10 +144,6 @@ max_batch_size = 10
 max_batch_timeout = 2
 max_retries = 5
 dead_letter_queue = "keyforge-email-staging-dlq"
-
-[[env.staging.r2_buckets]]
-binding = "ARCHIVE"
-bucket_name = "keyforge-archive-staging"
 
 [[env.staging.durable_objects.bindings]]
 name = "AUTHORIZATION_CODE"
@@ -185,10 +183,17 @@ EMAIL_DELIVERY_MODE = "resend"
 ALLOW_SELF_SIGNUP = "false"
 KEY_ROTATION_INTERVAL_SECONDS = "604800"
 TERMINAL_DATA_RETENTION_DAYS = "30"
-AUDIT_D1_RETENTION_DAYS = "90"
-AUDIT_ARCHIVE_RETENTION_DAYS = "2555"
+AUDIT_D1_RETENTION_DAYS = "365"
 MAINTENANCE_BATCH_SIZE = "100"
 MAINTENANCE_LEASE_SECONDS = "900"
+
+[env.production.secrets]
+required = [
+  "RESEND_API_KEY",
+  "EMAIL_FROM",
+  "REQUEST_HASH_SECRET",
+  "READINESS_PROBE_TOKEN",
+]
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -221,10 +226,6 @@ max_batch_size = 10
 max_batch_timeout = 2
 max_retries = 5
 dead_letter_queue = "keyforge-email-dlq"
-
-[[env.production.r2_buckets]]
-binding = "ARCHIVE"
-bucket_name = "keyforge-archive"
 
 [[env.production.durable_objects.bindings]]
 name = "AUTHORIZATION_CODE"

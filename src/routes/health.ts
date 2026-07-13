@@ -50,6 +50,7 @@ const REQUIRED_TABLES = [
 ] as const
 
 const REQUIRED_INDEXES = [
+  "idx_audit_created_id",
   "idx_sessions_cleanup_expires",
   "idx_sessions_cleanup_revoked",
   "idx_refresh_cleanup_expires",
@@ -140,7 +141,6 @@ function checkBindings(env: Env): void {
   const required = [
     "DB",
     "KV",
-    "ARCHIVE",
     "AUDIT_QUEUE",
     "EMAIL_QUEUE",
     "AUTHORIZATION_CODE",
@@ -220,7 +220,6 @@ health.get("/health/ready", async (c) => {
         await assertLegacySigningKeyCleanupComplete(c.env)
       },
     ],
-    ["audit_archive", () => c.env.ARCHIVE.head("_health/readiness")],
     ["audit_queue", () => c.env.AUDIT_QUEUE.metrics()],
     ["email_queue", () => c.env.EMAIL_QUEUE.metrics()],
     [

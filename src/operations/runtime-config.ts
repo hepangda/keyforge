@@ -43,7 +43,6 @@ export type RuntimeConfig = {
   readonly keyRotationIntervalSeconds: number
   readonly terminalDataRetentionDays: number
   readonly auditD1RetentionDays: number
-  readonly auditArchiveRetentionDays: number
   readonly maintenanceBatchSize: number
   readonly maintenanceLeaseSeconds: number
   readonly allowSelfSignup: boolean
@@ -54,6 +53,18 @@ export function getRuntimeConfig(env: Env): RuntimeConfig {
   const environment = environmentName(env.ENVIRONMENT)
   const strict = REMOTE_ENVIRONMENTS.has(environment)
   const values = env as unknown as Record<string, string | undefined>
+  const auditD1RetentionDays = boundedInteger(
+    "AUDIT_D1_RETENTION_DAYS",
+    env.AUDIT_D1_RETENTION_DAYS,
+    90,
+    1,
+    environment === "staging" ? 90 : 365,
+    strict,
+  )
+  const requiredAuditRetention = environment === "staging" ? 90 : 365
+  if (strict && auditD1RetentionDays !== requiredAuditRetention) {
+    throw new Error(`AUDIT_D1_RETENTION_DAYS must be ${requiredAuditRetention} in ${environment}`)
+  }
   return {
     environment,
     keyRotationIntervalSeconds: boundedInteger(
@@ -72,22 +83,7 @@ export function getRuntimeConfig(env: Env): RuntimeConfig {
       3650,
       strict,
     ),
-    auditD1RetentionDays: boundedInteger(
-      "AUDIT_D1_RETENTION_DAYS",
-      env.AUDIT_D1_RETENTION_DAYS,
-      90,
-      1,
-      3650,
-      strict,
-    ),
-    auditArchiveRetentionDays: boundedInteger(
-      "AUDIT_ARCHIVE_RETENTION_DAYS",
-      env.AUDIT_ARCHIVE_RETENTION_DAYS,
-      7 * 365,
-      1,
-      20 * 365,
-      strict,
-    ),
+    auditD1RetentionDays,
     maintenanceBatchSize: boundedInteger(
       "MAINTENANCE_BATCH_SIZE",
       env.MAINTENANCE_BATCH_SIZE,

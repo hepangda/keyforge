@@ -20,7 +20,8 @@ are deployment data; KeyForge is the project and runtime brand.
   private-key copy is confirmed deleted
 - Separate Queues for asynchronous audit ingestion and transactional email
   delivery with provider-idempotent retries and dead-letter isolation
-- R2 for long-term audit archives
+- D1-only audit retention: 90 days in staging and 365 days in production,
+  followed by bounded direct deletion with no archive copy
 
 The Worker publishes standard discovery metadata at
 `/.well-known/openid-configuration` and implements authorization code + PKCE,
@@ -98,7 +99,7 @@ one-time `/setup/bootstrap` flow described in the operations runbook.
 | --- | --- |
 | `src/oauth`, `src/oidc`, `src/tokens` | OAuth/OIDC protocol and token handling |
 | `src/auth`, `src/routes` | Authentication and HTTP routes |
-| `src/operations` | Scheduled key rotation, cleanup, and audit archival |
+| `src/operations` | Scheduled key rotation, cleanup, and audit retention deletion |
 | `src/do` | Durable Object consistency boundaries |
 | `migrations` | Ordered D1 schema and seed catalog |
 | `test` | Workerd-backed unit and integration tests |

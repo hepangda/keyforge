@@ -12,6 +12,12 @@ const REQUIRED_DURABLE_OBJECTS = new Map([
   ["REFRESH_TOKEN_FAMILY", "RefreshTokenFamilyDO"],
   ["RATE_LIMIT", "RateLimitDO"],
 ])
+const REQUIRED_REMOTE_SECRETS = new Set([
+  "RESEND_API_KEY",
+  "EMAIL_FROM",
+  "REQUEST_HASH_SECRET",
+  "READINESS_PROBE_TOKEN",
+])
 const EXPECTED_ENVIRONMENT = {
   staging: {
     workerName: "keyforge-staging",
@@ -21,7 +27,7 @@ const EXPECTED_ENVIRONMENT = {
     deadLetterQueueName: "keyforge-audit-staging-dlq",
     emailQueueName: "keyforge-email-staging",
     emailDeadLetterQueueName: "keyforge-email-staging-dlq",
-    bucketName: "keyforge-archive-staging",
+    auditRetentionDays: 90,
   },
   production: {
     workerName: "keyforge",
@@ -31,14 +37,13 @@ const EXPECTED_ENVIRONMENT = {
     deadLetterQueueName: "keyforge-audit-dlq",
     emailQueueName: "keyforge-email",
     emailDeadLetterQueueName: "keyforge-email-dlq",
-    bucketName: "keyforge-archive",
+    auditRetentionDays: 365,
   },
 }
 const NUMERIC_BOUNDS = new Map([
   ["KEY_ROTATION_INTERVAL_SECONDS", [86_400, 31_536_000]],
   ["TERMINAL_DATA_RETENTION_DAYS", [1, 3_650]],
-  ["AUDIT_D1_RETENTION_DAYS", [1, 3_650]],
-  ["AUDIT_ARCHIVE_RETENTION_DAYS", [1, 7_300]],
+  ["AUDIT_D1_RETENTION_DAYS", [1, 365]],
   ["MAINTENANCE_BATCH_SIZE", [1, 100]],
   ["MAINTENANCE_LEASE_SECONDS", [60, 3_600]],
 ])
@@ -82,6 +87,17 @@ function booleanValue(body, key) {
   return match[1] === "true"
 }
 
+function stringArrayValue(body, key) {
+  const match = body.match(new RegExp(`^\\s*${key}\\s*=\\s*\\[([\\s\\S]*?)\\]`, "m"))
+  if (!match) throw new Error(`${key} is missing or is not a TOML string array`)
+  const raw = match[1]
+  const values = [...raw.matchAll(/"([^"]+)"/g)].map((entry) => entry[1])
+  if (raw.replaceAll(/"[^"]+"/g, "").replaceAll(/[\s,]/g, "") !== "") {
+    throw new Error(`${key} is not a valid TOML string array`)
+  }
+  return values
+}
+
 function arrayEntry(tables, section, binding) {
   const entries = tables.get(section) ?? []
   const matches = entries.filter((body) => stringValue(body, "binding") === binding)
@@ -109,7 +125,6 @@ function remoteResources(tables, environment) {
   const auditQueueProducer = arrayEntry(tables, `${prefix}.queues.producers`, "AUDIT_QUEUE")
   const emailQueueProducer = arrayEntry(tables, `${prefix}.queues.producers`, "EMAIL_QUEUE")
   const queueConsumers = tables.get(`${prefix}.queues.consumers`) ?? []
-  const r2 = arrayEntry(tables, `${prefix}.r2_buckets`, "ARCHIVE")
   const auditQueueName = stringValue(auditQueueProducer, "queue")
   const emailQueueName = stringValue(emailQueueProducer, "queue")
   const auditConsumers = queueConsumers.filter(
@@ -135,7 +150,6 @@ function remoteResources(tables, environment) {
     emailQueueName,
     emailConsumerQueueName: stringValue(emailConsumers[0], "queue"),
     emailDeadLetterQueueName: stringValue(emailConsumers[0], "dead_letter_queue"),
-    bucketName: stringValue(r2, "bucket_name"),
     migrationsDirectory: stringValue(d1, "migrations_dir"),
   }
 }
@@ -150,9 +164,17 @@ export function validateDeployConfig(source, environment) {
   }
 
   const tables = parseTables(source)
+  if (/^\s*AUDIT_ARCHIVE_RETENTION_DAYS\s*=/m.test(source)) {
+    throw new Error("AUDIT_ARCHIVE_RETENTION_DAYS is forbidden; audit rows must not be archived")
+  }
+  const r2Sections = [...tables.keys()].filter((name) => name.endsWith("r2_buckets"))
+  if (r2Sections.length > 0) {
+    throw new Error(`R2 bindings are forbidden: ${r2Sections.join(", ")}`)
+  }
   const prefix = `env.${environment}`
   const root = onlyTable(tables, prefix)
   const vars = onlyTable(tables, `${prefix}.vars`)
+  const secrets = onlyTable(tables, `${prefix}.secrets`)
   const trigger = onlyTable(tables, `${prefix}.triggers`)
   const resources = remoteResources(tables, environment)
   const expected = EXPECTED_ENVIRONMENT[environment]
@@ -188,6 +210,20 @@ export function validateDeployConfig(source, environment) {
     if (!/^\d+$/.test(raw) || !Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
       throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`)
     }
+  }
+  if (Number(stringValue(vars, "AUDIT_D1_RETENTION_DAYS")) !== expected.auditRetentionDays) {
+    throw new Error(
+      `${environment} AUDIT_D1_RETENTION_DAYS must be ${expected.auditRetentionDays}`,
+    )
+  }
+  const requiredSecrets = stringArrayValue(secrets, "required")
+  if (
+    requiredSecrets.length !== REQUIRED_REMOTE_SECRETS.size ||
+    requiredSecrets.some((name) => !REQUIRED_REMOTE_SECRETS.has(name))
+  ) {
+    throw new Error(
+      `${environment} required secrets must be exactly ${[...REQUIRED_REMOTE_SECRETS].join(", ")}`,
+    )
   }
 
   const issuerText = stringValue(vars, "ISSUER")
@@ -236,7 +272,6 @@ export function validateDeployConfig(source, environment) {
     ["audit DLQ", resources.deadLetterQueueName, expected.deadLetterQueueName],
     ["email Queue", resources.emailQueueName, expected.emailQueueName],
     ["email DLQ", resources.emailDeadLetterQueueName, expected.emailDeadLetterQueueName],
-    ["R2 bucket", resources.bucketName, expected.bucketName],
   ]) {
     if (actual !== wanted) throw new Error(`${environment} ${label} must be ${wanted}`)
   }
@@ -250,7 +285,6 @@ export function validateDeployConfig(source, environment) {
     ["audit DLQ", resources.deadLetterQueueName],
     ["email Queue", resources.emailQueueName],
     ["email DLQ", resources.emailDeadLetterQueueName],
-    ["R2 bucket", resources.bucketName],
   ]) {
     rejectPlaceholder(value, `${environment} ${label}`)
   }
@@ -287,8 +321,6 @@ export function validateDeployConfig(source, environment) {
     otherResources.emailDeadLetterQueueName,
     "an email DLQ",
   )
-  assertDistinct(resources.bucketName, otherResources.bucketName, "an R2 bucket")
-
   const durableObjects = new Map(
     (tables.get(`${prefix}.durable_objects.bindings`) ?? []).map((body) => [
       stringValue(body, "name"),

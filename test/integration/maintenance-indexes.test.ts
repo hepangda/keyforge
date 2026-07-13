@@ -12,6 +12,14 @@ type PlanCase = {
 const CUTOFF = 2_000_000_000
 const cases: readonly PlanCase[] = [
   {
+    name: "audit retention",
+    table: "audit_logs",
+    index: "idx_audit_created_id",
+    sql: `SELECT id FROM audit_logs
+          WHERE created_at < ? ORDER BY created_at, id LIMIT ?`,
+    bindings: [CUTOFF, 100],
+  },
+  {
     name: "session expiry",
     table: "sessions",
     index: "idx_sessions_cleanup_expires",

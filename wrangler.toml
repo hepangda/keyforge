@@ -114,12 +114,12 @@ MAINTENANCE_LEASE_SECONDS = "900"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "keyforge_staging"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "9b8191ff-b641-49fb-beae-3434ab96f564"
 migrations_dir = "migrations"
 
 [[env.staging.kv_namespaces]]
 binding = "KV"
-id = "00000000000000000000000000000000"
+id = "638640e7b880467fa3f62e8c6fbe956c"
 
 [[env.staging.queues.producers]]
 binding = "AUDIT_QUEUE"

@@ -1,0 +1,14 @@
+{
+  "name": "keyforge-demo-rp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local demo third-party OpenID Connect relying party for the KeyForge authorization server",
+  "scripts": {
+    "start": "node app.mjs",
+    "selftest": "node selftest.mjs"
+  },
+  "dependencies": {
+    "jose": "^6.2.3"
+  }
+}

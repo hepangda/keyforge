@@ -1,0 +1,231 @@
+# Administrator API
+
+The JSON administrator API is served under `/admin`. It is intended for the
+first-party console and trusted operational tooling, not for public OAuth
+clients.
+
+## Authentication and mutation protection
+
+Every endpoint requires a valid KeyForge session whose user belongs to the
+`admins` group. A missing session returns `401`; a non-admin session returns
+`403`.
+
+Cookie-authenticated mutations also require request-integrity validation.
+Same-origin browser requests pass the Origin/Fetch Metadata check. Scripts and
+other non-browser clients must first call `GET /admin/csrf` with the session
+cookie, then echo the returned `csrf_token` in the `x-keyforge-csrf` header while
+retaining the CSRF and session cookies.
+
+```bash
+curl -c cookies.txt -b cookies.txt https://auth.pangda.app/admin/csrf
+curl -c cookies.txt -b cookies.txt \
+  -H 'content-type: application/json' \
+  -H "x-keyforge-csrf: $CSRF_TOKEN" \
+  -X PATCH https://auth.pangda.app/admin/users/usr_example \
+  --data '{"disabled":true}'
+```
+
+JSON validation failures return `400 {"error":"invalid_request"}`. Missing
+objects return `404 {"error":"not_found"}`. Pagination uses `limit` and
+`offset`; the server bounds values to its safe limits.
+
+## CSRF token
+
+### `GET /admin/csrf`
+
+Returns `{ "csrf_token": "..." }` and sets the double-submit cookie used by
+non-browser mutation requests.
+
+## Users
+
+### `GET /admin/users?limit=50&offset=0`
+
+Lists users. Password hashes, identity provider identifiers, and session tokens
+are never returned.
+
+### `POST /admin/users`
+
+Creates a login-ready user. `email` and `user_type` are required. When a
+`password` is supplied it must contain 12–128 characters; otherwise the server
+sends a one-time account invitation through the configured email provider.
+
+```json
+{
+  "email": "ada@example.com",
+  "name": "Ada Lovelace",
+  "user_type": "internal",
+  "email_verified": false,
+  "password": "optional-initial-password",
+  "group_ids": ["grp_seed_employees"]
+}
+```
+
+The response reports `credential_setup` as `password_set` or
+`invitation_sent`. Duplicate email returns `409`; invalid group IDs return
+`400`. The optional `group_ids` array accepts at most 100 entries.
+
+### `GET /admin/users/:id`
+
+Returns one user plus its `groups` array.
+
+### `PATCH /admin/users/:id`
+
+Accepts any subset of:
+
+```json
+{
+  "name": "Ada Lovelace",
+  "userType": "internal",
+  "disabled": false,
+  "emailVerified": true
+}
+```
+
+`userType` is `internal` or `external`.
+
+Disabling a user also revokes active sessions and refresh-token access. The API
+returns `409 {"error":"last_active_admin"}` rather than disabling the sole
+active administrator.
+
+### `PUT /admin/users/:id/groups`
+
+Replaces all group memberships with `{ "group_ids": ["..."] }`, with at most
+100 entries. Unknown group IDs or oversized arrays return `400`. Removing the
+`admins` group from the sole active administrator returns `409`.
+
+### `POST /admin/users/:id/revoke-sessions`
+
+Revokes the user's active sessions and associated refresh-token access. Returns
+`{ "revoked": true }`.
+
+## Groups
+
+### `GET /admin/groups`
+
+Lists group IDs, names, descriptions, and current member counts.
+
+### `POST /admin/groups`
+
+Creates a group from `{ "name": "operators", "description": "..." }`. Names
+are lowercase identifiers containing letters, digits, `.`, `_`, `:`, or `-`.
+A duplicate name returns `409`.
+
+### `GET /admin/groups/:id`
+
+Returns one group including its current member count.
+
+### `PATCH /admin/groups/:id`
+
+Updates `name` and/or `description`. The built-in `admins` group cannot be
+renamed, and group names remain globally unique.
+
+### `DELETE /admin/groups/:id`
+
+Deletes a non-protected group and cascades its memberships. The built-in
+`admins` group cannot be deleted.
+
+## OAuth clients
+
+### `GET /admin/clients`
+
+Lists OAuth clients and whether each client has a secret. Secret hashes and
+previous plaintext secrets are never returned.
+
+### `POST /admin/clients`
+
+Creates a coherent client policy. Required fields are `client_id`, `name`,
+`type`, `client_kind`, at least one supported scope and grant, and at least one
+registered, enabled resource. `default_resource`, when present, must be one of
+the allowed resources. Client IDs are URL-safe identifiers of at most 128
+characters.
+
+```json
+{
+  "client_id": "inventory_service",
+  "name": "Inventory Service",
+  "type": "confidential",
+  "client_kind": "service",
+  "redirect_uris": [],
+  "post_logout_redirect_uris": [],
+  "allowed_scopes": ["api.read"],
+  "allowed_grant_types": ["client_credentials"],
+  "allowed_resources": ["https://api.pangda.app"],
+  "default_resource": "https://api.pangda.app",
+  "require_pkce": true
+}
+```
+
+A confidential client receives `client_secret` exactly once in the `201`
+response. Store it in the consumer's secret manager immediately.
+Post-logout redirects must use HTTPS, except loopback HTTP is accepted for
+local development; credentials and URI fragments are rejected.
+
+Application clients require authorization code, at least one redirect, and may
+optionally use refresh tokens. Device clients require the device-code grant and
+no redirects. Service clients must be confidential, use only client credentials,
+and cannot request user-only scopes. Public clients cannot use client credentials;
+`offline_access` requires the refresh-token grant.
+
+### `PATCH /admin/clients/:id`
+
+Updates `name`, redirect URIs, post-logout redirect URIs, scopes, grant types,
+resources, or the default resource. PKCE with `S256` is mandatory for every
+authorization-code client; `require_pkce: false` is rejected rather than
+creating a per-client downgrade.
+
+### `DELETE /admin/clients/:id`
+
+Deletes a client and its dependent grants/consents according to D1 foreign-key
+rules.
+
+### `POST /admin/clients/:id/rotate-secret`
+
+Replaces a confidential client's secret and returns the new value exactly once.
+
+### `POST /admin/clients/:id/disable`
+
+### `POST /admin/clients/:id/enable`
+
+Toggles issuance eligibility without deleting the client.
+
+## Resources
+
+### `GET /admin/resources`
+
+Lists protected resource identifiers and their scope policies.
+
+### `POST /admin/resources`
+
+```json
+{
+  "resource_uri": "https://inventory.pangda.app",
+  "name": "Inventory API",
+  "allowed_scopes": ["api.read"]
+}
+```
+
+### `PATCH /admin/resources/:id`
+
+Updates `name`, `allowed_scopes`, or `enabled`. URL-encode a resource URI when
+placing it in the path.
+
+## Audit and device sessions
+
+### `GET /admin/audit-logs`
+
+Supports `limit`, `offset`, `user_id`, `client_id`, `actor_user_id`,
+`actor_client_id`, and `event_type` filters. Each entry returns the actor fields
+separately from the subject `user_id`/`client_id`, so an administrator changing
+another account is attributable without overwriting the affected account.
+These fields remain restricted to the authenticated administrator API and
+console; sensitive token and credential material is not returned.
+
+### `GET /admin/device-sessions`
+
+### `GET /admin/device-sessions/:id`
+
+Lists or retrieves CLI/device authorization sessions.
+
+### `POST /admin/device-sessions/:id/revoke`
+
+Denies a pending or approved device session. Returns `{ "revoked": true }`.

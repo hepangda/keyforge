@@ -1,0 +1,253 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "keyforge-local"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The top-level configuration is used by `wrangler dev` and the Workers test
+# pool. Remote releases must select `--env staging` or `--env production`.
+workers_dev = true
+
+[vars]
+ISSUER = "http://localhost:8787"
+ENVIRONMENT = "local"
+EMAIL_DELIVERY_MODE = "console"
+ALLOW_SELF_SIGNUP = "false"
+KEY_ROTATION_INTERVAL_SECONDS = "604800"
+TERMINAL_DATA_RETENTION_DAYS = "30"
+AUDIT_D1_RETENTION_DAYS = "90"
+AUDIT_ARCHIVE_RETENTION_DAYS = "2555"
+MAINTENANCE_BATCH_SIZE = "100"
+MAINTENANCE_LEASE_SECONDS = "900"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "keyforge"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "keyforge-audit-local"
+
+[[queues.consumers]]
+queue = "keyforge-audit-local"
+max_batch_size = 50
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "keyforge-audit-local-dlq"
+
+[[queues.producers]]
+binding = "EMAIL_QUEUE"
+queue = "keyforge-email-local"
+
+[[queues.consumers]]
+queue = "keyforge-email-local"
+max_batch_size = 10
+max_batch_timeout = 2
+max_retries = 5
+dead_letter_queue = "keyforge-email-local-dlq"
+
+[[r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "keyforge-archive-local"
+
+[[durable_objects.bindings]]
+name = "AUTHORIZATION_CODE"
+class_name = "AuthorizationCodeDO"
+
+[[durable_objects.bindings]]
+name = "ONE_TIME_TOKEN"
+class_name = "OneTimeTokenDO"
+
+[[durable_objects.bindings]]
+name = "WEBAUTHN_CHALLENGE"
+class_name = "WebAuthnChallengeDO"
+
+[[durable_objects.bindings]]
+name = "REFRESH_TOKEN_FAMILY"
+class_name = "RefreshTokenFamilyDO"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMIT"
+class_name = "RateLimitDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = [
+  "AuthorizationCodeDO",
+  "OneTimeTokenDO",
+  "WebAuthnChallengeDO",
+  "RefreshTokenFamilyDO",
+  "RateLimitDO",
+]
+
+[triggers]
+crons = ["15 * * * *"]
+
+[observability]
+enabled = true
+
+# Staging bindings are intentionally separate from production. Replace the
+# zero IDs during environment provisioning; never put secrets in this file.
+[env.staging]
+name = "keyforge-staging"
+workers_dev = false
+routes = [{ pattern = "auth-staging.pangda.app", custom_domain = true }]
+
+[env.staging.vars]
+ISSUER = "https://auth-staging.pangda.app"
+ENVIRONMENT = "staging"
+EMAIL_DELIVERY_MODE = "resend"
+ALLOW_SELF_SIGNUP = "false"
+KEY_ROTATION_INTERVAL_SECONDS = "604800"
+TERMINAL_DATA_RETENTION_DAYS = "14"
+AUDIT_D1_RETENTION_DAYS = "30"
+AUDIT_ARCHIVE_RETENTION_DAYS = "365"
+MAINTENANCE_BATCH_SIZE = "100"
+MAINTENANCE_LEASE_SECONDS = "900"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "keyforge_staging"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[[env.staging.queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "keyforge-audit-staging"
+
+[[env.staging.queues.consumers]]
+queue = "keyforge-audit-staging"
+max_batch_size = 50
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "keyforge-audit-staging-dlq"
+
+[[env.staging.queues.producers]]
+binding = "EMAIL_QUEUE"
+queue = "keyforge-email-staging"
+
+[[env.staging.queues.consumers]]
+queue = "keyforge-email-staging"
+max_batch_size = 10
+max_batch_timeout = 2
+max_retries = 5
+dead_letter_queue = "keyforge-email-staging-dlq"
+
+[[env.staging.r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "keyforge-archive-staging"
+
+[[env.staging.durable_objects.bindings]]
+name = "AUTHORIZATION_CODE"
+class_name = "AuthorizationCodeDO"
+
+[[env.staging.durable_objects.bindings]]
+name = "ONE_TIME_TOKEN"
+class_name = "OneTimeTokenDO"
+
+[[env.staging.durable_objects.bindings]]
+name = "WEBAUTHN_CHALLENGE"
+class_name = "WebAuthnChallengeDO"
+
+[[env.staging.durable_objects.bindings]]
+name = "REFRESH_TOKEN_FAMILY"
+class_name = "RefreshTokenFamilyDO"
+
+[[env.staging.durable_objects.bindings]]
+name = "RATE_LIMIT"
+class_name = "RateLimitDO"
+
+[env.staging.triggers]
+crons = ["15 * * * *"]
+
+[env.staging.observability]
+enabled = true
+
+[env.production]
+name = "keyforge"
+workers_dev = false
+routes = [{ pattern = "auth.pangda.app", custom_domain = true }]
+
+[env.production.vars]
+ISSUER = "https://auth.pangda.app"
+ENVIRONMENT = "production"
+EMAIL_DELIVERY_MODE = "resend"
+ALLOW_SELF_SIGNUP = "false"
+KEY_ROTATION_INTERVAL_SECONDS = "604800"
+TERMINAL_DATA_RETENTION_DAYS = "30"
+AUDIT_D1_RETENTION_DAYS = "90"
+AUDIT_ARCHIVE_RETENTION_DAYS = "2555"
+MAINTENANCE_BATCH_SIZE = "100"
+MAINTENANCE_LEASE_SECONDS = "900"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "keyforge"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[[env.production.queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "keyforge-audit"
+
+[[env.production.queues.consumers]]
+queue = "keyforge-audit"
+max_batch_size = 50
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "keyforge-audit-dlq"
+
+[[env.production.queues.producers]]
+binding = "EMAIL_QUEUE"
+queue = "keyforge-email"
+
+[[env.production.queues.consumers]]
+queue = "keyforge-email"
+max_batch_size = 10
+max_batch_timeout = 2
+max_retries = 5
+dead_letter_queue = "keyforge-email-dlq"
+
+[[env.production.r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "keyforge-archive"
+
+[[env.production.durable_objects.bindings]]
+name = "AUTHORIZATION_CODE"
+class_name = "AuthorizationCodeDO"
+
+[[env.production.durable_objects.bindings]]
+name = "ONE_TIME_TOKEN"
+class_name = "OneTimeTokenDO"
+
+[[env.production.durable_objects.bindings]]
+name = "WEBAUTHN_CHALLENGE"
+class_name = "WebAuthnChallengeDO"
+
+[[env.production.durable_objects.bindings]]
+name = "REFRESH_TOKEN_FAMILY"
+class_name = "RefreshTokenFamilyDO"
+
+[[env.production.durable_objects.bindings]]
+name = "RATE_LIMIT"
+class_name = "RateLimitDO"
+
+[env.production.triggers]
+crons = ["15 * * * *"]
+
+[env.production.observability]
+enabled = true

@@ -1,0 +1,439 @@
+import { env, SELF } from "cloudflare:test"
+import { beforeEach, describe, expect, it } from "vitest"
+import { verifyUserPassword } from "../../src/auth/password"
+import { createSession } from "../../src/auth/session"
+import {
+  createUser,
+  getGroupByName,
+  getUserByEmail,
+  getUserGroupNames,
+  getUserSecurityVersion,
+  setUserGroupsPreservingActiveAdmin,
+  updateUser,
+} from "../../src/db/queries/users"
+import { issueRefreshToken } from "../../src/tokens/refresh-token"
+
+const ISSUER = "https://auth.pangda.app"
+
+let adminCookie = ""
+let adminUserId = ""
+let userCookie = ""
+let regularUserId = ""
+let regularSessionId = ""
+
+beforeEach(async () => {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM refresh_tokens"),
+    env.DB.prepare("DELETE FROM sessions"),
+    env.DB.prepare("DELETE FROM user_groups"),
+    env.DB.prepare("DELETE FROM device_authorization_sessions"),
+    env.DB.prepare("DELETE FROM users"),
+    env.DB.prepare("DELETE FROM groups WHERE name LIKE 'test-%'"),
+    env.DB.prepare("DELETE FROM oauth_clients WHERE client_id LIKE 'test_%'"),
+    env.DB.prepare("DELETE FROM oauth_resources WHERE resource_uri LIKE 'urn:test:%'"),
+  ])
+  const adminUser = await createUser(env, {
+    email: "admin@pangda.app",
+    name: "Admin",
+    userType: "internal",
+  })
+  adminUserId = adminUser.id
+  await env.DB.prepare(
+    "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",
+  )
+    .bind(adminUser.id)
+    .run()
+  adminCookie = `__Host-keyforge_session=${(await createSession(env, { userId: adminUser.id, authMethod: "password", ttlSeconds: 3600 })).token}`
+
+  const regularUser = await createUser(env, {
+    email: "user@pangda.app",
+    name: "User",
+    userType: "external",
+  })
+  regularUserId = regularUser.id
+  const regularSession = await createSession(env, {
+    userId: regularUser.id,
+    authMethod: "password",
+    ttlSeconds: 3600,
+  })
+  regularSessionId = regularSession.sessionId
+  userCookie = `__Host-keyforge_session=${regularSession.token}`
+})
+
+function req(method: string, path: string, body?: unknown): Promise<Response> {
+  const headers: Record<string, string> = { cookie: adminCookie }
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers["origin"] = ISSUER
+    headers["sec-fetch-site"] = "same-origin"
+  }
+  if (body !== undefined) {
+    headers["content-type"] = "application/json"
+    return SELF.fetch(`${ISSUER}${path}`, {
+      method,
+      headers,
+      body: JSON.stringify(body),
+      redirect: "manual",
+    })
+  }
+  return SELF.fetch(`${ISSUER}${path}`, { method, headers, redirect: "manual" })
+}
+
+describe("admin API access control", () => {
+  it("requires an authenticated session", async () => {
+    expect((await SELF.fetch(`${ISSUER}/admin/users`)).status).toBe(401)
+  })
+
+  it("forbids non-admins", async () => {
+    expect(
+      (await SELF.fetch(`${ISSUER}/admin/users`, { headers: { cookie: userCookie } })).status,
+    ).toBe(403)
+  })
+})
+
+describe("admin users", () => {
+  it("lists, gets, patches, and revokes sessions", async () => {
+    const list = await req("GET", "/admin/users")
+    expect(list.status).toBe(200)
+    expect((await list.json<{ users: unknown[] }>()).users.length).toBeGreaterThanOrEqual(2)
+
+    const detail = await req("GET", `/admin/users/${regularUserId}`)
+    expect((await detail.json<{ email: string }>()).email).toBe("user@pangda.app")
+
+    const refresh = await issueRefreshToken(env, {
+      userId: regularUserId,
+      clientId: "pangda_app",
+      sessionId: regularSessionId,
+      resource: "https://api.pangda.app",
+      scope: "openid profile email offline_access api.read",
+      authTime: Math.floor(Date.now() / 1000),
+      rememberMe: false,
+    })
+
+    const patch = await req("PATCH", `/admin/users/${regularUserId}`, { disabled: true })
+    expect((await patch.json<{ disabled: boolean }>()).disabled).toBe(true)
+
+    expect((await req("POST", `/admin/users/${regularUserId}/revoke-sessions`)).status).toBe(200)
+    const family = await env.REFRESH_TOKEN_FAMILY.getByName(refresh.familyId).getState()
+    expect(family?.revoked).toBe(true)
+    const mirror = await env.DB.prepare("SELECT revoked_at FROM refresh_tokens WHERE id = ?")
+      .bind(refresh.familyId)
+      .first<{ revoked_at: number | null }>()
+    expect(mirror?.revoked_at).not.toBeNull()
+    const check = await SELF.fetch(`${ISSUER}/`, {
+      headers: { cookie: userCookie },
+      redirect: "manual",
+    })
+    expect(check.status).toBe(302)
+  })
+
+  it("creates password users and assigns validated groups", async () => {
+    const employees = await getGroupByName(env, "employees")
+    expect(employees).not.toBeNull()
+    const created = await req("POST", "/admin/users", {
+      email: "new.user@pangda.app",
+      name: "New User",
+      user_type: "internal",
+      email_verified: true,
+      password: "a long initial password",
+      group_ids: [employees?.id],
+    })
+    expect(created.status).toBe(201)
+    const body = await created.json<{
+      id: string
+      groups: string[]
+      credential_setup: string
+    }>()
+    expect(body.credential_setup).toBe("password_set")
+    expect(body.groups).toEqual(["employees"])
+    expect(await verifyUserPassword(env, body.id, "a long initial password")).toBe(true)
+  })
+
+  it("sends a single-use invitation when no initial password is supplied", async () => {
+    await env.KV.delete("test:email:invitee@pangda.app")
+    const created = await req("POST", "/admin/users", {
+      email: "invitee@pangda.app",
+      user_type: "external",
+      email_verified: false,
+      group_ids: [],
+    })
+    expect(created.status).toBe(201)
+    const responseText = await created.text()
+    expect(responseText).toContain('"credential_setup":"invitation_sent"')
+    expect(responseText).not.toContain("/password/reset?token=")
+
+    const delivery = await env.KV.get<{ subject: string; text: string }>(
+      "test:email:invitee@pangda.app",
+      "json",
+    )
+    expect(delivery?.subject).toContain("invited")
+    expect(delivery?.text).toContain("/password/reset?token=")
+    expect(await getUserByEmail(env, "invitee@pangda.app")).not.toBeNull()
+  })
+
+  it("creates groups and rejects unknown group assignments", async () => {
+    const created = await req("POST", "/admin/groups", {
+      name: "test-support",
+      description: "Support operators",
+    })
+    expect(created.status).toBe(201)
+    const group = await created.json<{ id: string; name: string }>()
+    expect(group.name).toBe("test-support")
+
+    const assigned = await req("PUT", `/admin/users/${regularUserId}/groups`, {
+      group_ids: [group.id],
+    })
+    expect(assigned.status).toBe(200)
+    expect(await getUserGroupNames(env, regularUserId)).toEqual(["test-support"])
+
+    expect(
+      (await req("PUT", `/admin/users/${regularUserId}/groups`, { group_ids: ["missing"] })).status,
+    ).toBe(400)
+  })
+
+  it("does not disable or demote the last active administrator", async () => {
+    const disable = await req("PATCH", `/admin/users/${adminUserId}`, { disabled: true })
+    expect(disable.status).toBe(409)
+    expect(await disable.json()).toEqual({ error: "last_active_admin" })
+
+    const demote = await req("PUT", `/admin/users/${adminUserId}/groups`, { group_ids: [] })
+    expect(demote.status).toBe(409)
+    expect(await demote.json()).toEqual({ error: "last_active_admin" })
+    expect(await getUserGroupNames(env, adminUserId)).toContain("admins")
+  })
+
+  it("preserves one active administrator under concurrent disable attempts", async () => {
+    const second = await createUser(env, {
+      email: "second.admin@pangda.app",
+      name: "Second Admin",
+      userType: "internal",
+    })
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",
+    )
+      .bind(second.id)
+      .run()
+
+    const results = await Promise.all([
+      updateUser(env, adminUserId, { disabled: true }),
+      updateUser(env, second.id, { disabled: true }),
+    ])
+    expect(results.filter((result) => result !== null)).toHaveLength(1)
+    const active = await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM users u
+       JOIN user_groups ug ON ug.user_id = u.id
+       WHERE ug.group_id = 'grp_seed_admins' AND u.disabled = 0`,
+    ).first<{ count: number }>()
+    expect(active?.count).toBe(1)
+  })
+
+  it("rolls back an administrative disable and every D1 revocation mirror together", async () => {
+    const securityVersion = await getUserSecurityVersion(env, regularUserId)
+    const refresh = await issueRefreshToken(env, {
+      userId: regularUserId,
+      clientId: "pangda_app",
+      sessionId: regularSessionId,
+      resource: "https://api.pangda.app",
+      scope: "openid offline_access",
+      authTime: Math.floor(Date.now() / 1000),
+      rememberMe: false,
+    })
+    await env.DB.prepare(
+      `CREATE TRIGGER fail_atomic_admin_refresh
+       BEFORE UPDATE OF revoked_at ON refresh_tokens
+       BEGIN SELECT RAISE(ABORT, 'simulated refresh mirror failure'); END`,
+    ).run()
+
+    try {
+      await expect(updateUser(env, regularUserId, { disabled: true })).rejects.toThrow()
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_atomic_admin_refresh").run()
+    }
+
+    expect((await getUserByEmail(env, "user@pangda.app"))?.disabled).toBe(false)
+    expect(await getUserSecurityVersion(env, regularUserId)).toBe(securityVersion)
+    expect(
+      (
+        await env.DB.prepare("SELECT revoked_at FROM sessions WHERE id = ?")
+          .bind(regularSessionId)
+          .first<{ revoked_at: number | null }>()
+      )?.revoked_at,
+    ).toBeNull()
+    expect(
+      (
+        await env.DB.prepare("SELECT revoked_at FROM refresh_tokens WHERE id = ?")
+          .bind(refresh.familyId)
+          .first<{ revoked_at: number | null }>()
+      )?.revoked_at,
+    ).toBeNull()
+    expect((await env.REFRESH_TOKEN_FAMILY.getByName(refresh.familyId).getState())?.revoked).toBe(
+      false,
+    )
+  })
+
+  it("preserves one active administrator under concurrent group demotions", async () => {
+    const second = await createUser(env, {
+      email: "group.admin@pangda.app",
+      name: "Group Admin",
+      userType: "internal",
+    })
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",
+    )
+      .bind(second.id)
+      .run()
+
+    const results = await Promise.all([
+      setUserGroupsPreservingActiveAdmin(env, adminUserId, []),
+      setUserGroupsPreservingActiveAdmin(env, second.id, []),
+    ])
+    expect(results.sort()).toEqual([false, true])
+    const remaining = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM user_groups WHERE group_id = 'grp_seed_admins'",
+    ).first<{ count: number }>()
+    expect(remaining?.count).toBe(1)
+  })
+})
+
+describe("admin clients", () => {
+  it("creates a confidential client whose secret works for client_credentials", async () => {
+    const res = await req("POST", "/admin/clients", {
+      client_id: "test_svc",
+      name: "Test Service",
+      type: "confidential",
+      client_kind: "service",
+      allowed_scopes: ["api.read"],
+      allowed_grant_types: ["client_credentials"],
+      allowed_resources: ["https://api.pangda.app"],
+      default_resource: "https://api.pangda.app",
+      require_pkce: true,
+    })
+    expect(res.status).toBe(201)
+    const body = await res.json<{ client_secret: string; has_secret: boolean }>()
+    expect(body.has_secret).toBe(true)
+
+    const token = await SELF.fetch(`${ISSUER}/oauth/token`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: `Basic ${btoa(`test_svc:${body.client_secret}`)}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        scope: "api.read",
+        resource: "https://api.pangda.app",
+      }).toString(),
+    })
+    expect(token.status).toBe(200)
+  })
+
+  it("rotates a secret and toggles enabled", async () => {
+    await req("POST", "/admin/clients", {
+      client_id: "test_rot",
+      name: "Rot",
+      type: "confidential",
+      client_kind: "service",
+      allowed_scopes: ["api.read"],
+      allowed_grant_types: ["client_credentials"],
+      allowed_resources: ["https://api.pangda.app"],
+      default_resource: "https://api.pangda.app",
+      require_pkce: true,
+    })
+    expect(
+      (
+        await (
+          await req("POST", "/admin/clients/test_rot/rotate-secret")
+        ).json<{ client_secret: string }>()
+      ).client_secret,
+    ).toBeTruthy()
+    expect((await req("POST", "/admin/clients/test_rot/disable")).status).toBe(200)
+    expect((await req("POST", "/admin/clients/test_rot/enable")).status).toBe(200)
+  })
+
+  it("never exposes secret hashes in listings", async () => {
+    const body = await (await req("GET", "/admin/clients")).json<{
+      clients: Array<Record<string, unknown>>
+    }>()
+    for (const client of body.clients) {
+      expect(client["client_secret_hash"]).toBeUndefined()
+      expect(client["clientSecretHash"]).toBeUndefined()
+    }
+  })
+
+  it("rejects attempts to disable mandatory S256 PKCE", async () => {
+    const response = await req("POST", "/admin/clients", {
+      client_id: "test_pkce_downgrade",
+      name: "PKCE Downgrade",
+      type: "public",
+      client_kind: "application",
+      require_pkce: false,
+    })
+
+    expect(response.status).toBe(400)
+    expect((await response.json<{ error: string }>()).error).toBe("invalid_request")
+  })
+
+  it("rejects unsafe post-logout redirect registrations", async () => {
+    const response = await req("POST", "/admin/clients", {
+      client_id: "test_unsafe_logout",
+      name: "Unsafe Logout",
+      type: "public",
+      client_kind: "application",
+      post_logout_redirect_uris: ["javascript:alert(1)"],
+    })
+
+    expect(response.status).toBe(400)
+    expect((await response.json<{ error: string }>()).error).toBe("invalid_request")
+  })
+})
+
+describe("admin resources", () => {
+  it("creates, lists, and patches a resource", async () => {
+    expect(
+      (
+        await req("POST", "/admin/resources", {
+          resource_uri: "urn:test:widget",
+          name: "Widget",
+          allowed_scopes: ["widget.read"],
+        })
+      ).status,
+    ).toBe(201)
+    const list = await (await req("GET", "/admin/resources")).json<{
+      resources: Array<{ resource_uri: string }>
+    }>()
+    expect(list.resources.some((r) => r.resource_uri === "urn:test:widget")).toBe(true)
+
+    const patched = await req("PATCH", "/admin/resources/urn:test:widget", {
+      name: "Widget v2",
+      enabled: false,
+    })
+    expect((await patched.json<{ name: string }>()).name).toBe("Widget v2")
+  })
+})
+
+describe("admin audit + device sessions", () => {
+  it("lists audit logs", async () => {
+    const res = await req("GET", "/admin/audit-logs")
+    expect(res.status).toBe(200)
+    expect(Array.isArray((await res.json<{ logs: unknown[] }>()).logs)).toBe(true)
+  })
+
+  it("lists and revokes device sessions", async () => {
+    await SELF.fetch(`${ISSUER}/oauth/device_authorization`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: "pangda_cli",
+        scope: "openid",
+        resource: "https://api.pangda.app",
+      }).toString(),
+    })
+    const sessions = (
+      await (
+        await req("GET", "/admin/device-sessions")
+      ).json<{ device_sessions: Array<{ id: string }> }>()
+    ).device_sessions
+    expect(sessions.length).toBeGreaterThanOrEqual(1)
+    const id = sessions[0]?.id ?? ""
+    expect((await req("POST", `/admin/device-sessions/${id}/revoke`)).status).toBe(200)
+  })
+})

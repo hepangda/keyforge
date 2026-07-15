@@ -10,6 +10,7 @@ import {
 } from "../db/queries/users"
 import { enqueueEmail } from "../email/sender"
 import { accountInvitationEmail } from "../email/templates"
+import type { Locale } from "../i18n"
 import type { User } from "../types/domain"
 
 export type ManagedUserInput = {
@@ -19,6 +20,7 @@ export type ManagedUserInput = {
   readonly emailVerified: boolean
   readonly password?: string
   readonly groupIds: readonly string[]
+  readonly locale?: Locale
 }
 
 export type ManagedUserResult =
@@ -75,7 +77,10 @@ export async function createManagedUser(
       await setUserPassword(env, user.id, input.password)
     } else {
       const { url } = await createAccountInvitationToken(env, user.id, user.email)
-      await enqueueEmail(env, { to: user.email, ...accountInvitationEmail(url) })
+      await enqueueEmail(env, {
+        to: user.email,
+        ...accountInvitationEmail(url, input.locale),
+      })
     }
   } catch (error) {
     await deleteUser(env, user.id)

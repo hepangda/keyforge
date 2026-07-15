@@ -49,6 +49,7 @@ login.get("/login", (c) => {
   const error = notice === "account_deleted" ? "Your account has been deleted." : undefined
   return c.html(
     renderLoginPage({
+      i18n: c.get("i18n"),
       csrfToken,
       returnTo: safeLocalPath(c.req.query("return_to") ?? null),
       reauthenticating,
@@ -70,6 +71,7 @@ login.post("/login", async (c) => {
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.html(
       renderLoginPage({
+        i18n: c.get("i18n"),
         csrfToken: issueCsrfToken(c),
         returnTo,
         email: displayIdentifier,
@@ -99,6 +101,7 @@ login.post("/login", async (c) => {
     c.header("retry-after", String(ipRate.retryAfterSeconds))
     return c.html(
       renderLoginPage({
+        i18n: c.get("i18n"),
         csrfToken: issueCsrfToken(c),
         returnTo,
         email: displayIdentifier,
@@ -139,6 +142,7 @@ login.post("/login", async (c) => {
     )
     return c.html(
       renderLoginPage({
+        i18n: c.get("i18n"),
         csrfToken: issueCsrfToken(c),
         returnTo,
         email: displayIdentifier,
@@ -163,6 +167,7 @@ login.post("/login", async (c) => {
     })
     return c.html(
       renderLoginPage({
+        i18n: c.get("i18n"),
         csrfToken: issueCsrfToken(c),
         returnTo,
         email: displayIdentifier,
@@ -204,7 +209,7 @@ login.get("/logout", (c) => {
   if (c.get("user") === undefined) {
     return c.redirect("/login")
   }
-  return c.html(renderLogoutConfirmation(issueCsrfToken(c)))
+  return c.html(renderLogoutConfirmation(c.get("i18n"), issueCsrfToken(c)))
 })
 
 login.post("/logout", async (c) => {
@@ -256,11 +261,14 @@ async function endSession(
 ): Promise<Response> {
   c.header("cache-control", "no-store")
   if (validateOAuthParameterSet(params) !== null) {
-    return c.html(renderErrorPage("The logout request contains invalid parameters."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "The logout request contains invalid parameters."),
+      400,
+    )
   }
   const association = await resolveLogoutClient(c.env, params)
   if (association.kind === "error") {
-    return c.html(renderErrorPage(association.description), 400)
+    return c.html(renderErrorPage(c.get("i18n"), association.description), 400)
   }
 
   const postLogoutRedirectUri = params.get("post_logout_redirect_uri")
@@ -270,7 +278,7 @@ async function endSession(
       !association.client.postLogoutRedirectUris.includes(postLogoutRedirectUri) ||
       !isSafePostLogoutRedirectUri(postLogoutRedirectUri)
     ) {
-      return c.html(renderErrorPage("Invalid post_logout_redirect_uri."), 400)
+      return c.html(renderErrorPage(c.get("i18n"), "Invalid post_logout_redirect_uri."), 400)
     }
   }
 
@@ -281,14 +289,22 @@ async function endSession(
     user !== undefined &&
     association.hintedSubject !== user.id
   ) {
-    return c.html(renderErrorPage("id_token_hint does not belong to this session."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "id_token_hint does not belong to this session."),
+      400,
+    )
   }
 
   // A GET may validate and render, but never revokes a browser session. This
   // prevents cross-site image/link navigation from logging a user out.
   if (!confirmed && (token !== undefined || user !== undefined)) {
     return c.html(
-      renderEndSessionConfirmation(issueCsrfToken(c), params, association.client?.name ?? null),
+      renderEndSessionConfirmation(
+        c.get("i18n"),
+        issueCsrfToken(c),
+        params,
+        association.client?.name ?? null,
+      ),
     )
   }
   if (token !== undefined) {

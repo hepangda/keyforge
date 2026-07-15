@@ -64,7 +64,7 @@ export const requireConsoleAdmin = createMiddleware<AppBindings>(async (c, next)
   }
   const groups = await getUserGroupNames(c.env, user.id)
   if (!groups.includes(ADMIN_GROUP)) {
-    return c.html(renderForbidden(), 403)
+    return c.html(renderForbidden(c.get("i18n")), 403)
   }
   const method = c.req.method.toUpperCase()
   const url = new URL(c.req.url)

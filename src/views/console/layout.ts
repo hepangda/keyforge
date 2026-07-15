@@ -1,3 +1,4 @@
+import type { I18n } from "../../i18n"
 import { appShell, brandHeader, escapeHtml, htmlLayout } from "../layout"
 
 export type ConsoleSection = "overview" | "users" | "clients" | "resources" | "devices" | "audit"
@@ -5,6 +6,7 @@ export type ConsoleSection = "overview" | "users" | "clients" | "resources" | "d
 export type ConsoleFlash = { readonly kind: "ok" | "warn"; readonly message: string }
 
 export type ConsoleChrome = {
+  readonly i18n: I18n
   readonly section: ConsoleSection
   readonly adminEmail: string
   readonly flash?: ConsoleFlash
@@ -198,33 +200,35 @@ html{scrollbar-gutter:stable}
 }
 `
 
-export function renderForbidden(): string {
-  const body = `<main class="card"><div class="head">${brandHeader()}<h1>Access denied</h1><p class="lead">Your account doesn't have administrator access.</p></div><p class="foot"><a class="link-quiet" href="/">Back to your account</a></p></main>`
-  return htmlLayout("Access denied — KeyForge", body)
+export function renderForbidden(i18n: I18n): string {
+  const body = `<main class="card"><div class="head">${brandHeader()}<h1>${escapeHtml(i18n.t("Access denied"))}</h1><p class="lead">${escapeHtml(i18n.t("Your account doesn't have administrator access."))}</p></div><p class="foot"><a class="link-quiet" href="/">${escapeHtml(i18n.t("Back to your account"))}</a></p></main>`
+  return htmlLayout(i18n, i18n.t("Access denied — KeyForge"), body)
 }
 
-function renderFlash(flash: ConsoleFlash | undefined): string {
+function renderFlash(i18n: I18n, flash: ConsoleFlash | undefined): string {
   return flash === undefined
     ? ""
-    : `<div class="flash flash--${flash.kind}" role="status">${escapeHtml(flash.message)}</div>`
+    : `<div class="flash flash--${flash.kind}" role="status">${escapeHtml(i18n.t(flash.message))}</div>`
 }
 
-export function consoleShell(title: string, chrome: ConsoleChrome, content: string): string {
-  const heading = title.replace(/\s+—.*$/, "")
+export function consoleShell(heading: string, chrome: ConsoleChrome, content: string): string {
+  const { i18n } = chrome
+  const pageTitle = `${heading} — ${i18n.t("Admin console")}`
   const tabs = NAV.map((item) => ({
-    label: item.label,
+    label: i18n.t(item.label),
     href: item.href,
     active: item.section === chrome.section,
   }))
-  const barRight = `<span class="shell-bar__who">Signed in as <b>${escapeHtml(chrome.adminEmail)}</b></span><a class="btn btn--ghost btn--sm" href="/">Your account</a><a class="btn btn--ghost btn--sm" href="/logout">Sign out</a>`
+  const barRight = `<span class="shell-bar__who">${escapeHtml(i18n.t("Signed in as"))} <b>${escapeHtml(chrome.adminEmail)}</b></span><a class="btn btn--ghost btn--sm" href="/">${escapeHtml(i18n.t("Your account"))}</a><a class="btn btn--ghost btn--sm" href="/logout">${escapeHtml(i18n.t("Sign out"))}</a>`
   return appShell({
-    title,
+    i18n,
+    title: pageTitle,
     heading,
-    headingDescription: SECTION_COPY[chrome.section],
-    badge: "Admin console",
+    headingDescription: i18n.t(SECTION_COPY[chrome.section]),
+    badge: i18n.t("Admin console"),
     barRight,
     tabs,
-    content: `<div class="console-content">${renderFlash(chrome.flash)}${content}</div><script src="/assets/console.js" defer></script>`,
+    content: `<div class="console-content">${renderFlash(i18n, chrome.flash)}${content}</div><script src="/assets/console.js" defer></script>`,
     extraStyles: CONSOLE_STYLES,
   })
 }

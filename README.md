@@ -5,6 +5,11 @@ for Cloudflare Workers. It provides browser SSO, CLI device authorization,
 machine-to-machine credentials, account recovery, passwords, passkeys, and
 an administrator console/API.
 
+The browser UI and transactional emails support English, Simplified Chinese,
+and Japanese. A saved language choice takes precedence; without one, KeyForge
+uses the browser's `Accept-Language` preference and falls back to English. The
+language picker can also be reset to follow the browser again.
+
 The checked-in staging and production profiles currently target the Pangda
 tenant. Its `pangda.app` issuer/resource URIs and seeded Pangda client catalog
 are deployment data; KeyForge is the project and runtime brand.
@@ -97,6 +102,7 @@ one-time `/setup/bootstrap` flow described in the operations runbook.
 | --- | --- |
 | `src/oauth`, `src/oidc`, `src/tokens` | OAuth/OIDC protocol and token handling |
 | `src/auth`, `src/routes` | Authentication and HTTP routes |
+| `src/i18n` | Locale negotiation and English/Chinese/Japanese message catalog |
 | `src/operations` | Scheduled key rotation, cleanup, and audit retention deletion |
 | `src/do` | Durable Object consistency boundaries |
 | `migrations` | Ordered D1 schema and seed catalog |

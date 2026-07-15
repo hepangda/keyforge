@@ -219,7 +219,10 @@ accountSecurity.post("/account/email/verify", async (c) => {
   if (user.emailVerified) return c.redirect("/?section=profile&notice=email_verified")
   try {
     const { url } = await createEmailVerificationToken(c.env, user.id, user.email)
-    await enqueueEmail(c.env, { to: user.email, ...emailVerificationEmail(url) })
+    await enqueueEmail(c.env, {
+      to: user.email,
+      ...emailVerificationEmail(url, c.get("i18n").locale),
+    })
     await recordAudit(c.env, {
       type: "user.email.verification.requested",
       userId: user.id,
@@ -254,7 +257,10 @@ accountSecurity.post("/account/email/change", async (c) => {
   }
   try {
     const { url } = await createEmailChangeToken(c.env, user.id, newEmail)
-    await enqueueEmail(c.env, { to: newEmail, ...emailChangeEmail(url) })
+    await enqueueEmail(c.env, {
+      to: newEmail,
+      ...emailChangeEmail(url, c.get("i18n").locale),
+    })
     await recordAudit(c.env, {
       type: "user.email.change.requested",
       userId: user.id,

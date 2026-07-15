@@ -37,6 +37,7 @@ const MAGIC_CALLBACK_RATE_LIMIT = 60
 magicLink.get("/login/magic", (c) =>
   c.html(
     renderMagicRequestPage(
+      c.get("i18n"),
       issueCsrfToken(c),
       safeLocalPath(c.req.query("return_to") ?? null),
       c.req.query("reauth") === "1",
@@ -51,7 +52,13 @@ magicLink.post("/login/magic", async (c) => {
   const reauthenticating = readFormField(form, "reauth") === "1"
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.html(
-      renderMagicRequestPage(issueCsrfToken(c), returnTo, reauthenticating, "Please try again."),
+      renderMagicRequestPage(
+        c.get("i18n"),
+        issueCsrfToken(c),
+        returnTo,
+        reauthenticating,
+        "Please try again.",
+      ),
       403,
     )
   }
@@ -74,7 +81,7 @@ magicLink.post("/login/magic", async (c) => {
         detail: "magic link rate limit exceeded",
       })
     }
-    return c.html(renderMagicSentPage(displayEmail))
+    return c.html(renderMagicSentPage(c.get("i18n"), displayEmail))
   }
   const addressHash = await requestCorrelationHash(
     c.env,
@@ -97,7 +104,7 @@ magicLink.post("/login/magic", async (c) => {
         detail: "magic link rate limit exceeded",
       })
     }
-    return c.html(renderMagicSentPage(displayEmail))
+    return c.html(renderMagicSentPage(c.get("i18n"), displayEmail))
   }
 
   const requestId = c.get("requestId")
@@ -119,54 +126,78 @@ magicLink.post("/login/magic", async (c) => {
             redirectTo: returnTo,
             reauthenticate: reauthenticating,
           })
-          await enqueueEmail(c.env, { to: email, ...magicLinkEmail(url) })
+          await enqueueEmail(c.env, {
+            to: email,
+            ...magicLinkEmail(url, c.get("i18n").locale),
+          })
         } catch (error) {
           console.error("email.magic_link_failed", requestId, error)
         }
       }
     })(),
   )
-  return c.html(renderMagicSentPage(displayEmail))
+  return c.html(renderMagicSentPage(c.get("i18n"), displayEmail))
 })
 
 magicLink.get("/login/magic/callback", async (c) => {
   const token = c.req.query("token") ?? ""
   if (!isAccountCapabilityToken(token)) {
-    return c.html(renderErrorPage("This sign-in link is invalid or has expired."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "This sign-in link is invalid or has expired."),
+      400,
+    )
   }
   const rate = await checkIpRateLimit(c, "capability:magic", MAGIC_CALLBACK_RATE_LIMIT)
   if (!rate.allowed) {
     c.header("retry-after", String(rate.retryAfterSeconds))
-    return c.html(renderErrorPage("Too many attempts. Please wait and try again."), 429)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "Too many attempts. Please wait and try again."),
+      429,
+    )
   }
   const payload = await peekMagicLink(c.env, token)
   if (payload === null) {
-    return c.html(renderErrorPage("This sign-in link is invalid or has expired."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "This sign-in link is invalid or has expired."),
+      400,
+    )
   }
-  return c.html(renderMagicConfirmation(issueCsrfToken(c), token, payload.email))
+  return c.html(renderMagicConfirmation(c.get("i18n"), issueCsrfToken(c), token, payload.email))
 })
 
 magicLink.post("/login/magic/callback", async (c) => {
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.html(renderErrorPage("This sign-in request could not be verified."), 403)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "This sign-in request could not be verified."),
+      403,
+    )
   }
   const token = readFormField(form, "token")
   if (!isAccountCapabilityToken(token)) {
-    return c.html(renderErrorPage("This sign-in link is invalid or has expired."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "This sign-in link is invalid or has expired."),
+      400,
+    )
   }
   const rate = await checkIpRateLimit(c, "capability:magic", MAGIC_CALLBACK_RATE_LIMIT)
   if (!rate.allowed) {
     c.header("retry-after", String(rate.retryAfterSeconds))
-    return c.html(renderErrorPage("Too many attempts. Please wait and try again."), 429)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "Too many attempts. Please wait and try again."),
+      429,
+    )
   }
   const payload = await consumeMagicLink(c.env, token)
   if (payload === null) {
-    return c.html(renderErrorPage("This sign-in link is invalid or has expired."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "This sign-in link is invalid or has expired."),
+      400,
+    )
   }
   const user = await getUserById(c.env, payload.userId)
   if (user === null || user.disabled || user.email !== payload.email) {
-    return c.html(renderErrorPage("This account is unavailable."), 400)
+    return c.html(renderErrorPage(c.get("i18n"), "This account is unavailable."), 400)
   }
   if (!user.emailVerified) {
     await updateUser(c.env, user.id, { emailVerified: true })
@@ -183,7 +214,10 @@ magicLink.post("/login/magic/callback", async (c) => {
     payload.securityVersion,
   )
   if (session === null) {
-    return c.html(renderErrorPage("This sign-in link is invalid or has expired."), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), "This sign-in link is invalid or has expired."),
+      400,
+    )
   }
   setSessionCookie(c, session.token, SESSION_TTL.default)
   await recordAudit(c.env, {

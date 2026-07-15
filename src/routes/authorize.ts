@@ -45,7 +45,10 @@ authorize.get("/oauth/authorize", async (c) => {
   const requestUrl = new URL(c.req.url)
   if (validateOAuthParameterSet(requestUrl.searchParams) !== null) {
     return c.html(
-      renderErrorPage("The authorization request contains invalid or oversized parameters."),
+      renderErrorPage(
+        c.get("i18n"),
+        "The authorization request contains invalid or oversized parameters.",
+      ),
       400,
     )
   }
@@ -62,7 +65,7 @@ authorize.post("/oauth/authorize/decision", async (c) => {
   }
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.html(renderErrorPage("Your session expired. Please try again."), 403)
+    return c.html(renderErrorPage(c.get("i18n"), "Your session expired. Please try again."), 403)
   }
   const query = new URLSearchParams()
   for (const key of AUTHORIZE_PARAM_KEYS) {
@@ -124,7 +127,7 @@ async function dispatchValidation(
           detail: validation.description,
         })
       }
-      return c.html(renderErrorPage(validation.description), 400)
+      return c.html(renderErrorPage(c.get("i18n"), validation.description), 400)
     }
     case "error_redirect":
       return errorRedirect(c, validation)
@@ -207,6 +210,7 @@ async function handleAuthorized(
   }
   return c.html(
     renderConsentPage({
+      i18n: c.get("i18n"),
       csrfToken: issueCsrfToken(c),
       clientName: params.client.name,
       scopes: params.scopes,

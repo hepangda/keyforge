@@ -1,31 +1,33 @@
+import type { I18n } from "../i18n"
 import { brandHeader, escapeHtml, htmlLayout, icons, permissionList } from "./layout"
 
-export function renderDeviceCodeEntryPage(error?: string): string {
+export function renderDeviceCodeEntryPage(i18n: I18n, error?: string): string {
   const errorHtml =
     error === undefined
       ? ""
-      : `<div class="alert" role="alert">${icons.alert}<div>${escapeHtml(error)}</div></div>`
+      : `<div class="alert" role="alert">${icons.alert}<div>${escapeHtml(i18n.t(error))}</div></div>`
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
-    <h1>Connect a device</h1>
-    <p class="lead">Enter the code shown on your device to continue.</p>
+    <h1>${escapeHtml(i18n.t("Connect a device"))}</h1>
+    <p class="lead">${escapeHtml(i18n.t("Enter the code shown on your device to continue."))}</p>
   </div>
   ${errorHtml}
   <form method="get" action="/device" autocomplete="off">
     <label class="field">
-      <span class="field__label">Device code</span>
+      <span class="field__label">${escapeHtml(i18n.t("Device code"))}</span>
       <input class="input input--code" type="text" name="user_code" required
         autocomplete="one-time-code" placeholder="ABCD-EFGH" inputmode="text"
         autocapitalize="characters" spellcheck="false" autofocus>
     </label>
-    <button class="btn btn--primary" type="submit">Continue</button>
+    <button class="btn btn--primary" type="submit">${escapeHtml(i18n.t("Continue"))}</button>
   </form>
 </main>`
-  return htmlLayout("Connect a device — KeyForge", body)
+  return htmlLayout(i18n, i18n.t("Connect a device — KeyForge"), body)
 }
 
 export type DeviceConfirmParams = {
+  readonly i18n: I18n
   readonly csrfToken: string
   readonly userCode: string
   readonly clientName: string
@@ -34,28 +36,29 @@ export type DeviceConfirmParams = {
 }
 
 export function renderDeviceConfirmPage(params: DeviceConfirmParams): string {
+  const { i18n } = params
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
-    <h1>Authorize ${escapeHtml(params.clientName)}</h1>
-    <p class="lead">Confirm you want to grant access to this device.</p>
+    <h1>${escapeHtml(i18n.t("Authorize {client}", { client: params.clientName }))}</h1>
+    <p class="lead">${escapeHtml(i18n.t("Confirm you want to grant access to this device."))}</p>
   </div>
-  <div class="callout">Device code <span class="mono">${escapeHtml(params.userCode)}</span></div>
-  ${permissionList(params.scopes)}
-  <div class="callout">Resource <span class="mono">${escapeHtml(params.resource)}</span></div>
+  <div class="callout">${escapeHtml(i18n.t("Device code"))} <span class="mono">${escapeHtml(params.userCode)}</span></div>
+  ${permissionList(i18n, params.scopes)}
+  <div class="callout">${escapeHtml(i18n.t("Resource"))} <span class="mono">${escapeHtml(params.resource)}</span></div>
   <form method="post" action="/device/confirm">
     <input type="hidden" name="csrf_token" value="${escapeHtml(params.csrfToken)}">
     <input type="hidden" name="user_code" value="${escapeHtml(params.userCode)}">
     <div class="btn-row">
-      <button class="btn btn--ghost" type="submit" name="decision" value="deny">Deny</button>
-      <button class="btn btn--primary" type="submit" name="decision" value="approve">Allow access</button>
+      <button class="btn btn--ghost" type="submit" name="decision" value="deny">${escapeHtml(i18n.t("Deny"))}</button>
+      <button class="btn btn--primary" type="submit" name="decision" value="approve">${escapeHtml(i18n.t("Allow access"))}</button>
     </div>
   </form>
 </main>`
-  return htmlLayout("Authorize device — KeyForge", body)
+  return htmlLayout(i18n, i18n.t("Authorize device — KeyForge"), body)
 }
 
-export function renderDeviceResultPage(kind: "approved" | "denied"): string {
+export function renderDeviceResultPage(i18n: I18n, kind: "approved" | "denied"): string {
   const approved = kind === "approved"
   const heading = approved ? "Device connected" : "Request denied"
   const message = approved
@@ -68,9 +71,9 @@ export function renderDeviceResultPage(kind: "approved" | "denied"): string {
   <div class="head">
     ${brandHeader()}
     ${mark}
-    <h1>${escapeHtml(heading)}</h1>
-    <p class="lead">${escapeHtml(message)}</p>
+    <h1>${escapeHtml(i18n.t(heading))}</h1>
+    <p class="lead">${escapeHtml(i18n.t(message))}</p>
   </div>
 </main>`
-  return htmlLayout("Device — KeyForge", body)
+  return htmlLayout(i18n, i18n.t("Device — KeyForge"), body)
 }

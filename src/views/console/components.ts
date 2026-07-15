@@ -1,20 +1,12 @@
+import type { I18n } from "../../i18n"
 import { escapeHtml } from "../layout"
 
-export function fmtDate(epochSeconds: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(epochSeconds * 1000))
+export function fmtDate(i18n: I18n, epochSeconds: number): string {
+  return i18n.formatDate(epochSeconds)
 }
 
-export function fmtDateTime(epochSeconds: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(epochSeconds * 1000))
+export function fmtDateTime(i18n: I18n, epochSeconds: number): string {
+  return i18n.formatDateTime(epochSeconds)
 }
 
 export function csrfField(token: string): string {
@@ -22,21 +14,25 @@ export function csrfField(token: string): string {
 }
 
 export function dataTable(
+  i18n: I18n,
   headers: readonly string[],
   rows: readonly (readonly string[])[],
   emptyMessage: string,
 ): string {
   if (rows.length === 0) {
-    return `<div class="ctable-wrap"><div class="ctable__empty">${escapeHtml(emptyMessage)}</div></div>`
+    return `<div class="ctable-wrap"><div class="ctable__empty">${escapeHtml(i18n.t(emptyMessage))}</div></div>`
   }
-  const head = headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join("")
+  const localizedHeaders = headers.map((header) => i18n.t(header))
+  const head = localizedHeaders
+    .map((header) => `<th scope="col">${escapeHtml(header)}</th>`)
+    .join("")
   const body = rows
     .map(
       (cells) =>
         `<tr>${cells
           .map(
             (cell, index) =>
-              `<td data-label="${escapeHtml(headers[index] ?? "")}"><div class="ctable__value">${cell}</div></td>`,
+              `<td data-label="${escapeHtml(localizedHeaders[index] ?? "")}"><div class="ctable__value">${cell}</div></td>`,
           )
           .join("")}</tr>`,
     )
@@ -44,10 +40,10 @@ export function dataTable(
   return `<div class="ctable-wrap"><table class="ctable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
 }
 
-export function statusBadge(ok: boolean, okLabel: string, offLabel: string): string {
+export function statusBadge(i18n: I18n, ok: boolean, okLabel: string, offLabel: string): string {
   return ok
-    ? `<span class="badge badge--ok"><span class="badge__dot"></span>${escapeHtml(okLabel)}</span>`
-    : `<span class="badge badge--warn"><span class="badge__dot"></span>${escapeHtml(offLabel)}</span>`
+    ? `<span class="badge badge--ok"><span class="badge__dot"></span>${escapeHtml(i18n.t(okLabel))}</span>`
+    : `<span class="badge badge--warn"><span class="badge__dot"></span>${escapeHtml(i18n.t(offLabel))}</span>`
 }
 
 export function scopeTags(values: readonly string[]): string {
@@ -58,6 +54,7 @@ export function scopeTags(values: readonly string[]): string {
 }
 
 export function pager(
+  i18n: I18n,
   baseHref: string,
   limit: number,
   offset: number,
@@ -72,17 +69,17 @@ export function pager(
     `${baseHref}${sep}limit=${limit}&offset=${Math.max(nextOffset, 0)}`
   const parts: string[] = [
     rowCount === 0
-      ? "<span>No results on this page.</span>"
-      : `<span>Showing ${offset + 1}–${offset + rowCount}</span>`,
+      ? `<span>${escapeHtml(i18n.t("No results on this page."))}</span>`
+      : `<span>${escapeHtml(i18n.t("Showing {start}–{end}", { start: offset + 1, end: offset + rowCount }))}</span>`,
   ]
   if (offset > 0) {
     parts.push(
-      `<a class="btn btn--ghost btn--tiny" href="${escapeHtml(pageHref(offset - limit))}">Previous</a>`,
+      `<a class="btn btn--ghost btn--tiny" href="${escapeHtml(pageHref(offset - limit))}">${escapeHtml(i18n.t("Previous"))}</a>`,
     )
   }
   if (hasNext) {
     parts.push(
-      `<a class="btn btn--ghost btn--tiny" href="${escapeHtml(pageHref(offset + limit))}">Next</a>`,
+      `<a class="btn btn--ghost btn--tiny" href="${escapeHtml(pageHref(offset + limit))}">${escapeHtml(i18n.t("Next"))}</a>`,
     )
   }
   return `<div class="pager">${parts.join("")}</div>`
@@ -95,31 +92,40 @@ export type FieldOptions = {
   readonly readonly?: boolean
 }
 
-export function textField(label: string, name: string, value: string, opts?: FieldOptions): string {
+export function textField(
+  i18n: I18n,
+  label: string,
+  name: string,
+  value: string,
+  opts?: FieldOptions,
+): string {
   const type = opts?.type ?? "text"
   const req = opts?.required === true ? " required" : ""
-  const ph = opts?.placeholder === undefined ? "" : ` placeholder="${escapeHtml(opts.placeholder)}"`
+  const ph =
+    opts?.placeholder === undefined ? "" : ` placeholder="${escapeHtml(i18n.t(opts.placeholder))}"`
   const ro = opts?.readonly === true ? " readonly" : ""
-  return `<label class="field"><span class="field__label">${escapeHtml(label)}</span><input class="input" type="${type}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${req}${ph}${ro}></label>`
+  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><input class="input" type="${type}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${req}${ph}${ro}></label>`
 }
 
 export function textAreaField(
+  i18n: I18n,
   label: string,
   name: string,
   value: string,
   hint?: string,
   opts?: { readonly required?: boolean },
 ): string {
-  const hintHtml = hint === undefined ? "" : `<p class="form-hint">${escapeHtml(hint)}</p>`
+  const hintHtml = hint === undefined ? "" : `<p class="form-hint">${escapeHtml(i18n.t(hint))}</p>`
   const required = opts?.required === true ? " required" : ""
-  return `<label class="field"><span class="field__label">${escapeHtml(label)}</span><textarea class="input" name="${escapeHtml(name)}" rows="3"${required}>${escapeHtml(value)}</textarea>${hintHtml}</label>`
+  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><textarea class="input" name="${escapeHtml(name)}" rows="3"${required}>${escapeHtml(value)}</textarea>${hintHtml}</label>`
 }
 
-export function checkboxField(label: string, name: string, checked: boolean): string {
-  return `<label class="checkline"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}>${escapeHtml(label)}</label>`
+export function checkboxField(i18n: I18n, label: string, name: string, checked: boolean): string {
+  return `<label class="checkline"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}>${escapeHtml(i18n.t(label))}</label>`
 }
 
 export function selectField(
+  i18n: I18n,
   label: string,
   name: string,
   options: readonly { readonly value: string; readonly label: string }[],
@@ -128,8 +134,8 @@ export function selectField(
   const opts = options
     .map(
       (option) =>
-        `<option value="${escapeHtml(option.value)}"${option.value === selected ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
+        `<option value="${escapeHtml(option.value)}"${option.value === selected ? " selected" : ""}>${escapeHtml(i18n.t(option.label))}</option>`,
     )
     .join("")
-  return `<label class="field"><span class="field__label">${escapeHtml(label)}</span><select class="input" name="${escapeHtml(name)}">${opts}</select></label>`
+  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><select class="input" name="${escapeHtml(name)}">${opts}</select></label>`
 }

@@ -9,6 +9,7 @@ import {
   updateClient,
 } from "../db/queries/clients"
 import { listResources } from "../db/queries/resources"
+import type { I18n } from "../i18n"
 import { type ClientConfiguration, validateClientConfiguration } from "../oauth/client-config"
 import { isSafePostLogoutRedirectUri } from "../oauth/post-logout"
 import { recordAudit } from "../security/audit"
@@ -72,15 +73,22 @@ function clientConfiguration(values: ClientFormValues): ClientConfiguration {
 async function clientConfigurationError(
   env: Env,
   configuration: ClientConfiguration,
+  i18n: I18n,
 ): Promise<string | undefined> {
   if (!configuration.redirectUris.every(isSafeOAuthRedirectUri)) {
-    return "Redirect URIs must use HTTPS, loopback HTTP, or a reverse-domain native scheme, without credentials or fragments."
+    return i18n.t(
+      "Redirect URIs must use HTTPS, loopback HTTP, or a reverse-domain native scheme, without credentials or fragments.",
+    )
   }
   if (!configuration.postLogoutRedirectUris.every(isSafePostLogoutRedirectUri)) {
-    return "Post-logout redirect URIs must use HTTPS or loopback HTTP, without credentials or fragments."
+    return i18n.t(
+      "Post-logout redirect URIs must use HTTPS or loopback HTTP, without credentials or fragments.",
+    )
   }
   const validation = await validateClientConfiguration(env, configuration)
-  return validation.ok ? undefined : `Configuration error: ${validation.reason}.`
+  return validation.ok
+    ? undefined
+    : i18n.t("Configuration error: {reason}.", { reason: i18n.t(validation.reason) })
 }
 
 async function renderClientFormError(
@@ -120,7 +128,7 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
     }
     const values = readClientFormValues(form)
     const configuration = clientConfiguration(values)
-    const validationError = await clientConfigurationError(c.env, configuration)
+    const validationError = await clientConfigurationError(c.env, configuration, c.get("i18n"))
     if (validationError !== undefined) {
       return renderClientFormError(c, null, values, validationError)
     }
@@ -169,7 +177,7 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
     if (current === null) return c.redirect("/console/clients?flash=not_found")
     const values = readClientFormValues(form, current)
     const configuration = clientConfiguration(values)
-    const validationError = await clientConfigurationError(c.env, configuration)
+    const validationError = await clientConfigurationError(c.env, configuration, c.get("i18n"))
     if (validationError !== undefined) {
       return renderClientFormError(c, current, values, validationError)
     }

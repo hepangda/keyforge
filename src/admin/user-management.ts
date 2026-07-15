@@ -1,20 +1,21 @@
 import { createAccountInvitationToken } from "../auth/account-tokens"
-import { setUserPassword } from "../auth/password"
+import { passwordMeetsPolicy, setUserPassword } from "../auth/password"
 import {
   createUser,
   deleteUser,
+  getUserByAlias,
   getUserByEmail,
   listGroups,
   setUserGroups,
 } from "../db/queries/users"
 import { enqueueEmail } from "../email/sender"
 import { accountInvitationEmail } from "../email/templates"
-import type { User, UserType } from "../types/domain"
+import type { User } from "../types/domain"
 
 export type ManagedUserInput = {
   readonly email: string
+  readonly alias: string
   readonly name?: string | null
-  readonly userType: UserType
   readonly emailVerified: boolean
   readonly password?: string
   readonly groupIds: readonly string[]
@@ -27,7 +28,10 @@ export type ManagedUserResult =
       readonly groups: readonly string[]
       readonly invitationSent: boolean
     }
-  | { readonly ok: false; readonly reason: "duplicate_email" | "invalid_groups" }
+  | {
+      readonly ok: false
+      readonly reason: "duplicate_email" | "duplicate_alias" | "invalid_groups" | "invalid_password"
+    }
 
 /**
  * Create a login-ready user. If no initial password is supplied, email a
@@ -42,6 +46,9 @@ export async function createManagedUser(
   if ((await getUserByEmail(env, email)) !== null) {
     return { ok: false, reason: "duplicate_email" }
   }
+  if ((await getUserByAlias(env, input.alias)) !== null) {
+    return { ok: false, reason: "duplicate_alias" }
+  }
 
   const groups = await listGroups(env)
   const requestedIds = [...new Set(input.groupIds)]
@@ -49,10 +56,16 @@ export async function createManagedUser(
   if (requestedIds.some((id) => !validIds.has(id))) {
     return { ok: false, reason: "invalid_groups" }
   }
+  const administrator = groups.some(
+    (group) => group.name === "admins" && requestedIds.includes(group.id),
+  )
+  if (input.password !== undefined && !passwordMeetsPolicy(input.password, administrator)) {
+    return { ok: false, reason: "invalid_password" }
+  }
 
   const user = await createUser(env, {
     email,
-    userType: input.userType,
+    alias: input.alias,
     emailVerified: input.emailVerified,
     ...(input.name === undefined ? {} : { name: input.name }),
   })

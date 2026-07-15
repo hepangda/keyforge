@@ -122,10 +122,6 @@ READINESS_PROBE_TOKEN="$(openssl rand -hex 32)"
 printf '%s' "$READINESS_PROBE_TOKEN" | pnpm exec wrangler secret put READINESS_PROBE_TOKEN --env staging
 # Store this value in the staging monitor's secret manager, then unset it.
 unset READINESS_PROBE_TOKEN
-pnpm exec wrangler secret put GITHUB_CLIENT_ID --env staging
-pnpm exec wrangler secret put GITHUB_CLIENT_SECRET --env staging
-pnpm exec wrangler secret put GOOGLE_CLIENT_ID --env staging
-pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --env staging
 ```
 
 Configure production separately and generate a different readiness token:
@@ -138,23 +134,16 @@ READINESS_PROBE_TOKEN="$(openssl rand -hex 32)"
 printf '%s' "$READINESS_PROBE_TOKEN" | pnpm exec wrangler secret put READINESS_PROBE_TOKEN --env production
 # Store this value in the production monitor's secret manager, then unset it.
 unset READINESS_PROBE_TOKEN
-pnpm exec wrangler secret put GITHUB_CLIENT_ID --env production
-pnpm exec wrangler secret put GITHUB_CLIENT_SECRET --env production
-pnpm exec wrangler secret put GOOGLE_CLIENT_ID --env production
-pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --env production
 ```
 
-Omit both commands for any provider that is disabled; never configure only one
-member of an ID/secret pair. Keep `ALLOW_SELF_SIGNUP="false"` unless the tenant
-has an explicit open-registration policy; the value must be the literal `true`
-or `false`. Secret values never belong in `wrangler.toml`, `.dev.vars.example`,
-logs, support tickets, or D1 exports shared with developers.
+Secret values never belong in `wrangler.toml`, `.dev.vars.example`, logs,
+support tickets, or D1 exports shared with developers.
 
 Removing R2 does not remove or add an application secret: there was no R2
 access key in the Worker. Required remote secrets remain `RESEND_API_KEY`,
-`EMAIL_FROM`, `REQUEST_HASH_SECRET`, and `READINESS_PROBE_TOKEN`; GitHub and
-Google credentials remain optional complete pairs. `BOOTSTRAP_TOKEN` is
-temporary and must be deleted after the first administrator is verified.
+`EMAIL_FROM`, `REQUEST_HASH_SECRET`, and `READINESS_PROBE_TOKEN`.
+`BOOTSTRAP_TOKEN` is temporary and must be deleted after the first administrator
+is verified.
 
 Migrations contain no password or administrator. Bootstrap staging and
 production separately, with a new random token for each environment. Include
@@ -416,9 +405,9 @@ open, while staging and production require
 probed. A missing remote token fails closed with `503`; a missing or incorrect
 request credential returns `401`. The authenticated readiness endpoint verifies all required
 bindings; strict runtime values; Resend and request-hash secrets; the schema
-through migration 0012, including required tables, actor/subject audit columns,
+through migration 0015, including required tables, actor/subject audit columns,
 actor lookup indexes, the audit-retention index, and bounded-cleanup indexes;
-the identity uniqueness index; the administrator seed catalog; the
+the canonical email/alias and login-method indexes; the administrator seed catalog; the
 D1-authoritative signing key, published JWKS, and completed legacy-KV cleanup;
 both Queue metrics; and a Durable Object RPC. It returns no secret values or
 failure details. Alert on:

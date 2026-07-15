@@ -36,7 +36,8 @@ export function readinessAccessStatus(
 const REQUIRED_TABLES = [
   "users",
   "groups",
-  "identities",
+  "password_credentials",
+  "webauthn_credentials",
   "oauth_clients",
   "oauth_resources",
   "sessions",
@@ -67,6 +68,8 @@ const REQUIRED_INDEXES = [
   "idx_reauth_cleanup_consumed",
   "idx_audit_actor_user_created",
   "idx_audit_actor_client_created",
+  "idx_users_alias_canonical",
+  "idx_password_credentials_user",
 ] as const
 
 function requireNonEmpty(value: unknown, name: string, minimumLength = 1): void {
@@ -94,6 +97,10 @@ async function checkDatabaseSchema(db: D1Database): Promise<void> {
       `SELECT
          EXISTS(SELECT 1 FROM pragma_table_info('users')
                 WHERE name = 'security_version') AS user_security_version_column,
+         EXISTS(SELECT 1 FROM pragma_table_info('users')
+                WHERE name = 'alias') AS user_alias_column,
+         NOT EXISTS(SELECT 1 FROM pragma_table_info('users')
+                WHERE name = 'user_type') AS user_type_removed,
          EXISTS(SELECT 1 FROM pragma_table_info('oauth_clients')
                 WHERE name = 'post_logout_redirect_uris_json') AS logout_column,
          EXISTS(SELECT 1 FROM pragma_table_info('refresh_tokens')
@@ -106,10 +113,10 @@ async function checkDatabaseSchema(db: D1Database): Promise<void> {
                 WHERE name = 'actor_user_id') AS audit_actor_user_column,
          EXISTS(SELECT 1 FROM pragma_table_info('audit_logs')
                 WHERE name = 'actor_client_id') AS audit_actor_client_column,
-         EXISTS(SELECT 1 FROM pragma_index_list('identities')
-                WHERE name = 'idx_identities_user_provider' AND [unique] = 1) AS identity_index,
          EXISTS(SELECT 1 FROM pragma_index_list('users')
                 WHERE name = 'idx_users_email_canonical' AND [unique] = 1) AS canonical_email_index,
+         EXISTS(SELECT 1 FROM pragma_index_list('users')
+                WHERE name = 'idx_users_alias_canonical' AND [unique] = 1) AS canonical_alias_index,
          EXISTS(SELECT 1 FROM pragma_index_list('groups')
                 WHERE name = 'idx_groups_name_canonical' AND [unique] = 1) AS canonical_group_index,
          EXISTS(SELECT 1 FROM groups WHERE name = 'admins') AS admin_group,
@@ -176,17 +183,6 @@ function checkRuntimeConfiguration(env: Env): void {
       !READINESS_TOKEN_PATTERN.test(values["READINESS_PROBE_TOKEN"]))
   ) {
     throw new Error("READINESS_PROBE_TOKEN is not configured or contains invalid characters")
-  }
-
-  for (const provider of ["GITHUB", "GOOGLE"] as const) {
-    const hasId =
-      typeof values[`${provider}_CLIENT_ID`] === "string" &&
-      String(values[`${provider}_CLIENT_ID`]).trim() !== ""
-    const hasSecret =
-      typeof values[`${provider}_CLIENT_SECRET`] === "string" &&
-      String(values[`${provider}_CLIENT_SECRET`]).trim() !== ""
-    if (hasId !== hasSecret)
-      throw new Error(`${provider} OAuth credentials must be configured as a pair`)
   }
 }
 

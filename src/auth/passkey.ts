@@ -58,7 +58,7 @@ export async function buildRegistrationOptions(
   return generateRegistrationOptions({
     rpName,
     rpID,
-    userName: user.email,
+    userName: user.alias,
     userID: strictBytes(new TextEncoder().encode(user.id)),
     userDisplayName: user.name ?? user.email,
     attestationType: "none",

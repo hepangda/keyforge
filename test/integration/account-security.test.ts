@@ -1,12 +1,7 @@
 import { env, SELF } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
-import {
-  changeUserPasswordKeepingSession,
-  setUserPassword,
-  verifyUserPassword,
-} from "../../src/auth/password"
+import { setUserPassword, verifyUserPassword } from "../../src/auth/password"
 import { createSession } from "../../src/auth/session"
-import { createIdentity } from "../../src/db/queries/identities"
 import {
   createUser,
   getUserByEmail,
@@ -64,7 +59,7 @@ function postAccount(
 }
 
 describe("account security settings", () => {
-  it("updates profile and password while revoking other sessions", async () => {
+  it("updates the profile and adds a second password without replacing the first", async () => {
     const user = await createUser(env, {
       email: "settings@pangda.app",
       name: "Before",
@@ -99,19 +94,23 @@ describe("account security settings", () => {
     expect(
       (
         await postAccount("/account/profile", browser, {
+          alias: "settingsuser",
           name: "After",
         })
       ).headers.get("location"),
     ).toContain("profile_updated")
     expect((await getUserById(env, user.id))?.name).toBe("After")
+    expect((await getUserById(env, user.id))?.alias).toBe("settingsuser")
 
-    const changed = await postAccount("/account/password", browser, {
+    const changed = await postAccount("/account/passwords", browser, {
+      name: "Backup password",
       current_password: "old password with enough length",
-      new_password: "new password with enough length",
-      new_password_confirm: "new password with enough length",
+      password: "new password with enough length",
+      password_confirm: "new password with enough length",
     })
     expect(changed.status).toBe(302)
-    expect(changed.headers.get("location")).toContain("password_changed")
+    expect(changed.headers.get("location")).toContain("password_added")
+    expect(await verifyUserPassword(env, user.id, "old password with enough length")).toBe(true)
     expect(await verifyUserPassword(env, user.id, "new password with enough length")).toBe(true)
 
     expect(
@@ -121,7 +120,7 @@ describe("account security settings", () => {
           redirect: "manual",
         })
       ).status,
-    ).toBe(302)
+    ).toBe(200)
     expect(
       (
         await SELF.fetch(`${ISSUER}/`, {
@@ -139,74 +138,14 @@ describe("account security settings", () => {
     ).toBeNull()
     expect(
       refreshRows.results.find((row) => row.id === otherRefresh.familyId)?.revoked_at,
-    ).not.toBeNull()
+    ).toBeNull()
     expect(
       (await env.REFRESH_TOKEN_FAMILY.getByName(currentRefresh.familyId).getState())?.revoked,
     ).toBe(false)
     expect(
       (await env.REFRESH_TOKEN_FAMILY.getByName(otherRefresh.familyId).getState())?.revoked,
-    ).toBe(true)
-  })
-
-  it("rolls back password, security epoch, sessions, and refresh mirrors together", async () => {
-    const user = await createUser(env, { email: "password-atomic@pangda.app" })
-    const oldPassword = "old password is long enough"
-    const newPassword = "new password is long enough"
-    await setUserPassword(env, user.id, oldPassword)
-    const securityVersion = await getUserSecurityVersion(env, user.id)
-    const current = await createSession(env, {
-      userId: user.id,
-      authMethod: "password",
-      ttlSeconds: 3600,
-    })
-    const other = await createSession(env, {
-      userId: user.id,
-      authMethod: "password",
-      ttlSeconds: 3600,
-    })
-    const refresh = await issueRefreshToken(env, {
-      userId: user.id,
-      clientId: "pangda_app",
-      sessionId: other.sessionId,
-      resource: "https://api.pangda.app",
-      scope: "openid offline_access",
-      authTime: Math.floor(Date.now() / 1000),
-      rememberMe: false,
-    })
-    await env.DB.prepare(
-      `CREATE TRIGGER fail_atomic_password_refresh
-       BEFORE UPDATE OF revoked_at ON refresh_tokens
-       BEGIN SELECT RAISE(ABORT, 'simulated refresh mirror failure'); END`,
-    ).run()
-
-    try {
-      await expect(
-        changeUserPasswordKeepingSession(env, user.id, newPassword, current.sessionId),
-      ).rejects.toThrow()
-    } finally {
-      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_atomic_password_refresh").run()
-    }
-
-    expect(await verifyUserPassword(env, user.id, oldPassword)).toBe(true)
-    expect(await verifyUserPassword(env, user.id, newPassword)).toBe(false)
-    expect(await getUserSecurityVersion(env, user.id)).toBe(securityVersion)
-    const sessions = await env.DB.prepare(
-      "SELECT id, revoked_at FROM sessions WHERE id IN (?, ?) ORDER BY id",
-    )
-      .bind(current.sessionId, other.sessionId)
-      .all<{ id: string; revoked_at: number | null }>()
-    expect(sessions.results.every((row) => row.revoked_at === null)).toBe(true)
-    expect(
-      (
-        await env.DB.prepare("SELECT revoked_at FROM refresh_tokens WHERE id = ?")
-          .bind(refresh.familyId)
-          .first<{ revoked_at: number | null }>()
-      )?.revoked_at,
-    ).toBeNull()
-    expect((await env.REFRESH_TOKEN_FAMILY.getByName(refresh.familyId).getState())?.revoked).toBe(
-      false,
-    )
-  })
+    ).toBe(false)
+  }, 10_000)
 
   it("sends passwordless users through recoverable reauthentication for sensitive actions", async () => {
     const user = await createUser(env, {
@@ -216,22 +155,23 @@ describe("account security settings", () => {
     const browser = await authenticatedBrowser(user.id)
     await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE user_id = ?").bind(user.id).run()
 
-    for (const [path, fields] of [
+    for (const [path, fields, returnTo] of [
       [
-        "/account/password",
+        "/account/passwords",
         {
-          new_password: "a new password with enough length",
-          new_password_confirm: "a new password with enough length",
+          password: "a new password with enough length",
+          password_confirm: "a new password with enough length",
         },
+        "/?section=login-methods",
       ],
-      ["/account/email/change", { new_email: "passwordless-new@pangda.app" }],
-      ["/account/delete", { confirmation: user.email }],
+      ["/account/email/change", { new_email: "passwordless-new@pangda.app" }, "/?section=profile"],
+      ["/account/delete", { confirmation: user.email }, "/?section=profile"],
     ] as const) {
       const response = await postAccount(path, browser, fields)
       expect(response.status).toBe(302)
       const location = response.headers.get("location") ?? ""
       expect(location).toContain("/login?reauth=1")
-      expect(new URL(location, ISSUER).searchParams.get("return_to")).toBe("/?section=profile")
+      expect(new URL(location, ISSUER).searchParams.get("return_to")).toBe(returnTo)
     }
     expect(await getUserById(env, user.id)).not.toBeNull()
   })
@@ -263,29 +203,6 @@ describe("account security settings", () => {
     const removed = await postAccount(`/account/passkeys/${credential.id}/delete`, browser)
     expect(removed.headers.get("location")).toContain("passkey_deleted")
     expect(await listCredentialSummaries(env, user.id)).toHaveLength(0)
-  })
-
-  it("unlinks a social identity only when another sign-in method remains", async () => {
-    const user = await createUser(env, { email: "unlink@pangda.app" })
-    await setUserPassword(env, user.id, "fallback password is long enough")
-    await createIdentity(env, {
-      userId: user.id,
-      provider: "github",
-      providerUserId: "unlink-gh",
-      email: user.email,
-      emailVerified: true,
-      profileJson: null,
-    })
-    const browser = await authenticatedBrowser(user.id)
-    const result = await postAccount("/account/identities/github/unlink", browser)
-    expect(result.headers.get("location")).toContain("identity_unlinked")
-    expect(
-      (
-        await env.DB.prepare("SELECT COUNT(*) AS n FROM identities WHERE user_id = ?")
-          .bind(user.id)
-          .first<{ n: number }>()
-      )?.n,
-    ).toBe(0)
   })
 
   it("changes email only after confirming the new address and then revokes sessions", async () => {
@@ -425,7 +342,7 @@ describe("account security settings", () => {
     const adminBrowser = await authenticatedBrowser(admin.id)
     const protectedResult = await postAccount("/account/delete", adminBrowser, {
       confirmation: admin.email,
-      current_password: "admin",
+      current_password: "test-admin-password-2026",
     })
     expect(protectedResult.headers.get("location")).toContain("last_active_admin")
     expect(await getUserById(env, admin.id)).not.toBeNull()

@@ -33,7 +33,6 @@ beforeEach(async () => {
   user = await createUser(env, {
     email: "oidc-interactions@pangda.app",
     name: "OIDC Interactions",
-    userType: "internal",
     emailVerified: true,
   })
   await setUserPassword(env, user.id, PASSWORD)

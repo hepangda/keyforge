@@ -1,14 +1,19 @@
--- Local demo-only identity. This file is applied explicitly by selftest.mjs and
+-- Local demo-only account. This file is applied explicitly by selftest.mjs and
 -- is never part of the production migration chain.
 INSERT OR REPLACE INTO users
-  (id, email, email_verified, name, user_type, disabled, created_at, updated_at)
+  (id, email, alias, email_verified, name, disabled, created_at, updated_at)
 VALUES
-  ('usr_demo_admin', 'demo-admin', 1, 'Demo Administrator', 'internal', 0, unixepoch(), unixepoch());
+  ('usr_demo_admin', 'demo-admin', 'demoadmin', 1, 'Demo Administrator', 0, unixepoch(), unixepoch());
 
-INSERT OR REPLACE INTO password_credentials (user_id, password_hash, updated_at)
+INSERT OR REPLACE INTO password_credentials
+  (id, user_id, password_hash, name, admin_eligible, created_at, updated_at)
 VALUES (
+  'pwd_demo_admin',
   'usr_demo_admin',
-  'scrypt$32768$8$1$yVLhH6oa6f3is1oUx0mLCg$iev7MtM5HU75bcTn8fv3AVGHeTZQg4sx-AlPLAWHJMA',
+  'scrypt$32768$8$1$ABEiM0RVZneImaq7zN3u_w$XIk-GTbU6FjhZSxeVcPlN5XkbHveUOZf8zLj-1Y4hVI',
+  'Demo password',
+  1,
+  unixepoch(),
   unixepoch()
 );
 

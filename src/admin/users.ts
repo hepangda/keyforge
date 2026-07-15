@@ -1,7 +1,14 @@
 import type { Hono } from "hono"
 import { z } from "zod"
+import { createMagicLink } from "../auth/magic-link"
+import {
+  addUserPassword,
+  deletePasswordCredentialPreservingLoginMethod,
+  listPasswordCredentials,
+} from "../auth/password"
 import { revokeAllUserSessions } from "../auth/session"
 import {
+  ALIAS_PATTERN,
   createGroup,
   deleteGroup,
   getGroupByName,
@@ -9,31 +16,42 @@ import {
   getUserGroupNames,
   listGroups,
   listUsers,
+  MAX_ALIAS_LENGTH,
   MAX_USER_GROUPS,
   setUserGroupsPreservingActiveAdmin,
   updateGroup,
   updateUser,
+  updateUserAlias,
 } from "../db/queries/users"
+import {
+  deleteCredentialPreservingLoginMethod,
+  listCredentialSummaries,
+} from "../db/queries/webauthn"
 import { recordAudit } from "../security/audit"
 import type { AppBindings } from "../types/app"
-import type { User, UserType } from "../types/domain"
+import type { User } from "../types/domain"
 import { parsePagination, readJsonBody } from "../utils/http"
 import { createManagedUser } from "./user-management"
 
 const patchSchema = z.object({
+  alias: z.string().trim().min(1).max(MAX_ALIAS_LENGTH).regex(ALIAS_PATTERN).optional(),
   name: z.string().trim().min(1).max(120).nullable().optional(),
-  userType: z.enum(["internal", "external"]).optional(),
   disabled: z.boolean().optional(),
   emailVerified: z.boolean().optional(),
 })
 
 const createUserSchema = z.object({
   email: z.email().max(254),
+  alias: z.string().trim().min(1).max(MAX_ALIAS_LENGTH).regex(ALIAS_PATTERN),
   name: z.string().trim().min(1).max(120).nullable().optional(),
-  user_type: z.enum(["internal", "external"]),
   email_verified: z.boolean().default(false),
-  password: z.string().min(12).max(128).optional(),
+  password: z.string().min(6).max(128).optional(),
   group_ids: z.array(z.string().min(1)).max(MAX_USER_GROUPS).default([]),
+})
+
+const passwordSchema = z.object({
+  password: z.string().min(6).max(128),
+  name: z.string().trim().max(80).nullable().optional(),
 })
 
 const setGroupsSchema = z.object({
@@ -57,10 +75,10 @@ function serializeUser(user: User, groups?: readonly string[]): Record<string, u
   const base: Record<string, unknown> = {
     id: user.id,
     email: user.email,
+    alias: user.alias,
     email_verified: user.emailVerified,
     name: user.name,
     picture: user.picture,
-    user_type: user.userType,
     disabled: user.disabled,
     created_at: user.createdAt,
   }
@@ -90,14 +108,17 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     const body = parsed.data
     const result = await createManagedUser(c.env, {
       email: body.email,
-      userType: body.user_type,
+      alias: body.alias,
       emailVerified: body.email_verified,
       groupIds: body.group_ids,
       ...(body.name === undefined ? {} : { name: body.name }),
       ...(body.password === undefined ? {} : { password: body.password }),
     })
     if (!result.ok) {
-      return c.json({ error: result.reason }, result.reason === "duplicate_email" ? 409 : 400)
+      return c.json(
+        { error: result.reason },
+        result.reason === "duplicate_email" || result.reason === "duplicate_alias" ? 409 : 400,
+      )
     }
     await recordAudit(c.env, {
       type: "admin.user.created",
@@ -209,12 +230,19 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     const body = parsed.data
     const patch: {
       name?: string | null
-      userType?: UserType
       disabled?: boolean
       emailVerified?: boolean
     } = {}
     if (body.name !== undefined) patch.name = body.name
-    if (body.userType !== undefined) patch.userType = body.userType
+    if (body.alias !== undefined) {
+      const aliasResult = await updateUserAlias(c.env, id, body.alias)
+      if (aliasResult !== "updated") {
+        return c.json(
+          { error: aliasResult === "conflict" ? "duplicate_alias" : "not_found" },
+          aliasResult === "conflict" ? 409 : 404,
+        )
+      }
+    }
     if (body.disabled !== undefined) patch.disabled = body.disabled
     if (body.emailVerified !== undefined) patch.emailVerified = body.emailVerified
     const updated = await updateUser(c.env, id, patch)
@@ -263,6 +291,109 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       metadata: { groups: names },
     })
     return c.json({ user_id: user.id, groups: names })
+  })
+
+  app.get("/admin/users/:id/login-methods", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    const [passwords, passkeys] = await Promise.all([
+      listPasswordCredentials(c.env, user.id),
+      listCredentialSummaries(c.env, user.id),
+    ])
+    return c.json({
+      passwords,
+      passkeys: passkeys.map((passkey) => ({
+        id: passkey.id,
+        name: passkey.name,
+        createdAt: passkey.createdAt,
+        lastUsedAt: passkey.lastUsedAt,
+      })),
+    })
+  })
+
+  app.post("/admin/users/:id/passwords", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    const parsed = passwordSchema.safeParse(await readJsonBody(c))
+    if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
+    const result = await addUserPassword(
+      c.env,
+      user.id,
+      parsed.data.password,
+      parsed.data.name ?? null,
+    )
+    if (result === null) return c.json({ error: "invalid_password_or_limit" }, 400)
+    await recordAudit(c.env, {
+      type: "admin.user.updated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "admin added password login method",
+    })
+    return c.json({ id: result.id }, 201)
+  })
+
+  app.delete("/admin/users/:id/passwords/:credentialId", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    const result = await deletePasswordCredentialPreservingLoginMethod(
+      c.env,
+      c.req.param("credentialId"),
+      user.id,
+    )
+    if (result !== "deleted") {
+      return c.json({ error: result }, result === "last_login_method" ? 409 : 404)
+    }
+    await recordAudit(c.env, {
+      type: "admin.user.updated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "admin deleted password login method",
+    })
+    return c.json({ deleted: true })
+  })
+
+  app.delete("/admin/users/:id/passkeys/:credentialId", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    const result = await deleteCredentialPreservingLoginMethod(
+      c.env,
+      c.req.param("credentialId"),
+      user.id,
+    )
+    if (result !== "deleted") {
+      return c.json({ error: result }, result === "last_login_method" ? 409 : 404)
+    }
+    await recordAudit(c.env, {
+      type: "admin.user.updated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "admin deleted passkey login method",
+    })
+    return c.json({ deleted: true })
+  })
+
+  app.post("/admin/users/:id/magic-link", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    if (user.disabled) return c.json({ error: "account_disabled" }, 409)
+    const link = await createMagicLink(c.env, {
+      userId: user.id,
+      redirectTo: "/",
+    })
+    await recordAudit(c.env, {
+      type: "admin.user.magic_link.generated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+    })
+    return c.json({ url: link.url, expires_in: 15 * 60 })
   })
 
   app.post("/admin/users/:id/revoke-sessions", async (c) => {

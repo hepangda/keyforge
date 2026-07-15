@@ -40,20 +40,22 @@ non-browser mutation requests.
 
 ### `GET /admin/users?limit=50&offset=0`
 
-Lists users. Password hashes, identity provider identifiers, and session tokens
-are never returned.
+Lists users. Password hashes, passkey material, and session tokens are never
+returned.
 
 ### `POST /admin/users`
 
-Creates a login-ready user. `email` and `user_type` are required. When a
-`password` is supplied it must contain 12–128 characters; otherwise the server
-sends a one-time account invitation through the configured email provider.
+Creates a login-ready user. `email` and `alias` are required. Aliases are
+case-insensitively unique and contain only English letters and numbers. When a
+`password` is supplied it must contain 6–128 characters, or at least 12 when
+the user is created in the `admins` group; otherwise the server sends a
+one-time account invitation through the configured email provider.
 
 ```json
 {
   "email": "ada@example.com",
+  "alias": "adalovelace",
   "name": "Ada Lovelace",
-  "user_type": "internal",
   "email_verified": false,
   "password": "optional-initial-password",
   "group_ids": ["grp_seed_employees"]
@@ -61,8 +63,8 @@ sends a one-time account invitation through the configured email provider.
 ```
 
 The response reports `credential_setup` as `password_set` or
-`invitation_sent`. Duplicate email returns `409`; invalid group IDs return
-`400`. The optional `group_ids` array accepts at most 100 entries.
+`invitation_sent`. Duplicate email or alias returns `409`; invalid group IDs
+return `400`. The optional `group_ids` array accepts at most 100 entries.
 
 ### `GET /admin/users/:id`
 
@@ -74,14 +76,12 @@ Accepts any subset of:
 
 ```json
 {
+  "alias": "adalovelace",
   "name": "Ada Lovelace",
-  "userType": "internal",
   "disabled": false,
   "emailVerified": true
 }
 ```
-
-`userType` is `internal` or `external`.
 
 Disabling a user also revokes active sessions and refresh-token access. The API
 returns `409 {"error":"last_active_admin"}` rather than disabling the sole
@@ -97,6 +97,33 @@ Replaces all group memberships with `{ "group_ids": ["..."] }`, with at most
 
 Revokes the user's active sessions and associated refresh-token access. Returns
 `{ "revoked": true }`.
+
+### `GET /admin/users/:id/login-methods`
+
+Returns password and passkey summaries in one response. Password hashes and
+passkey public keys are never included.
+
+### `POST /admin/users/:id/passwords`
+
+Adds another password login method from
+`{ "name": "Recovery password", "password": "..." }`. A user may keep up to
+five passwords. The 6-character minimum applies to ordinary users and the
+12-character minimum applies to administrators.
+
+### `DELETE /admin/users/:id/passwords/:credentialId`
+
+Deletes one password if another password or passkey remains. Attempting to
+remove the final reusable login method returns `409`.
+
+### `DELETE /admin/users/:id/passkeys/:credentialId`
+
+Deletes one passkey under the same last-login-method guard.
+
+### `POST /admin/users/:id/magic-link`
+
+Generates and returns a one-time 15-minute sign-in URL for an existing, enabled
+user. The URL is returned only in this response and is never generated for an
+unknown or disabled account.
 
 ## Groups
 

@@ -21,18 +21,6 @@ function boundedInteger(
   return fallback
 }
 
-function booleanValue(
-  name: string,
-  raw: string | undefined,
-  fallback: boolean,
-  strict: boolean,
-): boolean {
-  if (raw === "true") return true
-  if (raw === "false") return false
-  if (strict) throw new Error(`${name} must be either true or false`)
-  return fallback
-}
-
 function environmentName(raw: string): string {
   if (["local", "test", "staging", "production"].includes(raw)) return raw
   throw new Error("ENVIRONMENT must be local, test, staging, or production")
@@ -45,14 +33,12 @@ export type RuntimeConfig = {
   readonly auditD1RetentionDays: number
   readonly maintenanceBatchSize: number
   readonly maintenanceLeaseSeconds: number
-  readonly allowSelfSignup: boolean
 }
 
 /** Parse and bound every operator-controlled runtime value. Remote mistakes fail closed. */
 export function getRuntimeConfig(env: Env): RuntimeConfig {
   const environment = environmentName(env.ENVIRONMENT)
   const strict = REMOTE_ENVIRONMENTS.has(environment)
-  const values = env as unknown as Record<string, string | undefined>
   const auditD1RetentionDays = boundedInteger(
     "AUDIT_D1_RETENTION_DAYS",
     env.AUDIT_D1_RETENTION_DAYS,
@@ -100,7 +86,6 @@ export function getRuntimeConfig(env: Env): RuntimeConfig {
       3600,
       strict,
     ),
-    allowSelfSignup: booleanValue("ALLOW_SELF_SIGNUP", values["ALLOW_SELF_SIGNUP"], false, strict),
   }
 }
 

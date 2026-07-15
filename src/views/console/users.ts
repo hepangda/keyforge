@@ -1,5 +1,7 @@
+import type { PasswordCredentialSummary } from "../../auth/password"
 import type { GroupSummary } from "../../db/queries/users"
-import type { User, UserType } from "../../types/domain"
+import type { CredentialSummary } from "../../db/queries/webauthn"
+import type { User } from "../../types/domain"
 import { escapeHtml } from "../layout"
 import {
   checkboxField,
@@ -7,7 +9,6 @@ import {
   dataTable,
   fmtDate,
   pager,
-  selectField,
   statusBadge,
   textField,
 } from "./components"
@@ -37,8 +38,8 @@ export function renderUsersList(
   hasNext: boolean,
 ): string {
   const userRows = users.map((user) => [
-    `<b>${escapeHtml(user.email)}</b>`,
-    escapeHtml(user.userType === "internal" ? "Internal" : "External"),
+    `<b>${escapeHtml(user.alias)}</b>`,
+    escapeHtml(user.email),
     statusBadge(!user.disabled, "Active", "Disabled"),
     `<span class="mono">${escapeHtml(fmtDate(user.createdAt))}</span>`,
     `<div class="actions"><a class="btn btn--ghost btn--tiny" href="/console/users/${escapeHtml(user.id)}">Manage</a></div>`,
@@ -60,7 +61,7 @@ export function renderUsersList(
   </div>
   <section class="panel">
     <div class="panel__head"><div><h2 class="panel__title">Users</h2><p class="panel__desc">Everyone who can sign in to this server.</p></div></div>
-    ${dataTable(["Email", "Type", "Status", "Created", ""], userRows, "No users found. Add the first account to begin.")}
+    ${dataTable(["Username", "Email", "Status", "Created", ""], userRows, "No users found. Add the first account to begin.")}
     <div class="panel__body">${pager("/console/users", limit, offset, users.length, hasNext)}</div>
   </section>
   <section class="panel">
@@ -115,8 +116,8 @@ export function renderUserCreate(
 ): string {
   const values = feedback?.values ?? {
     email: "",
+    alias: "",
     name: "",
-    userType: "external" as const,
     emailVerified: false,
     groupIds: [],
   }
@@ -135,18 +136,11 @@ export function renderUserCreate(
       <form method="post" action="/console/users" class="form-grid">
         ${csrfField(csrfToken)}
         ${textField("Email", "email", values.email, { type: "email", required: true, placeholder: "name@example.com" })}
+        ${textField("Username", "alias", values.alias, { required: true, placeholder: "janedoe" })}
+        <p class="form-hint form-hint--standalone">English letters and numbers only; usernames are unique and can be used at sign-in.</p>
         ${textField("Display name", "name", values.name, { placeholder: "Optional" })}
-        ${selectField(
-          "Account type",
-          "user_type",
-          [
-            { value: "external", label: "External" },
-            { value: "internal", label: "Internal" },
-          ],
-          values.userType,
-        )}
         ${textField("Initial password", "password", "", { type: "password", placeholder: "Leave blank to send an invitation" })}
-        <p class="form-hint form-hint--standalone">Initial passwords require 12–128 characters. Invitations never expose a credential to the administrator.</p>
+        <p class="form-hint form-hint--standalone">Initial passwords require 6–128 characters, or at least 12 when the admins group is selected. Invitations never expose a credential to the administrator.</p>
         ${checkboxField("Mark email as verified", "email_verified", values.emailVerified)}
         <fieldset class="field-cluster"><legend>Groups</legend>${groupChoices(groups, new Set(values.groupIds))}</fieldset>
         <div><button class="btn btn--primary btn--auto" type="submit">Create user</button></div>
@@ -158,8 +152,8 @@ export function renderUserCreate(
 
 export type UserCreateValues = {
   readonly email: string
+  readonly alias: string
   readonly name: string
-  readonly userType: UserType
   readonly emailVerified: boolean
   readonly groupIds: readonly string[]
 }
@@ -174,6 +168,9 @@ export function renderUserDetail(
   user: User,
   groups: readonly GroupSummary[],
   selectedGroupIds: ReadonlySet<string>,
+  passwords: readonly PasswordCredentialSummary[],
+  passkeys: readonly CredentialSummary[],
+  passwordMinimum: number,
   csrfToken: string,
 ): string {
   const selectedNames = groups
@@ -181,8 +178,28 @@ export function renderUserDetail(
     .map((group) => `<span class="tag">${escapeHtml(group.name)}</span>`)
     .join("")
   const groupList = selectedNames === "" ? '<span class="mono">—</span>' : selectedNames
+  const methodRows = [
+    ...passwords.map((password) => [
+      '<span class="method-label">Password</span>',
+      `<b>${escapeHtml(password.name ?? "Password")}</b>${passwordMinimum === 12 && !password.adminEligible ? '<p class="form-hint">Unavailable while this user is an administrator</p>' : ""}`,
+      password.lastUsedAt === null
+        ? "Never"
+        : `<span class="mono">${escapeHtml(fmtDate(password.lastUsedAt))}</span>`,
+      `<span class="mono">${escapeHtml(fmtDate(password.createdAt))}</span>`,
+      `<form method="post" action="/console/users/${escapeHtml(user.id)}/passwords/${escapeHtml(password.id)}/delete" class="actions">${csrfField(csrfToken)}<button class="btn btn--ghost btn--tiny" type="submit">Delete</button></form>`,
+    ]),
+    ...passkeys.map((passkey) => [
+      '<span class="method-label method-label--passkey">Passkey</span>',
+      `<b>${escapeHtml(passkey.name ?? "Passkey")}</b>`,
+      passkey.lastUsedAt === null
+        ? "Never"
+        : `<span class="mono">${escapeHtml(fmtDate(passkey.lastUsedAt))}</span>`,
+      `<span class="mono">${escapeHtml(fmtDate(passkey.createdAt))}</span>`,
+      `<form method="post" action="/console/users/${escapeHtml(user.id)}/passkeys/${escapeHtml(passkey.id)}/delete" class="actions">${csrfField(csrfToken)}<button class="btn btn--ghost btn--tiny" type="submit">Delete</button></form>`,
+    ]),
+  ]
   const content = `<div class="toolbar">
-    <div><h2 class="panel__title">${escapeHtml(user.email)}</h2><p class="panel__desc mono">${escapeHtml(user.id)}</p></div>
+    <div><h2 class="panel__title">${escapeHtml(user.name ?? user.alias)}</h2><p class="panel__desc"><span class="mono">@${escapeHtml(user.alias)}</span> · ${escapeHtml(user.email)}</p></div>
     <a class="btn btn--ghost btn--sm" href="/console/users">Back to users</a>
   </div>
   <section class="panel">
@@ -190,20 +207,37 @@ export function renderUserDetail(
     <div class="panel__body">
       <form method="post" action="/console/users/${escapeHtml(user.id)}" class="form-grid">
         ${csrfField(csrfToken)}
+        ${textField("Username", "alias", user.alias, { required: true })}
+        <p class="form-hint form-hint--standalone">English letters and numbers only. Users can sign in with this username.</p>
         ${textField("Display name", "name", user.name ?? "", { placeholder: "No name set" })}
-        ${selectField(
-          "Account type",
-          "user_type",
-          [
-            { value: "internal", label: "Internal" },
-            { value: "external", label: "External" },
-          ],
-          user.userType,
-        )}
         ${checkboxField("Email verified", "email_verified", user.emailVerified)}
         ${checkboxField("Account disabled (blocks sign-in)", "disabled", user.disabled)}
         <div><button class="btn btn--primary btn--auto" type="submit">Save changes</button></div>
       </form>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><div><h2 class="panel__title">Login methods</h2><p class="panel__desc">Passwords and passkeys are managed together. Keep at least one reusable method.</p></div><span class="badge">${methodRows.length} total</span></div>
+    ${dataTable(["Type", "Name", "Last used", "Created", ""], methodRows, "No password or passkey has been configured.")}
+    <div class="panel__body">
+      <form method="post" action="/console/users/${escapeHtml(user.id)}/passwords" class="form-grid form-grid--method">
+        ${csrfField(csrfToken)}
+        ${textField("Password name", "name", "", { placeholder: "e.g. Temporary password" })}
+        ${textField("New password", "password", "", { type: "password", required: true })}
+        ${textField("Confirm password", "password_confirm", "", { type: "password", required: true })}
+        <p class="form-hint form-hint--standalone">Requires ${passwordMinimum}–128 characters for this user. Password values are never shown again.</p>
+        <div><button class="btn btn--ghost btn--auto" type="submit">Add password</button></div>
+      </form>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><div><h2 class="panel__title">Magic link</h2><p class="panel__desc">Generate a one-time 15-minute sign-in link for this existing user.</p></div></div>
+    <div class="panel__body">
+      <form method="post" action="/console/users/${escapeHtml(user.id)}/magic-link">
+        ${csrfField(csrfToken)}
+        <button class="btn btn--ghost btn--auto" type="submit"${user.disabled ? " disabled" : ""}>Generate magic link</button>
+      </form>
+      ${user.disabled ? '<p class="form-hint">Enable this user before generating a sign-in link.</p>' : ""}
     </div>
   </section>
   <section class="panel">
@@ -226,4 +260,10 @@ export function renderUserDetail(
     </div>
   </section>`
   return consoleShell(`${user.email} — Admin console`, chrome, content)
+}
+
+export function renderMagicLinkResult(chrome: ConsoleChrome, user: User, url: string): string {
+  const content = `<div class="toolbar"><div><h2 class="panel__title">Magic link generated</h2><p class="panel__desc">One-time sign-in for <b>${escapeHtml(user.email)}</b>.</p></div><a class="btn btn--ghost btn--sm" href="/console/users/${escapeHtml(user.id)}">Back to user</a></div>
+  <section class="panel"><div class="panel__head"><div><h2 class="panel__title">Share this link securely</h2><p class="panel__desc">It expires in 15 minutes and can be used only once. Creating another security transition invalidates it.</p></div></div><div class="panel__body"><div class="secret">${escapeHtml(url)}</div><p class="form-hint">The link is intentionally shown only on this page.</p></div></section>`
+  return consoleShell(`Magic link for ${user.email} — Admin console`, chrome, content)
 }

@@ -9,8 +9,18 @@ import {
   peekEmailVerificationToken,
   peekPasswordResetToken,
 } from "../auth/account-tokens"
-import { setUserPasswordAtSecurityVersion } from "../auth/password"
-import { getUserByEmail, getUserById, updateUser, updateUserEmail } from "../db/queries/users"
+import {
+  minimumPasswordLength,
+  PASSWORD_POLICY,
+  setUserPasswordAtSecurityVersion,
+} from "../auth/password"
+import {
+  getUserByEmail,
+  getUserById,
+  isUserAdmin,
+  updateUser,
+  updateUserEmail,
+} from "../db/queries/users"
 import { enqueueEmail } from "../email/sender"
 import { passwordResetEmail } from "../email/templates"
 import { recordAudit } from "../security/audit"
@@ -161,10 +171,19 @@ recovery.get("/password/reset", async (c) => {
       400,
     )
   }
+  const user = await getUserById(c.env, payload.userId)
+  if (user === null || user.disabled) {
+    return c.html(
+      renderRecoveryResult("Account unavailable", "This account is unavailable.", false),
+      400,
+    )
+  }
+  const minimum = minimumPasswordLength(await isUserAdmin(c.env, user.id))
   return c.html(
     renderPasswordResetForm(
       issueCsrfToken(c),
       token,
+      minimum,
       undefined,
       payload.purpose === "account_invitation",
     ),
@@ -177,17 +196,7 @@ recovery.post("/password/reset", async (c) => {
   const password = readFormField(form, "password")
   const confirmation = readFormField(form, "password_confirm")
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.html(renderPasswordResetForm(issueCsrfToken(c), token, "Please try again."), 403)
-  }
-  if (password.length < 12 || password.length > 128 || password !== confirmation) {
-    return c.html(
-      renderPasswordResetForm(
-        issueCsrfToken(c),
-        token,
-        "Passwords must match and contain 12 to 128 characters.",
-      ),
-      400,
-    )
+    return c.html(renderPasswordResetForm(issueCsrfToken(c), token, 6, "Please try again."), 403)
   }
   if (!isAccountCapabilityToken(token)) {
     return c.html(
@@ -201,6 +210,41 @@ recovery.post("/password/reset", async (c) => {
   }
   const resetLimited = await enforceRecoveryCapabilityRate(c)
   if (resetLimited !== null) return resetLimited
+  const pendingPayload = await peekPasswordResetToken(c.env, token)
+  if (pendingPayload === null) {
+    return c.html(
+      renderRecoveryResult(
+        "Reset link unavailable",
+        "This password reset link is invalid, expired, or already used.",
+        false,
+      ),
+      400,
+    )
+  }
+  const pendingUser = await getUserById(c.env, pendingPayload.userId)
+  if (pendingUser === null || pendingUser.disabled || pendingUser.email !== pendingPayload.email) {
+    return c.html(
+      renderRecoveryResult("Account unavailable", "This account is unavailable.", false),
+      400,
+    )
+  }
+  const minimum = minimumPasswordLength(await isUserAdmin(c.env, pendingUser.id))
+  if (
+    password.length < minimum ||
+    password.length > PASSWORD_POLICY.maximum ||
+    password !== confirmation
+  ) {
+    return c.html(
+      renderPasswordResetForm(
+        issueCsrfToken(c),
+        token,
+        minimum,
+        `Passwords must match and contain ${minimum} to ${PASSWORD_POLICY.maximum} characters.`,
+        pendingPayload.purpose === "account_invitation",
+      ),
+      400,
+    )
+  }
   const payload = await consumePasswordResetToken(c.env, token)
   if (payload === null) {
     return c.html(

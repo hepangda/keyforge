@@ -7,7 +7,7 @@ import { ulid } from "ulidx"
  */
 export const ID_PREFIX = {
   user: "usr",
-  identity: "idt",
+  password: "pwd",
   session: "sess",
   group: "grp",
   consent: "cnst",

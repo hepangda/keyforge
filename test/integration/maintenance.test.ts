@@ -29,8 +29,8 @@ describe("scheduled maintenance", () => {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO users
-          (id, email, email_verified, name, user_type, disabled, created_at, updated_at)
-         VALUES (?, ?, 1, ?, 'internal', 0, ?, ?)`,
+          (id, email, alias, email_verified, name, disabled, created_at, updated_at)
+         VALUES (?, ?, 'maintenancetest', 1, ?, 0, ?, ?)`,
       ).bind(
         "usr_maintenance_test",
         "maintenance@example.test",
@@ -204,9 +204,9 @@ describe("scheduled maintenance", () => {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO users
-          (id, email, email_verified, name, user_type, disabled, created_at, updated_at)
-         VALUES ('usr_maintenance_test', 'maintenance@example.test', 1, 'Maintenance Test',
-                 'internal', 0, ?, ?)`,
+          (id, email, alias, email_verified, name, disabled, created_at, updated_at)
+         VALUES ('usr_maintenance_test', 'maintenance@example.test', 'maintenancetest', 1,
+                 'Maintenance Test', 0, ?, ?)`,
       ).bind(NOW - 100 * DAY, NOW - 100 * DAY),
       env.DB.prepare(
         `INSERT INTO sessions

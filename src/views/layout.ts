@@ -48,6 +48,7 @@ const BASE_STYLES = `
   }
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{
   margin:0;min-height:100vh;min-height:100dvh;color:var(--ink);

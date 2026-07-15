@@ -2,14 +2,24 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
 import { createEmailChangeToken, createEmailVerificationToken } from "../auth/account-tokens"
-import { getProviderCredentials } from "../auth/oauth-providers"
 import {
-  changeUserPasswordKeepingSession,
+  addUserPassword,
+  deletePasswordCredentialPreservingLoginMethod,
+  minimumPasswordLength,
+  PASSWORD_POLICY,
+  renamePasswordCredential,
   userHasPassword,
   verifyUserPassword,
 } from "../auth/password"
-import { deleteIdentityPreservingLoginMethod } from "../db/queries/identities"
-import { deleteUserPreservingActiveAdmin, getUserByEmail, updateUser } from "../db/queries/users"
+import {
+  ALIAS_PATTERN,
+  deleteUserPreservingActiveAdmin,
+  getUserByEmail,
+  isUserAdmin,
+  MAX_ALIAS_LENGTH,
+  updateUser,
+  updateUserAlias,
+} from "../db/queries/users"
 import { deleteCredentialPreservingLoginMethod, renameCredential } from "../db/queries/webauthn"
 import { enqueueEmail } from "../email/sender"
 import { emailChangeEmail, emailVerificationEmail } from "../email/templates"
@@ -28,7 +38,6 @@ export const accountSecurity = new Hono<AppBindings>()
 
 accountSecurity.use("/account/*", requireAuth)
 
-const SOCIAL_PROVIDERS = new Set(["github", "google"])
 const emailSchema = z.email().max(254)
 
 function currentUser(c: Context<AppBindings>): User | null {
@@ -38,12 +47,6 @@ function currentUser(c: Context<AppBindings>): User | null {
 async function verifiedForm(c: Context<AppBindings>): Promise<FormData | null> {
   const form = await c.req.raw.formData()
   return verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined) ? form : null
-}
-
-function configuredSocialProviders(env: Env): ("github" | "google")[] {
-  return (["github", "google"] as const).filter(
-    (provider) => getProviderCredentials(env, provider) !== null,
-  )
 }
 
 async function authorizeSensitivePasswordAction(
@@ -98,6 +101,13 @@ accountSecurity.post("/account/profile", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
   if (user === null || form === null) return c.redirect("/?section=profile&notice=invalid")
+  const alias = readFormField(form, "alias").trim()
+  if (!ALIAS_PATTERN.test(alias) || alias.length > MAX_ALIAS_LENGTH) {
+    return c.redirect("/?section=profile&notice=alias_invalid")
+  }
+  if ((await updateUserAlias(c.env, user.id, alias)) !== "updated") {
+    return c.redirect("/?section=profile&notice=alias_invalid")
+  }
   const rawName = readFormField(form, "name").trim()
   await updateUser(c.env, user.id, { name: rawName === "" ? null : rawName.slice(0, 120) })
   await recordAudit(c.env, {
@@ -109,38 +119,97 @@ accountSecurity.post("/account/profile", async (c) => {
   return c.redirect("/?section=profile&notice=profile_updated")
 })
 
-accountSecurity.post("/account/password", async (c) => {
+accountSecurity.post("/account/passwords", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
-  if (user === null || form === null) return c.redirect("/?section=profile&notice=invalid")
-  const password = readFormField(form, "new_password")
-  const confirmation = readFormField(form, "new_password_confirm")
-  const authorization = await authorizeSensitivePasswordAction(c, user, form, "change_password")
-  if (authorization === "reauthentication_required") {
-    return c.redirect(reauthenticationRedirect("/?section=profile"))
+  if (user === null || form === null) {
+    return c.redirect("/?section=login-methods&notice=invalid")
   }
+  const authorization = await authorizeSensitivePasswordAction(c, user, form, "add_password")
+  if (authorization === "reauthentication_required") {
+    return c.redirect(reauthenticationRedirect("/?section=login-methods"))
+  }
+  const password = readFormField(form, "password")
+  const confirmation = readFormField(form, "password_confirm")
+  const administrator = await isUserAdmin(c.env, user.id)
+  const minimum = minimumPasswordLength(administrator)
   if (
     authorization !== "authorized" ||
-    password.length < 12 ||
-    password.length > 128 ||
+    password.length < minimum ||
+    password.length > PASSWORD_POLICY.maximum ||
     password !== confirmation
   ) {
-    return c.redirect("/?section=profile&notice=password_invalid")
+    return c.redirect("/?section=login-methods&notice=password_invalid")
   }
-  const currentSession = c.get("session")
-  if (
-    currentSession === undefined ||
-    !(await changeUserPasswordKeepingSession(c.env, user.id, password, currentSession.id))
-  ) {
-    return c.redirect("/?section=profile&notice=password_invalid")
+  const rawName = readFormField(form, "name").trim()
+  if ((await addUserPassword(c.env, user.id, password, rawName === "" ? null : rawName)) === null) {
+    return c.redirect("/?section=login-methods&notice=password_invalid")
   }
   await recordAudit(c.env, {
     type: "user.password.changed",
     userId: user.id,
     requestId: c.get("requestId"),
     success: true,
+    detail: "password login method added",
   })
-  return c.redirect("/?section=profile&notice=password_changed")
+  return c.redirect("/?section=login-methods&notice=password_added")
+})
+
+accountSecurity.post("/account/passwords/:id/rename", async (c) => {
+  const user = currentUser(c)
+  const form = await verifiedForm(c)
+  if (user === null || form === null) {
+    return c.redirect("/?section=login-methods&notice=invalid")
+  }
+  const rawName = readFormField(form, "name").trim()
+  const renamed = await renamePasswordCredential(
+    c.env,
+    c.req.param("id"),
+    user.id,
+    rawName === "" ? null : rawName,
+  )
+  if (renamed) {
+    await recordAudit(c.env, {
+      type: "user.password.changed",
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "password login method renamed",
+    })
+  }
+  return c.redirect(`/?section=login-methods&notice=${renamed ? "password_renamed" : "not_found"}`)
+})
+
+accountSecurity.post("/account/passwords/:id/delete", async (c) => {
+  const user = currentUser(c)
+  const form = await verifiedForm(c)
+  if (user === null || form === null) {
+    return c.redirect("/?section=login-methods&notice=invalid")
+  }
+  if (!hasRecentAuthentication(c.get("session"))) {
+    return c.redirect(reauthenticationRedirect("/?section=login-methods"))
+  }
+  const result = await deletePasswordCredentialPreservingLoginMethod(
+    c.env,
+    c.req.param("id"),
+    user.id,
+  )
+  if (result === "deleted") {
+    await recordAudit(c.env, {
+      type: "user.password.changed",
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "password login method deleted",
+    })
+  }
+  const notice =
+    result === "deleted"
+      ? "password_deleted"
+      : result === "last_login_method"
+        ? "last_login_method"
+        : "not_found"
+  return c.redirect(`/?section=login-methods&notice=${notice}`)
 })
 
 accountSecurity.post("/account/email/verify", async (c) => {
@@ -203,7 +272,9 @@ accountSecurity.post("/account/email/change", async (c) => {
 accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
-  if (user === null || form === null) return c.redirect("/?section=passkeys&notice=invalid")
+  if (user === null || form === null) {
+    return c.redirect("/?section=login-methods&notice=invalid")
+  }
   const rawName = readFormField(form, "name").trim()
   const renamed = await renameCredential(
     c.env,
@@ -220,22 +291,19 @@ accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
       detail: "passkey renamed",
     })
   }
-  return c.redirect(`/?section=passkeys&notice=${renamed ? "passkey_renamed" : "not_found"}`)
+  return c.redirect(`/?section=login-methods&notice=${renamed ? "passkey_renamed" : "not_found"}`)
 })
 
 accountSecurity.post("/account/passkeys/:id/delete", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
-  if (user === null || form === null) return c.redirect("/?section=passkeys&notice=invalid")
-  if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect("/login?reauth=1&return_to=%2F%3Fsection%3Dpasskeys")
+  if (user === null || form === null) {
+    return c.redirect("/?section=login-methods&notice=invalid")
   }
-  const result = await deleteCredentialPreservingLoginMethod(
-    c.env,
-    c.req.param("id"),
-    user.id,
-    configuredSocialProviders(c.env),
-  )
+  if (!hasRecentAuthentication(c.get("session"))) {
+    return c.redirect(reauthenticationRedirect("/?section=login-methods"))
+  }
+  const result = await deleteCredentialPreservingLoginMethod(c.env, c.req.param("id"), user.id)
   if (result === "deleted") {
     await recordAudit(c.env, {
       type: "user.passkey.updated",
@@ -245,51 +313,13 @@ accountSecurity.post("/account/passkeys/:id/delete", async (c) => {
       detail: "passkey deleted",
     })
   }
-  return c.redirect(
-    `/?section=passkeys&notice=${
-      result === "deleted"
-        ? "passkey_deleted"
-        : result === "last_login_method"
-          ? "last_login_method"
-          : "not_found"
-    }`,
-  )
-})
-
-accountSecurity.post("/account/identities/:provider/unlink", async (c) => {
-  const user = currentUser(c)
-  const form = await verifiedForm(c)
-  const provider = c.req.param("provider")
-  if (user === null || form === null || !SOCIAL_PROVIDERS.has(provider)) {
-    return c.redirect("/?section=identities&notice=invalid")
-  }
-  if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect("/login?reauth=1&return_to=%2F%3Fsection%3Didentities")
-  }
-  const result = await deleteIdentityPreservingLoginMethod(
-    c.env,
-    user.id,
-    provider,
-    configuredSocialProviders(c.env),
-  )
-  if (result === "deleted") {
-    await recordAudit(c.env, {
-      type: "user.identity.unlinked",
-      userId: user.id,
-      requestId: c.get("requestId"),
-      success: true,
-      detail: `unlinked ${provider}`,
-    })
-  }
-  return c.redirect(
-    `/?section=identities&notice=${
-      result === "deleted"
-        ? "identity_unlinked"
-        : result === "last_login_method"
-          ? "last_login_method"
-          : "not_found"
-    }`,
-  )
+  const notice =
+    result === "deleted"
+      ? "passkey_deleted"
+      : result === "last_login_method"
+        ? "last_login_method"
+        : "not_found"
+  return c.redirect(`/?section=login-methods&notice=${notice}`)
 })
 
 accountSecurity.post("/account/delete", async (c) => {

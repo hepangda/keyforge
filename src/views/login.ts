@@ -5,7 +5,6 @@ export type LoginPageParams = {
   readonly returnTo: string
   readonly email?: string
   readonly error?: string
-  readonly socialProviders?: readonly ("github" | "google")[]
   readonly reauthenticating?: boolean
 }
 
@@ -19,22 +18,7 @@ export function renderLoginPage(params: LoginPageParams): string {
   if (params.returnTo && params.returnTo !== "/") magicQuery.set("return_to", params.returnTo)
   if (params.reauthenticating === true) magicQuery.set("reauth", "1")
   const magicHref = `/login/magic${magicQuery.size === 0 ? "" : `?${magicQuery.toString()}`}`
-  const providerQuery = new URLSearchParams()
-  if (params.returnTo && params.returnTo !== "/") {
-    providerQuery.set("return_to", params.returnTo)
-  }
-  if (params.reauthenticating === true) {
-    providerQuery.set("reauth", "1")
-  }
-  const returnToQuery = providerQuery.size === 0 ? "" : `?${providerQuery.toString()}`
-  const providers = params.socialProviders ?? []
-  const social = providers
-    .map(
-      (provider) =>
-        `<a class="btn btn--ghost" href="/login/${provider}${returnToQuery}">Continue with ${provider === "github" ? "GitHub" : "Google"}</a>`,
-    )
-    .join("")
-  const alternatives = `${social}<button class="btn btn--ghost" type="button" data-passkey-login data-return-to="${escapeHtml(params.returnTo)}"${params.reauthenticating === true ? ' data-reauth="1"' : ""}>Use a passkey</button>`
+  const alternatives = `<button class="btn btn--ghost" type="button" data-passkey-login data-return-to="${escapeHtml(params.returnTo)}"${params.reauthenticating === true ? ' data-reauth="1"' : ""}>Use a passkey</button>`
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}

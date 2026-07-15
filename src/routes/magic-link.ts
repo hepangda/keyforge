@@ -116,7 +116,6 @@ magicLink.post("/login/magic", async (c) => {
         try {
           const { url } = await createMagicLink(c.env, {
             userId: user.id,
-            email,
             redirectTo: returnTo,
             reauthenticate: reauthenticating,
           })

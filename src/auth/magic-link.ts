@@ -1,12 +1,11 @@
 import { TOKEN_TTL } from "../config"
-import { getUserSecurityVersion } from "../db/queries/users"
+import { getUserById, getUserSecurityVersion } from "../db/queries/users"
 import { hashOpaqueToken } from "../tokens/token-hash"
 import type { AccountOneTimeTokenPayload } from "../types/tokens"
 import { randomToken } from "../utils/random"
 
 export type MagicLinkInput = {
   readonly userId: string
-  readonly email: string
   readonly redirectTo: string | null
   readonly reauthenticate?: boolean
 }
@@ -16,12 +15,15 @@ export async function createMagicLink(
   input: MagicLinkInput,
 ): Promise<{ token: string; url: string }> {
   const token = randomToken(32)
+  const user = await getUserById(env, input.userId)
   const securityVersion = await getUserSecurityVersion(env, input.userId)
-  if (securityVersion === null) throw new Error("account unavailable")
+  if (user === null || user.disabled || securityVersion === null) {
+    throw new Error("account unavailable")
+  }
   const payload: AccountOneTimeTokenPayload = {
     purpose: "magic_link",
     userId: input.userId,
-    email: input.email,
+    email: user.email,
     redirectTo: input.redirectTo,
     reauthenticate: input.reauthenticate === true,
     securityVersion,

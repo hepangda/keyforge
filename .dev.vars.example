@@ -1,6 +1,5 @@
 # Local secrets for `wrangler dev`. Copy to `.dev.vars` and fill in.
 # In production set each with: wrangler secret put <NAME>
-# (client_id values are public; kept here so social login is fully configured.)
 
 # One-time first-admin bootstrap secret (minimum 32 random characters).
 # Delete it from the remote environment immediately after bootstrap succeeds.
@@ -19,16 +18,3 @@ REQUEST_HASH_SECRET=""
 # Dedicated readiness bearer credential. Local readiness does not require it;
 # set a different random 32+ character secret in staging and production.
 READINESS_PROBE_TOKEN=""
-
-# Account creation through a first-time social login is disabled by default.
-ALLOW_SELF_SIGNUP="false"
-
-# GitHub OAuth app — https://github.com/settings/developers
-# Authorization callback URL: https://auth.pangda.app/login/github/callback
-GITHUB_CLIENT_ID=""
-GITHUB_CLIENT_SECRET=""
-
-# Google OAuth client — https://console.cloud.google.com/apis/credentials
-# Authorized redirect URI: https://auth.pangda.app/login/google/callback
-GOOGLE_CLIENT_ID=""
-GOOGLE_CLIENT_SECRET=""

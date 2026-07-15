@@ -1,12 +1,9 @@
 import { env, SELF } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
+import { verifyUserPassword } from "../../src/auth/password"
 import { getUserByEmail, getUserGroupNames } from "../../src/db/queries/users"
-import { verifyPassword } from "../../src/security/crypto"
 
 const ISSUER = "https://auth.pangda.app"
-const SEED_HASH =
-  "scrypt$32768$8$1$yVLhH6oa6f3is1oUx0mLCg$iev7MtM5HU75bcTn8fv3AVGHeTZQg4sx-AlPLAWHJMA"
-
 function cookieValue(setCookies: readonly string[], name: string): string {
   for (const cookie of setCookies) {
     if (cookie.startsWith(`${name}=`)) {
@@ -17,18 +14,20 @@ function cookieValue(setCookies: readonly string[], name: string): string {
 }
 
 describe("test-only administrator fixture", () => {
-  it("has a password hash that verifies for 'admin' and rejects others", async () => {
-    expect(await verifyPassword("admin", SEED_HASH)).toBe(true)
-    expect(await verifyPassword("wrong", SEED_HASH)).toBe(false)
+  it("has an administrator-eligible password and rejects others", async () => {
+    const admin = await getUserByEmail(env, "admin")
+    expect(admin).not.toBeNull()
+    expect(await verifyUserPassword(env, admin?.id ?? "", "test-admin-password-2026")).toBe(true)
+    expect(await verifyUserPassword(env, admin?.id ?? "", "wrong")).toBe(false)
   })
 
-  it("is seeded as an internal user in the admins group", async () => {
+  it("is seeded in the admins group with a username", async () => {
     const admin = await getUserByEmail(env, "admin")
     expect(admin).not.toBeNull()
     if (admin === null) {
       return
     }
-    expect(admin.userType).toBe("internal")
+    expect(admin.alias).toMatch(/^[A-Za-z0-9]+$/)
     expect(await getUserGroupNames(env, admin.id)).toContain("admins")
   })
 
@@ -41,7 +40,11 @@ describe("test-only administrator fixture", () => {
         "content-type": "application/x-www-form-urlencoded",
         cookie: `__Host-keyforge_csrf=${csrf}`,
       },
-      body: new URLSearchParams({ email: "admin", password: "admin", csrf_token: csrf }).toString(),
+      body: new URLSearchParams({
+        email: "admin",
+        password: "test-admin-password-2026",
+        csrf_token: csrf,
+      }).toString(),
       redirect: "manual",
     })
     expect(login.status).toBe(302)

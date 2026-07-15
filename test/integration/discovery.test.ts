@@ -32,7 +32,8 @@ describe("GET /.well-known/openid-configuration", () => {
     expect(body.id_token_signing_alg_values_supported).toEqual(["RS256"])
     expect(body.scopes_supported).toContain("groups")
     expect(body.claims_supported).toContain("groups")
-    expect(body.claims_supported).toContain("user_type")
+    expect(body.claims_supported).toContain("preferred_username")
+    expect(body.claims_supported).not.toContain("user_type")
   })
 })
 

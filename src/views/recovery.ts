@@ -44,6 +44,7 @@ export function renderPasswordResetSent(email: string): string {
 export function renderPasswordResetForm(
   csrfToken: string,
   token: string,
+  minimumLength: number,
   error?: string,
   invitation = false,
 ): string {
@@ -51,7 +52,7 @@ export function renderPasswordResetForm(
   <div class="head">
     ${brandHeader()}
     <h1>${invitation ? "Accept your invitation" : "Choose a new password"}</h1>
-    <p class="lead">${invitation ? "Create a password to activate your invited account." : "Use at least 12 characters and avoid a password used elsewhere."}</p>
+    <p class="lead">${invitation ? "Create a password to activate your invited account." : `Use at least ${minimumLength} characters and avoid a password used elsewhere.`}</p>
   </div>
   ${alert(error)}
   <form method="post" action="/password/reset">
@@ -59,11 +60,11 @@ export function renderPasswordResetForm(
     <input type="hidden" name="token" value="${escapeHtml(token)}">
     <label class="field">
       <span class="field__label">New password</span>
-      <input class="input" type="password" name="password" minlength="12" maxlength="128" autocomplete="new-password" required autofocus>
+      <input class="input" type="password" name="password" minlength="${minimumLength}" maxlength="128" autocomplete="new-password" required autofocus>
     </label>
     <label class="field">
       <span class="field__label">Confirm new password</span>
-      <input class="input" type="password" name="password_confirm" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <input class="input" type="password" name="password_confirm" minlength="${minimumLength}" maxlength="128" autocomplete="new-password" required>
     </label>
     <button class="btn btn--primary" type="submit">${invitation ? "Accept invitation" : "Reset password"}</button>
   </form>

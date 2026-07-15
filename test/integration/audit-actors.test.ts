@@ -52,7 +52,11 @@ async function loginAdmin(): Promise<string> {
       "content-type": "application/x-www-form-urlencoded",
       cookie: `__Host-keyforge_csrf=${csrf}`,
     },
-    body: new URLSearchParams({ email: "admin", password: "admin", csrf_token: csrf }).toString(),
+    body: new URLSearchParams({
+      email: "admin",
+      password: "test-admin-password-2026",
+      csrf_token: csrf,
+    }).toString(),
     redirect: "manual",
   })
   return (

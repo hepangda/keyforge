@@ -20,7 +20,6 @@ import { login } from "./routes/login"
 import { magicLink } from "./routes/magic-link"
 import { oauth } from "./routes/oauth"
 import { recovery } from "./routes/recovery"
-import { social } from "./routes/social"
 import { webauthn } from "./routes/webauthn"
 import { wellKnown } from "./routes/well-known"
 import { insertAuditBatch, recordAudit } from "./security/audit"
@@ -119,7 +118,6 @@ app.route("/", authorize)
 app.route("/", device)
 app.route("/", magicLink)
 app.route("/", recovery)
-app.route("/", social)
 app.route("/", webauthn)
 app.route("/", admin)
 app.route("/", adminConsole)

@@ -30,7 +30,6 @@ beforeEach(async () => {
   const user = await createUser(env, {
     email: "cli@pangda.app",
     name: "CLI User",
-    userType: "internal",
   })
   const session = await createSession(env, {
     userId: user.id,

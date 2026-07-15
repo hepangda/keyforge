@@ -83,9 +83,9 @@ export const SUPPORTED_CLAIMS = [
   "email",
   "email_verified",
   "name",
+  "preferred_username",
   "picture",
   "groups",
-  "user_type",
 ] as const
 
 /** OAuth grant types this server implements. */

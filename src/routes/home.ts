@@ -1,10 +1,8 @@
 import { Hono } from "hono"
-import { getProviderCredentials } from "../auth/oauth-providers"
-import { userHasPassword } from "../auth/password"
+import { listPasswordCredentials, minimumPasswordLength } from "../auth/password"
 import { listSessionsByUser } from "../auth/session"
 import { getClientById } from "../db/queries/clients"
 import { listConsentsByUser } from "../db/queries/consents"
-import { listIdentitiesByUser } from "../db/queries/identities"
 import { listDeviceRefreshFamiliesForUser } from "../db/queries/tokens"
 import { getUserGroupNames } from "../db/queries/users"
 import { listCredentialSummaries } from "../db/queries/webauthn"
@@ -14,7 +12,6 @@ import type { DashboardApp, DashboardData, DashboardSection } from "../views/das
 import { DASHBOARD_SECTIONS, renderDashboard } from "../views/dashboard"
 
 const ADMIN_GROUP = "admins"
-const SOCIAL_PROVIDERS = ["github", "google"] as const
 
 function parseSection(raw: string | undefined, isAdmin: boolean): DashboardSection {
   const match = DASHBOARD_SECTIONS.find((candidate) => candidate === raw)
@@ -32,16 +29,14 @@ home.get("/", async (c) => {
   if (user === undefined || session === undefined) {
     return c.redirect("/login")
   }
-  const [groups, sessions, passkeys, identities, consents, hasPassword, deviceFamilies] =
-    await Promise.all([
-      getUserGroupNames(c.env, user.id),
-      listSessionsByUser(c.env, user.id),
-      listCredentialSummaries(c.env, user.id),
-      listIdentitiesByUser(c.env, user.id),
-      listConsentsByUser(c.env, user.id),
-      userHasPassword(c.env, user.id),
-      listDeviceRefreshFamiliesForUser(c.env, user.id),
-    ])
+  const [groups, sessions, passwords, passkeys, consents, deviceFamilies] = await Promise.all([
+    getUserGroupNames(c.env, user.id),
+    listSessionsByUser(c.env, user.id),
+    listPasswordCredentials(c.env, user.id),
+    listCredentialSummaries(c.env, user.id),
+    listConsentsByUser(c.env, user.id),
+    listDeviceRefreshFamiliesForUser(c.env, user.id),
+  ])
   const consentGroups = new Map<string, { scopes: Set<string>; resources: Set<string> }>()
   for (const consent of consents) {
     const group = consentGroups.get(consent.clientId) ?? {
@@ -63,10 +58,6 @@ home.get("/", async (c) => {
       }
     }),
   )
-  const configuredProviders = SOCIAL_PROVIDERS.filter(
-    (provider) => getProviderCredentials(c.env, provider) !== null,
-  )
-  const connected = new Set(identities.map((identity) => identity.provider))
   const isAdmin = groups.includes(ADMIN_GROUP)
   const notice = c.req.query("notice")
   const data: DashboardData = {
@@ -83,17 +74,16 @@ home.get("/", async (c) => {
       expiresAt: entry.expiresAt,
       current: entry.id === session.id,
     })),
+    passwords,
     passkeys: passkeys.map((entry) => ({
       id: entry.id,
       name: entry.name,
       createdAt: entry.createdAt,
       lastUsedAt: entry.lastUsedAt,
     })),
-    identities: identities.map((entry) => ({ provider: entry.provider, email: entry.email })),
     apps,
     devices: deviceFamilies,
-    connectableProviders: configuredProviders.filter((provider) => !connected.has(provider)),
-    hasPassword,
+    passwordMinimum: minimumPasswordLength(isAdmin),
     ...(notice === undefined ? {} : { notice }),
   }
   return c.html(renderDashboard(data, parseSection(c.req.query("section"), isAdmin)))

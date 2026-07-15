@@ -1,6 +1,5 @@
 import type { JWTPayload } from "jose"
 import { JWT_TYP, TOKEN_TTL } from "../config"
-import type { UserType } from "../types/domain"
 import { generateId, ID_PREFIX } from "../utils/id"
 import { signJwt } from "./jwt"
 
@@ -49,7 +48,6 @@ export type UserAccessTokenParams = {
   readonly clientId: string
   readonly resource: string
   readonly scope: string
-  readonly userType: UserType
 }
 
 export async function issueUserAccessToken(
@@ -66,9 +64,6 @@ export async function issueUserAccessToken(
     scope: params.scope,
     token_use: "access_token",
     jti,
-  }
-  if (params.scope.split(/\s+/).includes("groups")) {
-    claims["user_type"] = params.userType
   }
   const token = await signJwt(env, claims, {
     typ: JWT_TYP.accessToken,

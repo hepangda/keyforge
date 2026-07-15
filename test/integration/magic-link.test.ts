@@ -11,7 +11,7 @@ let userId = ""
 beforeEach(async () => {
   await env.RATE_LIMIT.getByName("capability:magic:ip:unknown").reset()
   await env.DB.batch([env.DB.prepare("DELETE FROM sessions"), env.DB.prepare("DELETE FROM users")])
-  const user = await createUser(env, { email: EMAIL, name: "Mona", userType: "external" })
+  const user = await createUser(env, { email: EMAIL, name: "Mona" })
   userId = user.id
 })
 
@@ -62,7 +62,7 @@ async function requestMagicLink(email: string): Promise<Response> {
 
 describe("magic link login", () => {
   it("consumes a valid link and authenticates a session", async () => {
-    const { token } = await createMagicLink(env, { userId, email: EMAIL, redirectTo: "/" })
+    const { token } = await createMagicLink(env, { userId, redirectTo: "/" })
     const peek = await callback(token)
     expect(peek.status).toBe(200)
     expect(await peek.text()).toContain("Confirm sign in")
@@ -80,7 +80,7 @@ describe("magic link login", () => {
   })
 
   it("consumes a link exactly once", async () => {
-    const { token } = await createMagicLink(env, { userId, email: EMAIL, redirectTo: "/" })
+    const { token } = await createMagicLink(env, { userId, redirectTo: "/" })
     expect((await confirmMagicLink(token)).status).toBe(302)
     expect((await callback(token)).status).toBe(400)
   })
@@ -101,12 +101,25 @@ describe("magic link login", () => {
   })
 
   it("shows a generic sent page for both known and unknown emails", async () => {
+    await Promise.all([
+      env.KV.delete(`test:email:${EMAIL}`),
+      env.KV.delete("test:email:nobody@pangda.app"),
+    ])
     const known = await requestMagicLink(EMAIL)
     expect(known.status).toBe(200)
     expect(await known.text()).toContain("Check your email")
+    await expect.poll(() => env.KV.get(`test:email:${EMAIL}`)).not.toBeNull()
 
     const unknown = await requestMagicLink("nobody@pangda.app")
     expect(unknown.status).toBe(200)
     expect(await unknown.text()).toContain("Check your email")
+    expect(await env.KV.get("test:email:nobody@pangda.app")).toBeNull()
+  })
+
+  it("refuses to mint a link after the user no longer exists", async () => {
+    await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run()
+    await expect(createMagicLink(env, { userId, redirectTo: "/" })).rejects.toThrow(
+      "account unavailable",
+    )
   })
 })

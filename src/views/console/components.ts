@@ -103,9 +103,16 @@ export function textField(label: string, name: string, value: string, opts?: Fie
   return `<label class="field"><span class="field__label">${escapeHtml(label)}</span><input class="input" type="${type}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${req}${ph}${ro}></label>`
 }
 
-export function textAreaField(label: string, name: string, value: string, hint?: string): string {
+export function textAreaField(
+  label: string,
+  name: string,
+  value: string,
+  hint?: string,
+  opts?: { readonly required?: boolean },
+): string {
   const hintHtml = hint === undefined ? "" : `<p class="form-hint">${escapeHtml(hint)}</p>`
-  return `<label class="field"><span class="field__label">${escapeHtml(label)}</span><textarea class="input" name="${escapeHtml(name)}" rows="3">${escapeHtml(value)}</textarea>${hintHtml}</label>`
+  const required = opts?.required === true ? " required" : ""
+  return `<label class="field"><span class="field__label">${escapeHtml(label)}</span><textarea class="input" name="${escapeHtml(name)}" rows="3"${required}>${escapeHtml(value)}</textarea>${hintHtml}</label>`
 }
 
 export function checkboxField(label: string, name: string, checked: boolean): string {

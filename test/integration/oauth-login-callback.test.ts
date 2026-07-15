@@ -155,6 +155,9 @@ describe("oauth login + callback (end to end)", () => {
     })
     expect(consent.status).toBe(200)
     expect(await consent.text()).toContain("Pangda App")
+    expect(consent.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://app.pangda.app;",
+    )
     const consentCsrf = cookieValue(consent.headers.getSetCookie(), "__Host-keyforge_csrf")
     expect(consentCsrf).not.toBe("")
 

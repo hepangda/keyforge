@@ -176,6 +176,8 @@ describe("authorization_code + PKCE flow", () => {
   it("renders an error page for an unregistered redirect_uri", async () => {
     const res = await authedFetch(authorizeUrl({ redirect_uri: "https://evil.example/cb" }))
     expect(res.status).toBe(400)
+    expect(res.headers.get("content-security-policy")).toContain("form-action 'self';")
+    expect(res.headers.get("content-security-policy")).not.toContain("https://evil.example")
     expect(await res.text()).toContain("Invalid redirect_uri")
   })
 

@@ -37,6 +37,11 @@ const AUTHORIZE_PARAM_KEYS = [
 type ConsentContext = { readonly user: User; readonly session: SessionRecord }
 type HiddenFields = Readonly<Record<string, string>>
 
+function formActionSource(redirectUri: string): string {
+  const url = new URL(redirectUri)
+  return url.origin === "null" ? url.protocol : url.origin
+}
+
 function withState(params: Record<string, string>, state: string | null): Record<string, string> {
   return state === null ? params : { ...params, state }
 }
@@ -208,6 +213,8 @@ async function handleAuthorized(
   if (noInteraction) {
     return interactionError(c, params, "consent_required", "User consent is required")
   }
+  // validateAuthorizeRequest proved this exact redirect URI is registered.
+  c.set("oauthRedirectFormAction", formActionSource(params.redirectUri))
   return c.html(
     renderConsentPage({
       i18n: c.get("i18n"),

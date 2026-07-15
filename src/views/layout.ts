@@ -219,6 +219,9 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 
 .shell{width:min(100%,1080px);min-width:0;margin:0 auto;align-self:start;display:flex;flex-direction:column;gap:1.4rem;padding:1.5rem 0 3rem}
 .shell-main{display:flex;min-width:0;flex-direction:column;gap:1.4rem}
+.shell-heading{display:grid;gap:.3rem}
+.shell-heading h1{margin:0;text-align:left;font-size:1.55rem;line-height:1.25;font-weight:640;letter-spacing:-.018em;color:var(--ink)}
+.shell-heading p{max-width:720px;margin:0;color:var(--ink-2);font-size:.9rem}
 .shell-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem 1.4rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow);animation:rise .4s cubic-bezier(.2,.7,.2,1) both}
 .shell-bar__brand{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .shell-bar .brand{flex-direction:row;margin:0;gap:.7rem}
@@ -351,6 +354,7 @@ export type ShellTab = { readonly label: string; readonly href: string; readonly
 export type AppShellOptions = {
   readonly title: string
   readonly heading: string
+  readonly headingDescription?: string
   readonly badge?: string
   readonly barRight: string
   readonly tabs: readonly ShellTab[]
@@ -370,13 +374,17 @@ export function appShell(options: AppShellOptions): string {
       return `<a class="shell-tab${active}" href="${tab.href}"${current}>${escapeHtml(tab.label)}</a>`
     })
     .join("")
+  const heading =
+    options.headingDescription === undefined
+      ? `<h1 class="sr-only">${escapeHtml(options.heading)}</h1>`
+      : `<header class="shell-heading"><h1>${escapeHtml(options.heading)}</h1><p>${escapeHtml(options.headingDescription)}</p></header>`
   const body = `<div class="shell">
   <div class="shell-bar">
     <div class="shell-bar__brand">${brandHeader()}${badge}</div>
     <div class="shell-bar__right">${options.barRight}</div>
   </div>
   <nav class="shell-tabs" aria-label="Sections">${tabs}</nav>
-  <main class="shell-main"><h1 class="sr-only">${escapeHtml(options.heading)}</h1>${options.content}</main>
+  <main class="shell-main">${heading}${options.content}</main>
 </div>`
   return htmlLayout(options.title, body, options.extraStyles)
 }

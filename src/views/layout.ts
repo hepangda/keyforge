@@ -1,3 +1,5 @@
+import type { I18n } from "../i18n"
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -57,6 +59,29 @@ body{
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
 }
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.language-picker{
+  display:inline-flex;align-items:center;gap:.35rem;min-width:0;padding:.25rem .38rem;
+  color:var(--ink-3);border:1px solid transparent;border-radius:var(--r-chip);
+  transition:color .16s ease,background .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.language-picker:hover{color:var(--ink);background:var(--surface-2);border-color:var(--line)}
+.language-picker:focus-within{color:var(--ink);background:var(--surface);border-color:var(--brass-line);box-shadow:var(--focus)}
+.language-picker__icon{flex:none;width:15px;height:15px}
+.language-picker__field{position:relative;display:flex;align-items:center;min-width:0}
+.language-picker__field::after{
+  content:"";position:absolute;right:.42rem;top:50%;width:.34rem;height:.34rem;pointer-events:none;
+  border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-70%) rotate(45deg);
+}
+.language-picker__select{
+  max-width:10.5rem;min-width:0;padding:.2rem 1.35rem .2rem .15rem;
+  color:inherit;background:transparent;border:0;outline:0;appearance:none;cursor:pointer;
+  font:550 .78rem/1.4 var(--font-sans);
+}
+.language-picker__select option{color:var(--ink);background:var(--surface)}
+.language-picker__apply{width:auto;padding:.3rem .55rem;font-size:.76rem}
+.language-picker--card{margin-top:.1rem;background:color-mix(in srgb,var(--bg) 38%,transparent)}
+.language-picker--shell{flex:none;color:var(--ink-2);background:var(--surface-2);border-color:var(--line)}
+.stage-stack{position:relative;width:100%;display:flex;flex-direction:column;align-items:center;gap:.65rem}
 /* Signature backdrop: a soft forge glow over a faint guilloché ring field. */
 .stage{
   position:relative;min-height:100vh;min-height:100dvh;
@@ -228,6 +253,7 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 .shell-bar .seal{width:34px;height:34px}
 .shell-bar .brand__name{font-size:1.05rem;margin:0}
 .shell-bar__badge{font-size:.66rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--brass);border:1px solid var(--brass-line);border-radius:var(--r-pill);padding:.16rem .55rem}
+.shell-bar__actions{display:flex;align-items:center;justify-content:flex-end;gap:1rem;flex-wrap:wrap}
 .shell-bar__right{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
 .shell-bar__right .btn{width:auto}
 .shell-bar__who{font-size:.82rem;color:var(--ink-2)}
@@ -269,10 +295,22 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 
 .btn--sm{padding:.4rem .8rem;font-size:.82rem;border-radius:var(--r-chip)}
 
+@media (max-width:600px){
+  .shell-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+  .shell-bar__brand{min-width:0}
+  .shell-bar__actions{display:contents}
+  .language-picker--shell{grid-column:2;grid-row:1}
+  .language-picker--shell .language-picker__select{width:6.5rem;max-width:6.5rem;text-overflow:ellipsis}
+  .shell-bar__right{grid-column:1/-1;grid-row:2;width:100%;justify-content:space-between}
+  .shell-bar__who{flex-basis:100%}
+}
 @media (max-width:420px){
   .card{padding:1.35rem 1.15rem;border-radius:16px}
   h1{font-size:1.3rem}
   .btn-row{flex-direction:column}
+  .stage{padding:1rem}
+  .shell-bar__right{gap:.65rem}
+  .language-picker__select{max-width:8.75rem}
 }
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
@@ -316,25 +354,55 @@ const SCOPE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   groups: "Your group memberships",
 }
 
-export function permissionList(scopes: readonly string[]): string {
+export function permissionList(i18n: I18n, scopes: readonly string[]): string {
   if (scopes.length === 0) {
-    return `<div class="empty">This app isn't requesting any specific permissions.</div>`
+    return `<div class="empty">${escapeHtml(i18n.t("This app isn't requesting any specific permissions."))}</div>`
   }
   const items = scopes
     .map((scope) => {
       const desc = SCOPE_DESCRIPTIONS[scope]
       const descHtml =
-        desc === undefined ? "" : `<span class="perm__desc">${escapeHtml(desc)}</span>`
+        desc === undefined ? "" : `<span class="perm__desc">${escapeHtml(i18n.t(desc))}</span>`
       return `<li>${icons.key}<div><span class="perm__scope">${escapeHtml(scope)}</span>${descHtml}</div></li>`
     })
     .join("")
   return `<ul class="perm">${items}</ul>`
 }
 
-export function htmlLayout(title: string, body: string, extraStyles?: string): string {
+type LanguagePickerPlacement = "card" | "shell"
+
+function languagePicker(i18n: I18n, placement: LanguagePickerPlacement): string {
+  const selected = (preference: string) => (i18n.preference === preference ? " selected" : "")
+  return `<form class="language-picker language-picker--${placement}" method="get" action="/language" data-language-picker>
+  <svg class="language-picker__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6"/><path d="M3.8 12h16.4M12 3.5c2.1 2.25 3.2 5.08 3.2 8.5S14.1 18.25 12 20.5C9.9 18.25 8.8 15.42 8.8 12S9.9 5.75 12 3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+  <label class="language-picker__field">
+    <span class="sr-only">${escapeHtml(i18n.t("Language"))}</span>
+    <select class="language-picker__select" name="language" aria-label="${escapeHtml(i18n.t("Language"))}">
+      <option value="auto"${selected("auto")}>${escapeHtml(i18n.t("Follow browser"))}</option>
+      <option value="en"${selected("en")}>English</option>
+      <option value="zh-CN"${selected("zh-CN")}>简体中文</option>
+      <option value="ja"${selected("ja")}>日本語</option>
+    </select>
+  </label>
+  <input type="hidden" name="return_to" value="${escapeHtml(i18n.returnTo)}">
+  <noscript><button class="btn btn--ghost language-picker__apply" type="submit">${escapeHtml(i18n.t("Apply"))}</button></noscript>
+</form>`
+}
+
+export function htmlLayout(
+  i18n: I18n,
+  title: string,
+  body: string,
+  extraStyles?: string,
+  languagePlacement: "card" | "none" = "card",
+): string {
   const extra = extraStyles === undefined ? "" : `<style>${extraStyles}</style>`
+  const stageBody =
+    languagePlacement === "card"
+      ? `<div class="stage-stack">${body}${languagePicker(i18n, "card")}</div>`
+      : body
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${i18n.locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -345,13 +413,14 @@ export function htmlLayout(title: string, body: string, extraStyles?: string): s
 <title>${escapeHtml(title)}</title>
 <style>${BASE_STYLES}</style>${extra}
 </head>
-<body><div class="stage">${body}</div><script src="/assets/forms.js" defer></script></body>
+<body><div class="stage">${stageBody}</div><script src="/assets/forms.js" defer></script></body>
 </html>`
 }
 
 export type ShellTab = { readonly label: string; readonly href: string; readonly active: boolean }
 
 export type AppShellOptions = {
+  readonly i18n: I18n
   readonly title: string
   readonly heading: string
   readonly headingDescription?: string
@@ -381,10 +450,13 @@ export function appShell(options: AppShellOptions): string {
   const body = `<div class="shell">
   <div class="shell-bar">
     <div class="shell-bar__brand">${brandHeader()}${badge}</div>
-    <div class="shell-bar__right">${options.barRight}</div>
+    <div class="shell-bar__actions">
+      ${languagePicker(options.i18n, "shell")}
+      <div class="shell-bar__right">${options.barRight}</div>
+    </div>
   </div>
-  <nav class="shell-tabs" aria-label="Sections">${tabs}</nav>
+  <nav class="shell-tabs" aria-label="${escapeHtml(options.i18n.t("Sections"))}">${tabs}</nav>
   <main class="shell-main">${heading}${options.content}</main>
 </div>`
-  return htmlLayout(options.title, body, options.extraStyles)
+  return htmlLayout(options.i18n, options.title, body, options.extraStyles, "none")
 }

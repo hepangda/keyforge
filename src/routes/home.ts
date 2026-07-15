@@ -61,6 +61,7 @@ home.get("/", async (c) => {
   const isAdmin = groups.includes(ADMIN_GROUP)
   const notice = c.req.query("notice")
   const data: DashboardData = {
+    i18n: c.get("i18n"),
     csrfToken: issueCsrfToken(c),
     user,
     groups,

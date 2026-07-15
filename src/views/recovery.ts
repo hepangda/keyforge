@@ -1,47 +1,49 @@
+import type { I18n, MessageValues } from "../i18n"
 import { brandHeader, escapeHtml, htmlLayout, icons } from "./layout"
 
-function alert(message?: string): string {
+function alert(i18n: I18n, message?: string): string {
   return message === undefined
     ? ""
-    : `<div class="alert" role="alert">${icons.alert}<div>${escapeHtml(message)}</div></div>`
+    : `<div class="alert" role="alert">${icons.alert}<div>${escapeHtml(i18n.t(message))}</div></div>`
 }
 
-export function renderPasswordResetRequest(csrfToken: string, error?: string): string {
+export function renderPasswordResetRequest(i18n: I18n, csrfToken: string, error?: string): string {
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
-    <h1>Reset your password</h1>
-    <p class="lead">Enter your account email and we'll send a one-time reset link.</p>
+    <h1>${escapeHtml(i18n.t("Reset your password"))}</h1>
+    <p class="lead">${escapeHtml(i18n.t("Enter your account email and we'll send a one-time reset link."))}</p>
   </div>
-  ${alert(error)}
+  ${alert(i18n, error)}
   <form method="post" action="/password/forgot">
     <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
     <label class="field">
-      <span class="field__label">Email</span>
+      <span class="field__label">${escapeHtml(i18n.t("Email"))}</span>
       <input class="input" type="email" name="email" autocomplete="username" required autofocus>
     </label>
-    <button class="btn btn--primary" type="submit">Send reset link</button>
+    <button class="btn btn--primary" type="submit">${escapeHtml(i18n.t("Send reset link"))}</button>
   </form>
-  <p class="foot foot--split"><a class="link-quiet" href="/login">Back to sign in</a></p>
+  <p class="foot foot--split"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Back to sign in"))}</a></p>
 </main>`
-  return htmlLayout("Reset password — KeyForge", body)
+  return htmlLayout(i18n, i18n.t("Reset password — KeyForge"), body)
 }
 
-export function renderPasswordResetSent(email: string): string {
+export function renderPasswordResetSent(i18n: I18n, email: string): string {
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
     <div class="result-mark">${icons.check}</div>
-    <h1>Check your email</h1>
-    <p class="lead">If an account exists for <strong>${escapeHtml(email)}</strong>, a reset link is on its way.</p>
+    <h1>${escapeHtml(i18n.t("Check your email"))}</h1>
+    <p class="lead">${escapeHtml(i18n.t("If an account exists for {email}, a reset link is on its way.", { email }))}</p>
   </div>
-  <div class="callout">The link expires in <strong>one hour</strong> and works only once.</div>
-  <p class="foot"><a class="link-quiet" href="/login">Return to sign in</a></p>
+  <div class="callout">${escapeHtml(i18n.t("The link expires in one hour and works only once."))}</div>
+  <p class="foot"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Return to sign in"))}</a></p>
 </main>`
-  return htmlLayout("Check your email — KeyForge", body)
+  return htmlLayout(i18n, i18n.t("Check your email — KeyForge"), body)
 }
 
 export function renderPasswordResetForm(
+  i18n: I18n,
   csrfToken: string,
   token: string,
   minimumLength: number,
@@ -51,65 +53,74 @@ export function renderPasswordResetForm(
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
-    <h1>${invitation ? "Accept your invitation" : "Choose a new password"}</h1>
-    <p class="lead">${invitation ? "Create a password to activate your invited account." : `Use at least ${minimumLength} characters and avoid a password used elsewhere.`}</p>
+    <h1>${escapeHtml(i18n.t(invitation ? "Accept your invitation" : "Choose a new password"))}</h1>
+    <p class="lead">${escapeHtml(invitation ? i18n.t("Create a password to activate your invited account.") : i18n.t("Use at least {minimum} characters and avoid a password used elsewhere.", { minimum: minimumLength }))}</p>
   </div>
-  ${alert(error)}
+  ${alert(i18n, error)}
   <form method="post" action="/password/reset">
     <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
     <input type="hidden" name="token" value="${escapeHtml(token)}">
     <label class="field">
-      <span class="field__label">New password</span>
+      <span class="field__label">${escapeHtml(i18n.t("New password"))}</span>
       <input class="input" type="password" name="password" minlength="${minimumLength}" maxlength="128" autocomplete="new-password" required autofocus>
     </label>
     <label class="field">
-      <span class="field__label">Confirm new password</span>
+      <span class="field__label">${escapeHtml(i18n.t("Confirm new password"))}</span>
       <input class="input" type="password" name="password_confirm" minlength="${minimumLength}" maxlength="128" autocomplete="new-password" required>
     </label>
-    <button class="btn btn--primary" type="submit">${invitation ? "Accept invitation" : "Reset password"}</button>
+    <button class="btn btn--primary" type="submit">${escapeHtml(i18n.t(invitation ? "Accept invitation" : "Reset password"))}</button>
   </form>
 </main>`
   return htmlLayout(
-    `${invitation ? "Accept invitation" : "Choose a new password"} — KeyForge`,
+    i18n,
+    i18n.t(invitation ? "Accept invitation — KeyForge" : "Choose a new password — KeyForge"),
     body,
   )
 }
 
-export function renderRecoveryResult(title: string, message: string, success: boolean): string {
+export function renderRecoveryResult(
+  i18n: I18n,
+  title: string,
+  message: string,
+  success: boolean,
+): string {
   const mark = success ? icons.check : icons.cross
   const muted = success ? "" : " result-mark--muted"
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
     <div class="result-mark${muted}">${mark}</div>
-    <h1>${escapeHtml(title)}</h1>
-    <p class="lead">${escapeHtml(message)}</p>
+    <h1>${escapeHtml(i18n.t(title))}</h1>
+    <p class="lead">${escapeHtml(i18n.t(message))}</p>
   </div>
-  <p class="foot"><a class="link-quiet" href="/login">Continue to sign in</a></p>
+  <p class="foot"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Continue to sign in"))}</a></p>
 </main>`
-  return htmlLayout(`${title} — KeyForge`, body)
+  return htmlLayout(i18n, `${i18n.t(title)} — KeyForge`, body)
 }
 
 export function renderRecoveryConfirmation(params: {
+  readonly i18n: I18n
   readonly title: string
   readonly message: string
+  readonly messageValues?: MessageValues
   readonly action: string
   readonly token: string
   readonly csrfToken: string
   readonly submitLabel: string
 }): string {
+  const { i18n } = params
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
-    <h1>${escapeHtml(params.title)}</h1>
-    <p class="lead">${escapeHtml(params.message)}</p>
+    <h1>${escapeHtml(i18n.t(params.title))}</h1>
+    <p class="lead">${escapeHtml(i18n.t(params.message, params.messageValues))}</p>
   </div>
   <form method="post" action="${escapeHtml(params.action)}">
     <input type="hidden" name="csrf_token" value="${escapeHtml(params.csrfToken)}">
     <input type="hidden" name="token" value="${escapeHtml(params.token)}">
-    <button class="btn btn--primary" type="submit">${escapeHtml(params.submitLabel)}</button>
+    <button class="btn btn--primary" type="submit">${escapeHtml(i18n.t(params.submitLabel))}</button>
   </form>
-  <p class="foot"><a class="link-quiet" href="/login">Cancel</a></p>
+  <p class="foot"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Cancel"))}</a></p>
 </main>`
-  return htmlLayout(`${params.title} — KeyForge`, body)
+  return htmlLayout(i18n, `${i18n.t(params.title)} — KeyForge`, body)
 }

@@ -64,27 +64,37 @@ device.get("/device", async (c) => {
     return c.redirect(`/login?reauth=1&return_to=${encodeURIComponent(returnTo)}`)
   }
   if (userCode === "") {
-    return c.html(renderDeviceCodeEntryPage())
+    return c.html(renderDeviceCodeEntryPage(c.get("i18n")))
   }
   const session = await getDeviceByUserCodeHash(
     c.env,
     await hashOpaqueToken(normalizeUserCode(userCode)),
   )
   if (session === null || session.status !== "pending" || isExpired(session.expiresAt)) {
-    return c.html(renderDeviceCodeEntryPage("That code is invalid or has expired."), 400)
+    return c.html(
+      renderDeviceCodeEntryPage(c.get("i18n"), "That code is invalid or has expired."),
+      400,
+    )
   }
   const client = await currentDeviceClient(c.env, session)
   if (client === null) {
     return c.html(
-      renderDeviceCodeEntryPage("That authorization request is no longer available."),
+      renderDeviceCodeEntryPage(
+        c.get("i18n"),
+        "That authorization request is no longer available.",
+      ),
       400,
     )
   }
   if (!(await userMayReceiveScopes(c.env, user.id, parseScopeString(session.scope)))) {
-    return c.html(renderDeviceCodeEntryPage("This account cannot grant the requested access."), 403)
+    return c.html(
+      renderDeviceCodeEntryPage(c.get("i18n"), "This account cannot grant the requested access."),
+      403,
+    )
   }
   return c.html(
     renderDeviceConfirmPage({
+      i18n: c.get("i18n"),
       csrfToken: issueCsrfToken(c),
       userCode,
       clientName: client.name,
@@ -102,14 +112,20 @@ device.post("/device/confirm", async (c) => {
   }
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.html(renderDeviceCodeEntryPage("Your session expired. Please try again."), 403)
+    return c.html(
+      renderDeviceCodeEntryPage(c.get("i18n"), "Your session expired. Please try again."),
+      403,
+    )
   }
   const session = await getDeviceByUserCodeHash(
     c.env,
     await hashOpaqueToken(normalizeUserCode(readFormField(form, "user_code"))),
   )
   if (session === null || session.status !== "pending" || isExpired(session.expiresAt)) {
-    return c.html(renderDeviceCodeEntryPage("That code is invalid or has expired."), 400)
+    return c.html(
+      renderDeviceCodeEntryPage(c.get("i18n"), "That code is invalid or has expired."),
+      400,
+    )
   }
   if (!hasRecentAuthentication(browserSession)) {
     const returnTo = `/device?user_code=${encodeURIComponent(readFormField(form, "user_code"))}`
@@ -119,16 +135,25 @@ device.post("/device/confirm", async (c) => {
   const client = await currentDeviceClient(c.env, session)
   if (client === null) {
     return c.html(
-      renderDeviceCodeEntryPage("That authorization request is no longer available."),
+      renderDeviceCodeEntryPage(
+        c.get("i18n"),
+        "That authorization request is no longer available.",
+      ),
       400,
     )
   }
   if (!(await userMayReceiveScopes(c.env, user.id, scopes))) {
-    return c.html(renderDeviceCodeEntryPage("This account cannot grant the requested access."), 403)
+    return c.html(
+      renderDeviceCodeEntryPage(c.get("i18n"), "This account cannot grant the requested access."),
+      403,
+    )
   }
   if (readFormField(form, "decision") === "approve") {
     if (session.resourceUri === null) {
-      return c.html(renderDeviceCodeEntryPage("That request has no valid resource."), 400)
+      return c.html(
+        renderDeviceCodeEntryPage(c.get("i18n"), "That request has no valid resource."),
+        400,
+      )
     }
     const approved = await approveDeviceWithConsent(c.env, {
       id: session.id,
@@ -140,7 +165,10 @@ device.post("/device/confirm", async (c) => {
       resource: session.resourceUri,
     })
     if (!approved) {
-      return c.html(renderDeviceCodeEntryPage("That request was already handled."), 409)
+      return c.html(
+        renderDeviceCodeEntryPage(c.get("i18n"), "That request was already handled."),
+        409,
+      )
     }
     await recordAudit(c.env, {
       type: "oauth.device.approved",
@@ -149,10 +177,13 @@ device.post("/device/confirm", async (c) => {
       requestId: c.get("requestId"),
       success: true,
     })
-    return c.html(renderDeviceResultPage("approved"))
+    return c.html(renderDeviceResultPage(c.get("i18n"), "approved"))
   }
   if (!(await denyDevice(c.env, session.id))) {
-    return c.html(renderDeviceCodeEntryPage("That request was already handled."), 409)
+    return c.html(
+      renderDeviceCodeEntryPage(c.get("i18n"), "That request was already handled."),
+      409,
+    )
   }
   await recordAudit(c.env, {
     type: "oauth.device.denied",
@@ -161,5 +192,5 @@ device.post("/device/confirm", async (c) => {
     requestId: c.get("requestId"),
     success: false,
   })
-  return c.html(renderDeviceResultPage("denied"))
+  return c.html(renderDeviceResultPage(c.get("i18n"), "denied"))
 })

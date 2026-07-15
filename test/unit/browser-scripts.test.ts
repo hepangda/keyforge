@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   ACCOUNT_BROWSER_SCRIPT,
   CONSOLE_BROWSER_SCRIPT,
+  FORMS_BROWSER_SCRIPT,
   LOGIN_BROWSER_SCRIPT,
 } from "../../src/views/browser-scripts"
 
@@ -13,6 +14,16 @@ describe("browser script isolation", () => {
 
   it("does not ship the account-only redirect helper in the login bundle", () => {
     expect(LOGIN_BROWSER_SCRIPT).not.toContain("redirectForReauthentication")
+  })
+
+  it("fills the language return URL in the browser without reflecting request queries in HTML", () => {
+    expect(FORMS_BROWSER_SCRIPT).toContain("[data-language-picker]")
+    expect(FORMS_BROWSER_SCRIPT).toContain('select[name="language"]')
+    expect(FORMS_BROWSER_SCRIPT).toContain("form.requestSubmit()")
+    expect(FORMS_BROWSER_SCRIPT).toContain(
+      "window.location.pathname+window.location.search+window.location.hash",
+    )
+    expect(() => new Function(FORMS_BROWSER_SCRIPT)).not.toThrow()
   })
 
   it("progressively enhances the Console application wizard", () => {

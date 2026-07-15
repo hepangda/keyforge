@@ -58,7 +58,7 @@ export function readFlash(c: Context<AppBindings>): ConsoleFlash | undefined {
 
 export function chrome(c: Context<AppBindings>, section: ConsoleSection): ConsoleChrome {
   const user = c.get("user")
-  const base: ConsoleChrome = { section, adminEmail: user?.email ?? "" }
+  const base: ConsoleChrome = { i18n: c.get("i18n"), section, adminEmail: user?.email ?? "" }
   const flash = readFlash(c)
   return flash === undefined ? base : { ...base, flash }
 }

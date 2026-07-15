@@ -80,10 +80,11 @@ function userCreateValues(form: FormData): UserCreateValues {
   }
 }
 
-function passwordCleared(message: string, hadPassword: boolean): string {
+function passwordCleared(c: Context<AppBindings>, message: string, hadPassword: boolean): string {
+  const localized = c.get("i18n").t(message)
   return hadPassword
-    ? `${message} For security, the initial password was cleared; enter it again.`
-    : message
+    ? `${localized} ${c.get("i18n").t("For security, the initial password was cleared; enter it again.")}`
+    : localized
 }
 
 async function renderUserCreateError(
@@ -145,9 +146,11 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
               : field === "password"
                 ? "Initial passwords must contain 6–128 characters (12 for administrators)."
                 : field === "groupIds"
-                  ? `Select no more than ${MAX_USER_GROUPS} valid groups.`
+                  ? c
+                      .get("i18n")
+                      .t("Select no more than {max} valid groups.", { max: MAX_USER_GROUPS })
                   : "Check the form values."
-      return renderUserCreateError(c, values, passwordCleared(error, rawPassword !== ""))
+      return renderUserCreateError(c, values, passwordCleared(c, error, rawPassword !== ""))
     }
     const data = parsed.data
     try {
@@ -157,6 +160,7 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
         name: data.name === "" ? null : data.name,
         emailVerified: data.emailVerified,
         groupIds: data.groupIds,
+        locale: c.get("i18n").locale,
         ...(data.password === undefined ? {} : { password: data.password }),
       })
       if (!result.ok) {
@@ -164,6 +168,7 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
           c,
           values,
           passwordCleared(
+            c,
             result.reason === "duplicate_email"
               ? "An account already uses that email address."
               : result.reason === "duplicate_alias"

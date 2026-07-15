@@ -1,4 +1,5 @@
 import type { PasswordCredentialSummary } from "../auth/password"
+import type { I18n } from "../i18n"
 import type { AuthMethod, User } from "../types/domain"
 import { appShell, escapeHtml, icons } from "./layout"
 
@@ -37,6 +38,7 @@ export type DashboardDevice = {
 }
 
 export type DashboardData = {
+  readonly i18n: I18n
   readonly csrfToken: string
   readonly user: User
   readonly groups: readonly string[]
@@ -67,14 +69,6 @@ const AUTH_METHOD_LABELS: Record<AuthMethod, string> = {
   passkey: "Passkey",
 }
 
-function formatDate(epochSeconds: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(epochSeconds * 1000))
-}
-
 function initialsOf(value: string): string {
   const base = value.includes("@") ? (value.split("@")[0] ?? value) : value
   const parts = base
@@ -91,57 +85,57 @@ function csrfField(token: string): string {
 }
 
 function renderProfile(data: DashboardData): string {
-  const { user, groups } = data
+  const { i18n, user, groups } = data
   const displayName = user.name ?? user.alias
   const avatar =
     user.picture === null
       ? `<div class="avatar avatar--fallback" aria-hidden="true">${escapeHtml(initialsOf(displayName))}</div>`
       : `<img class="avatar" src="${escapeHtml(user.picture)}" alt="" referrerpolicy="no-referrer">`
   const emailBadge = user.emailVerified
-    ? '<span class="badge badge--ok"><span class="badge__dot"></span>Verified</span>'
-    : '<span class="badge badge--warn"><span class="badge__dot"></span>Unverified</span>'
+    ? `<span class="badge badge--ok"><span class="badge__dot"></span>${escapeHtml(i18n.t("Verified"))}</span>`
+    : `<span class="badge badge--warn"><span class="badge__dot"></span>${escapeHtml(i18n.t("Unverified"))}</span>`
   const groupList = groups.length === 0 ? "—" : groups.map(escapeHtml).join(", ")
   const hasPassword = data.passwords.length > 0
   const verifyEmail = user.emailVerified
     ? ""
-    : `<form method="post" action="/account/email/verify">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm" type="submit">Send verification email</button></form>`
+    : `<form method="post" action="/account/email/verify">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(i18n.t("Send verification email"))}</button></form>`
   const emailAuthorization = hasPassword
-    ? '<label class="field"><span class="field__label">Current password</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>'
-    : '<div class="callout">A recent sign-in is required because this account has no password.</div>'
+    ? `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>`
+    : `<div class="callout">${escapeHtml(i18n.t("A recent sign-in is required because this account has no password."))}</div>`
 
   return `<section class="dash-panel" id="profile">
-  <div class="dash-panel__head"><div><h2 class="dash-panel__title">Profile</h2><p class="dash-panel__desc">Your account identity and information shared with approved applications.</p></div></div>
+  <div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Profile"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Your account identity and information shared with approved applications."))}</p></div></div>
   <div class="dash-panel__body">
     <div class="identity">${avatar}<div class="identity__body"><div class="identity__name">${escapeHtml(displayName)}</div><div class="identity__sub">@${escapeHtml(user.alias)} · ${escapeHtml(user.email)}</div></div></div>
     <div class="meta">
-      <div class="meta__row"><span class="meta__key">Username</span><span class="meta__val mono">${escapeHtml(user.alias)}</span></div>
-      <div class="meta__row"><span class="meta__key">Email</span><span class="meta__val">${escapeHtml(user.email)}</span></div>
-      <div class="meta__row"><span class="meta__key">Verification</span><span class="meta__val">${emailBadge}</span></div>
-      <div class="meta__row"><span class="meta__key">Groups</span><span class="meta__val">${groupList}</span></div>
-      <div class="meta__row"><span class="meta__key">Member since</span><span class="meta__val mono">${escapeHtml(formatDate(user.createdAt))}</span></div>
+      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Username"))}</span><span class="meta__val mono">${escapeHtml(user.alias)}</span></div>
+      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Email"))}</span><span class="meta__val">${escapeHtml(user.email)}</span></div>
+      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Verification"))}</span><span class="meta__val">${emailBadge}</span></div>
+      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Groups"))}</span><span class="meta__val">${groupList}</span></div>
+      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Member since"))}</span><span class="meta__val mono">${escapeHtml(i18n.formatDate(user.createdAt))}</span></div>
     </div>
     <div class="settings-grid">
       <form method="post" action="/account/profile" class="setting-card">
         ${csrfField(data.csrfToken)}
-        <div><h3>Public profile</h3><p>Your username may contain only English letters and numbers.</p></div>
-        <label class="field"><span class="field__label">Username</span><input class="input" name="alias" pattern="[A-Za-z0-9]+" maxlength="64" value="${escapeHtml(user.alias)}" autocomplete="username" required></label>
-        <label class="field"><span class="field__label">Display name</span><input class="input" name="name" maxlength="120" value="${escapeHtml(user.name ?? "")}" autocomplete="name"></label>
-        <button class="btn btn--ghost btn--sm" type="submit">Save profile</button>
+        <div><h3>${escapeHtml(i18n.t("Public profile"))}</h3><p>${escapeHtml(i18n.t("Your username may contain only English letters and numbers."))}</p></div>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Username"))}</span><input class="input" name="alias" pattern="[A-Za-z0-9]+" maxlength="64" value="${escapeHtml(user.alias)}" autocomplete="username" required></label>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Display name"))}</span><input class="input" name="name" maxlength="120" value="${escapeHtml(user.name ?? "")}" autocomplete="name"></label>
+        <button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(i18n.t("Save profile"))}</button>
       </form>
-      <div class="setting-card"><div><h3>Email verification</h3><p>${user.emailVerified ? "This address has been verified." : "Verify this address before applications treat it as confirmed."}</p></div>${verifyEmail}</div>
+      <div class="setting-card"><div><h3>${escapeHtml(i18n.t("Email verification"))}</h3><p>${escapeHtml(i18n.t(user.emailVerified ? "This address has been verified." : "Verify this address before applications treat it as confirmed."))}</p></div>${verifyEmail}</div>
       <form method="post" action="/account/email/change" class="setting-card">
         ${csrfField(data.csrfToken)}
-        <div><h3>Change email</h3><p>We confirm the new address before changing your sign-in email.</p></div>
-        <label class="field"><span class="field__label">New email</span><input class="input" type="email" name="new_email" autocomplete="email" maxlength="254" required></label>
+        <div><h3>${escapeHtml(i18n.t("Change email"))}</h3><p>${escapeHtml(i18n.t("We confirm the new address before changing your sign-in email."))}</p></div>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("New email"))}</span><input class="input" type="email" name="new_email" autocomplete="email" maxlength="254" required></label>
         ${emailAuthorization}
-        <button class="btn btn--ghost btn--sm" type="submit">Send confirmation</button>
+        <button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(i18n.t("Send confirmation"))}</button>
       </form>
       <form method="post" action="/account/delete" class="setting-card setting-card--danger">
         ${csrfField(data.csrfToken)}
-        <div><h3>Delete account</h3><p>Permanently removes sessions, login methods, and application grants.</p></div>
-        <label class="field"><span class="field__label">Type ${escapeHtml(user.email)} to confirm</span><input class="input" name="confirmation" autocomplete="off" required></label>
-        ${hasPassword ? '<label class="field"><span class="field__label">Current password</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>' : ""}
-        <button class="btn btn--danger btn--sm" type="submit">Delete account</button>
+        <div><h3>${escapeHtml(i18n.t("Delete account"))}</h3><p>${escapeHtml(i18n.t("Permanently removes sessions, login methods, and application grants."))}</p></div>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Type {value} to confirm", { value: user.email }))}</span><input class="input" name="confirmation" autocomplete="off" required></label>
+        ${hasPassword ? `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>` : ""}
+        <button class="btn btn--danger btn--sm" type="submit">${escapeHtml(i18n.t("Delete account"))}</button>
       </form>
     </div>
   </div>
@@ -154,49 +148,50 @@ function credentialActions(
   id: string,
   name: string | null,
 ): string {
-  const label = kind === "passwords" ? "Password name" : "Passkey name"
+  const label = data.i18n.t(kind === "passwords" ? "Password name" : "Passkey name")
   return `<div class="credential-actions">
     <form method="post" action="/account/${kind}/${escapeHtml(id)}/rename" class="credential-rename">
       ${csrfField(data.csrfToken)}
       <input class="input" name="name" maxlength="80" aria-label="${label}" placeholder="${label}" value="${escapeHtml(name ?? "")}">
-      <button class="btn btn--ghost btn--sm" type="submit">Rename</button>
+      <button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(data.i18n.t("Rename"))}</button>
     </form>
-    <form method="post" action="/account/${kind}/${escapeHtml(id)}/delete">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm" type="submit">Delete</button></form>
+    <form method="post" action="/account/${kind}/${escapeHtml(id)}/delete">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(data.i18n.t("Delete"))}</button></form>
   </div>`
 }
 
 function renderLoginMethods(data: DashboardData): string {
+  const { i18n } = data
   const passwordRows = data.passwords.map(
     (password) => `<li class="dash-list__item">
       <div class="method-mark" aria-hidden="true">${icons.key}</div>
-      <div class="dash-item__main"><div class="dash-item__title">${escapeHtml(password.name ?? "Password")} <span class="method-kind">Password</span></div><div class="dash-item__meta">Added <span class="mono">${formatDate(password.createdAt)}</span>${password.lastUsedAt === null ? "" : ` · Last used <span class="mono">${formatDate(password.lastUsedAt)}</span>`}${data.isAdmin && !password.adminEligible ? " · Not available for administrator sign-in" : ""}</div></div>
+      <div class="dash-item__main"><div class="dash-item__title">${escapeHtml(password.name ?? i18n.t("Password"))} <span class="method-kind">${escapeHtml(i18n.t("Password"))}</span></div><div class="dash-item__meta">${escapeHtml(i18n.t("Added"))} <span class="mono">${i18n.formatDate(password.createdAt)}</span>${password.lastUsedAt === null ? "" : ` · ${escapeHtml(i18n.t("Last used"))} <span class="mono">${i18n.formatDate(password.lastUsedAt)}</span>`}${data.isAdmin && !password.adminEligible ? ` · ${escapeHtml(i18n.t("Not available for administrator sign-in"))}` : ""}</div></div>
       ${credentialActions(data, "passwords", password.id, password.name)}
     </li>`,
   )
   const passkeyRows = data.passkeys.map(
     (passkey) => `<li class="dash-list__item">
       <div class="method-mark method-mark--passkey" aria-hidden="true">${icons.key}</div>
-      <div class="dash-item__main"><div class="dash-item__title">${escapeHtml(passkey.name ?? "Passkey")} <span class="method-kind">Passkey</span></div><div class="dash-item__meta">Added <span class="mono">${formatDate(passkey.createdAt)}</span>${passkey.lastUsedAt === null ? "" : ` · Last used <span class="mono">${formatDate(passkey.lastUsedAt)}</span>`}</div></div>
+      <div class="dash-item__main"><div class="dash-item__title">${escapeHtml(passkey.name ?? i18n.t("Passkey"))} <span class="method-kind">${escapeHtml(i18n.t("Passkey"))}</span></div><div class="dash-item__meta">${escapeHtml(i18n.t("Added"))} <span class="mono">${i18n.formatDate(passkey.createdAt)}</span>${passkey.lastUsedAt === null ? "" : ` · ${escapeHtml(i18n.t("Last used"))} <span class="mono">${i18n.formatDate(passkey.lastUsedAt)}</span>`}</div></div>
       ${credentialActions(data, "passkeys", passkey.id, passkey.name)}
     </li>`,
   )
   const rows = [...passwordRows, ...passkeyRows]
   const currentPassword =
     data.passwords.length === 0
-      ? '<div class="callout">You are adding the first password to this account. A recent sign-in is required.</div>'
-      : '<label class="field"><span class="field__label">Current password</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>'
+      ? `<div class="callout">${escapeHtml(i18n.t("You are adding the first password to this account. A recent sign-in is required."))}</div>`
+      : `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>`
   return `<section class="dash-panel" id="login-methods">
-    <div class="dash-panel__head"><div><h2 class="dash-panel__title">Login methods</h2><p class="dash-panel__desc">Passwords and passkeys are independent ways to access this account. Add more than one for recovery.</p></div><button class="btn btn--primary btn--sm btn--auto" type="button" data-passkey-register data-csrf="${escapeHtml(data.csrfToken)}">Add passkey</button></div>
-    <ul class="dash-list">${rows.length === 0 ? '<li class="dash-list__item--empty">No reusable login methods yet. Add a password or passkey.</li>' : rows.join("\n")}</ul>
+    <div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Login methods"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Passwords and passkeys are independent ways to access this account. Add more than one for recovery."))}</p></div><button class="btn btn--primary btn--sm btn--auto" type="button" data-passkey-register data-csrf="${escapeHtml(data.csrfToken)}" data-waiting-message="${escapeHtml(i18n.t("Follow your browser's passkey prompt…"))}" data-cancelled-message="${escapeHtml(i18n.t("Passkey creation was cancelled."))}" data-error-message="${escapeHtml(i18n.t("Passkey creation could not be completed."))}">${escapeHtml(i18n.t("Add passkey"))}</button></div>
+    <ul class="dash-list">${rows.length === 0 ? `<li class="dash-list__item--empty">${escapeHtml(i18n.t("No reusable login methods yet. Add a password or passkey."))}</li>` : rows.join("\n")}</ul>
     <div class="dash-panel__foot login-method-add">
       <form method="post" action="/account/passwords" class="method-form">
         ${csrfField(data.csrfToken)}
-        <div class="method-form__intro"><h3>Add a password</h3><p>Use ${data.passwordMinimum}–128 characters${data.isAdmin ? "; administrator passwords require at least 12" : ""}.</p></div>
-        <label class="field"><span class="field__label">Name</span><input class="input" name="name" maxlength="80" placeholder="e.g. Password manager"></label>
+        <div class="method-form__intro"><h3>${escapeHtml(i18n.t("Add a password"))}</h3><p>${escapeHtml(i18n.t(data.isAdmin ? "Use {minimum}–128 characters; administrator passwords require at least 12." : "Use {minimum}–128 characters.", { minimum: data.passwordMinimum }))}</p></div>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Name"))}</span><input class="input" name="name" maxlength="80" placeholder="${escapeHtml(i18n.t("e.g. Password manager"))}"></label>
         ${currentPassword}
-        <label class="field"><span class="field__label">New password</span><input class="input" type="password" name="password" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
-        <label class="field"><span class="field__label">Confirm password</span><input class="input" type="password" name="password_confirm" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
-        <button class="btn btn--ghost btn--sm btn--auto" type="submit">Add password</button>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("New password"))}</span><input class="input" type="password" name="password" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Confirm password"))}</span><input class="input" type="password" name="password_confirm" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
+        <button class="btn btn--ghost btn--sm btn--auto" type="submit">${escapeHtml(i18n.t("Add password"))}</button>
       </form>
       <p class="inline-status" data-passkey-status role="status" hidden></p>
     </div>
@@ -205,34 +200,38 @@ function renderLoginMethods(data: DashboardData): string {
 }
 
 function renderSessions(data: DashboardData): string {
+  const { i18n } = data
   const rows = data.sessions
     .map((session) => {
-      const current = session.current ? ' <span class="dash-item__current">This device</span>' : ""
+      const current = session.current
+        ? ` <span class="dash-item__current">${escapeHtml(i18n.t("This device"))}</span>`
+        : ""
       const action = session.current
         ? ""
-        : `<form method="post" action="/account/sessions/${escapeHtml(session.id)}/revoke">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">Sign out</button></form>`
-      return `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(AUTH_METHOD_LABELS[session.authMethod])}${current}</div><div class="dash-item__meta">Started <span class="mono">${formatDate(session.createdAt)}</span> · Last active <span class="mono">${formatDate(session.lastSeenAt)}</span> · Expires <span class="mono">${formatDate(session.expiresAt)}</span></div></div><div class="dash-item__actions">${action}</div></li>`
+        : `<form method="post" action="/account/sessions/${escapeHtml(session.id)}/revoke">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Sign out"))}</button></form>`
+      return `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(i18n.t(AUTH_METHOD_LABELS[session.authMethod]))}${current}</div><div class="dash-item__meta">${escapeHtml(i18n.t("Started"))} <span class="mono">${i18n.formatDate(session.createdAt)}</span> · ${escapeHtml(i18n.t("Last active"))} <span class="mono">${i18n.formatDate(session.lastSeenAt)}</span> · ${escapeHtml(i18n.t("Expires"))} <span class="mono">${i18n.formatDate(session.expiresAt)}</span></div></div><div class="dash-item__actions">${action}</div></li>`
     })
     .join("\n")
   const others = data.sessions.filter((session) => !session.current).length
-  return `<section class="dash-panel" id="sessions"><div class="dash-panel__head"><div><h2 class="dash-panel__title">Active sessions</h2><p class="dash-panel__desc">Devices and browsers currently signed in to your account.</p></div></div><ul class="dash-list">${rows}</ul>${others === 0 ? "" : `<div class="dash-panel__foot dash-panel__foot--end"><form method="post" action="/account/sessions/revoke-others">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">Sign out all other sessions</button></form></div>`}</section>`
+  return `<section class="dash-panel" id="sessions"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Active sessions"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Devices and browsers currently signed in to your account."))}</p></div></div><ul class="dash-list">${rows}</ul>${others === 0 ? "" : `<div class="dash-panel__foot dash-panel__foot--end"><form method="post" action="/account/sessions/revoke-others">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Sign out all other sessions"))}</button></form></div>`}</section>`
 }
 
 function renderApps(data: DashboardData): string {
+  const { i18n } = data
   const rows = data.apps.map(
     (app) =>
-      `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(app.name)}</div><div class="dash-item__meta"><span class="dash-item__icon">${icons.key}</span><span class="mono">${app.scopes.map(escapeHtml).join(", ")}</span></div><div class="dash-item__meta">Resources: <span class="mono">${app.resources.map(escapeHtml).join(", ")}</span></div></div><div class="dash-item__actions"><form method="post" action="/account/apps/${encodeURIComponent(app.clientId)}/revoke">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">Revoke all access</button></form></div></li>`,
+      `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(app.name)}</div><div class="dash-item__meta"><span class="dash-item__icon">${icons.key}</span><span class="mono">${app.scopes.map(escapeHtml).join(", ")}</span></div><div class="dash-item__meta">${escapeHtml(i18n.t("Resources:"))} <span class="mono">${app.resources.map(escapeHtml).join(", ")}</span></div></div><div class="dash-item__actions"><form method="post" action="/account/apps/${encodeURIComponent(app.clientId)}/revoke">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Revoke all access"))}</button></form></div></li>`,
   )
   const devices = data.devices.map(
     (device) =>
-      `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(device.clientName)}</div><div class="dash-item__meta"><span class="mono">${escapeHtml(device.resource)}</span> · Last used ${formatDate(device.lastRotatedAt)} · Expires ${formatDate(device.expiresAt)}</div></div><div class="dash-item__actions"><form method="post" action="/account/devices/${encodeURIComponent(device.familyId)}/revoke">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">Revoke device</button></form></div></li>`,
+      `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(device.clientName)}</div><div class="dash-item__meta"><span class="mono">${escapeHtml(device.resource)}</span> · ${escapeHtml(i18n.t("Last used"))} ${i18n.formatDate(device.lastRotatedAt)} · ${escapeHtml(i18n.t("Expires"))} ${i18n.formatDate(device.expiresAt)}</div></div><div class="dash-item__actions"><form method="post" action="/account/devices/${encodeURIComponent(device.familyId)}/revoke">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Revoke device"))}</button></form></div></li>`,
   )
-  return `<section class="dash-panel" id="apps"><div class="dash-panel__head"><div><h2 class="dash-panel__title">Authorized apps</h2><p class="dash-panel__desc">Applications you have granted access to your account.</p></div></div><ul class="dash-list">${rows.length === 0 ? '<li class="dash-list__item--empty">No applications currently have access.</li>' : rows.join("\n")}</ul></section><section class="dash-panel" id="authorized-devices"><div class="dash-panel__head"><div><h2 class="dash-panel__title">Authorized CLI and devices</h2><p class="dash-panel__desc">Refresh access issued independently to a device.</p></div></div><ul class="dash-list">${devices.length === 0 ? '<li class="dash-list__item--empty">No independently authorized device sessions.</li>' : devices.join("\n")}</ul></section>`
+  return `<section class="dash-panel" id="apps"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Authorized apps"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Applications you have granted access to your account."))}</p></div></div><ul class="dash-list">${rows.length === 0 ? `<li class="dash-list__item--empty">${escapeHtml(i18n.t("No applications currently have access."))}</li>` : rows.join("\n")}</ul></section><section class="dash-panel" id="authorized-devices"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Authorized CLI and devices"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Refresh access issued independently to a device."))}</p></div></div><ul class="dash-list">${devices.length === 0 ? `<li class="dash-list__item--empty">${escapeHtml(i18n.t("No independently authorized device sessions."))}</li>` : devices.join("\n")}</ul></section>`
 }
 
-function renderAdmin(isAdmin: boolean): string {
-  if (!isAdmin) return ""
-  return `<section class="dash-panel" id="admin"><div class="dash-panel__head"><div><h2 class="dash-panel__title">Administration</h2><p class="dash-panel__desc">Configure applications, users, resources, devices, and audit activity.</p></div><a href="/console" class="btn btn--primary btn--sm">Open admin console</a></div></section>`
+function renderAdmin(data: DashboardData): string {
+  if (!data.isAdmin) return ""
+  return `<section class="dash-panel" id="admin"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(data.i18n.t("Administration"))}</h2><p class="dash-panel__desc">${escapeHtml(data.i18n.t("Configure applications, users, resources, devices, and audit activity."))}</p></div><a href="/console" class="btn btn--primary btn--sm">${escapeHtml(data.i18n.t("Open admin console"))}</a></div></section>`
 }
 
 function renderSection(data: DashboardData, section: DashboardSection): string {
@@ -246,7 +245,7 @@ function renderSection(data: DashboardData, section: DashboardSection): string {
     case "apps":
       return renderApps(data)
     case "admin":
-      return renderAdmin(data.isAdmin)
+      return renderAdmin(data)
   }
 }
 
@@ -288,27 +287,31 @@ const SUCCESS_NOTICES = new Set([
 ])
 
 export function renderDashboard(data: DashboardData, section: DashboardSection): string {
+  const { i18n } = data
   const displayName = data.user.name ?? data.user.alias
-  const heading = NAV_ITEMS.find((item) => item.section === section)?.label ?? "Your account"
+  const heading = i18n.t(
+    NAV_ITEMS.find((item) => item.section === section)?.label ?? "Your account",
+  )
   const avatar =
     data.user.picture === null
       ? `<div class="avatar avatar--fallback" aria-hidden="true">${escapeHtml(initialsOf(displayName))}</div>`
       : `<img class="avatar" src="${escapeHtml(data.user.picture)}" alt="" referrerpolicy="no-referrer">`
   const tabs = NAV_ITEMS.filter((item) => item.section !== "admin" || data.isAdmin).map((item) => ({
-    label: item.label,
+    label: i18n.t(item.label),
     href: `/?section=${item.section}`,
     active: item.section === section,
   }))
-  const barRight = `<div class="shell-user">${avatar}<span class="shell-user__name">${escapeHtml(displayName)}</span></div><form method="post" action="/logout">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">Sign out</button></form>`
+  const barRight = `<div class="shell-user">${avatar}<span class="shell-user__name">${escapeHtml(displayName)}</span></div><form method="post" action="/logout">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Sign out"))}</button></form>`
   const notice = data.notice === undefined ? undefined : NOTICES[data.notice]
   const success = data.notice !== undefined && SUCCESS_NOTICES.has(data.notice)
   const noticeHtml =
     notice === undefined
       ? ""
-      : `<div class="dash-notice${success ? "" : " dash-notice--error"}" role="${success ? "status" : "alert"}">${escapeHtml(notice)}</div>`
+      : `<div class="dash-notice${success ? "" : " dash-notice--error"}" role="${success ? "status" : "alert"}">${escapeHtml(i18n.t(notice))}</div>`
 
   return appShell({
-    title: "Your account — KeyForge",
+    i18n,
+    title: i18n.t("Your account — KeyForge"),
     heading,
     barRight,
     tabs,

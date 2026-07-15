@@ -39,7 +39,7 @@ This single command:
    `http://localhost:8787` so discovery/JWKS/tokens all point at localhost);
 3. starts this demo app on `:8788`;
 4. drives the **entire** flow over HTTP — `/login` → authorize → sign in as the
-   local demo-only **`demo-admin` / `admin`** identity → approve consent → callback with the code →
+   local demo-only **`demo-admin` / `demo-admin-2026`** account → approve consent → callback with the code →
    token exchange → **id_token verified against the JWKS** — and asserts the user
    is authenticated;
 5. tears both servers down.

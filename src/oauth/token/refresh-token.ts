@@ -171,7 +171,6 @@ async function issueRotatedTokens(
     clientId: client.clientId,
     resource: outcome.resource,
     scope: outcome.scope,
-    userType: user.userType,
   })
   const response: TokenResponse = {
     access_token: accessToken.token,

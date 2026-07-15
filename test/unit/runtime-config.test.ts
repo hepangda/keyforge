@@ -9,7 +9,6 @@ function configEnv(overrides: Record<string, string> = {}): Env {
     AUDIT_D1_RETENTION_DAYS: "90",
     MAINTENANCE_BATCH_SIZE: "100",
     MAINTENANCE_LEASE_SECONDS: "900",
-    ALLOW_SELF_SIGNUP: "false",
     ...overrides,
   } as unknown as Env
 }
@@ -23,7 +22,6 @@ describe("runtime maintenance configuration", () => {
         AUDIT_D1_RETENTION_DAYS: "365",
         MAINTENANCE_BATCH_SIZE: "25",
         MAINTENANCE_LEASE_SECONDS: "120",
-        ALLOW_SELF_SIGNUP: "true",
       }),
     )
 
@@ -33,7 +31,6 @@ describe("runtime maintenance configuration", () => {
       auditD1RetentionDays: 365,
       maintenanceBatchSize: 25,
       maintenanceLeaseSeconds: 120,
-      allowSelfSignup: true,
     })
   })
 
@@ -65,7 +62,6 @@ describe("runtime maintenance configuration", () => {
       auditD1RetentionDays: 90,
       maintenanceBatchSize: 100,
       maintenanceLeaseSeconds: 900,
-      allowSelfSignup: false,
     })
   })
 
@@ -79,15 +75,6 @@ describe("runtime maintenance configuration", () => {
         }),
       ),
     ).toThrow(/MAINTENANCE_BATCH_SIZE/)
-
-    expect(() =>
-      getRuntimeConfig(
-        configEnv({
-          ENVIRONMENT: "staging",
-          ALLOW_SELF_SIGNUP: "sometimes",
-        }),
-      ),
-    ).toThrow(/ALLOW_SELF_SIGNUP/)
 
     expect(() =>
       getRuntimeConfig(

@@ -35,7 +35,6 @@ beforeEach(async () => {
   const adminUser = await createUser(env, {
     email: "admin@pangda.app",
     name: "Admin",
-    userType: "internal",
   })
   adminUserId = adminUser.id
   await env.DB.prepare(
@@ -48,7 +47,6 @@ beforeEach(async () => {
   const regularUser = await createUser(env, {
     email: "user@pangda.app",
     name: "User",
-    userType: "external",
   })
   regularUserId = regularUser.id
   const regularSession = await createSession(env, {
@@ -97,7 +95,10 @@ describe("admin users", () => {
     expect((await list.json<{ users: unknown[] }>()).users.length).toBeGreaterThanOrEqual(2)
 
     const detail = await req("GET", `/admin/users/${regularUserId}`)
-    expect((await detail.json<{ email: string }>()).email).toBe("user@pangda.app")
+    const detailBody = await detail.json<Record<string, unknown>>()
+    expect(detailBody["email"]).toBe("user@pangda.app")
+    expect(detailBody["alias"]).toEqual(expect.any(String))
+    expect(detailBody).not.toHaveProperty("user_type")
 
     const refresh = await issueRefreshToken(env, {
       userId: regularUserId,
@@ -131,8 +132,8 @@ describe("admin users", () => {
     expect(employees).not.toBeNull()
     const created = await req("POST", "/admin/users", {
       email: "new.user@pangda.app",
+      alias: "newuser",
       name: "New User",
-      user_type: "internal",
       email_verified: true,
       password: "a long initial password",
       group_ids: [employees?.id],
@@ -152,7 +153,7 @@ describe("admin users", () => {
     await env.KV.delete("test:email:invitee@pangda.app")
     const created = await req("POST", "/admin/users", {
       email: "invitee@pangda.app",
-      user_type: "external",
+      alias: "invitee",
       email_verified: false,
       group_ids: [],
     })
@@ -168,6 +169,46 @@ describe("admin users", () => {
     expect(delivery?.subject).toContain("invited")
     expect(delivery?.text).toContain("/password/reset?token=")
     expect(await getUserByEmail(env, "invitee@pangda.app")).not.toBeNull()
+  })
+
+  it("manages password login methods and generates a magic link on demand", async () => {
+    const password = await req("POST", `/admin/users/${regularUserId}/passwords`, {
+      password: "sixsix",
+      name: "Temporary access",
+    })
+    expect(password.status).toBe(201)
+
+    const methods = await req("GET", `/admin/users/${regularUserId}/login-methods`)
+    expect(methods.status).toBe(200)
+    expect((await methods.json<{ passwords: Array<{ name: string }> }>()).passwords).toContainEqual(
+      expect.objectContaining({ name: "Temporary access" }),
+    )
+
+    const generated = await req("POST", `/admin/users/${regularUserId}/magic-link`)
+    expect(generated.status).toBe(200)
+    const body = await generated.json<{ url: string; expires_in: number }>()
+    expect(body.expires_in).toBe(15 * 60)
+    expect(body.url).toContain("/login/magic/callback?token=")
+    const confirmation = await SELF.fetch(body.url)
+    expect(confirmation.status).toBe(200)
+    expect(await confirmation.text()).toContain("Confirm sign in")
+  }, 10_000)
+
+  it("rejects invalid and duplicate aliases", async () => {
+    const invalid = await req("PATCH", `/admin/users/${regularUserId}`, {
+      alias: "not-valid!",
+    })
+    expect(invalid.status).toBe(400)
+
+    const other = await createUser(env, {
+      email: "alias-owner@pangda.app",
+      alias: "AliasOwner",
+    })
+    const duplicate = await req("PATCH", `/admin/users/${regularUserId}`, {
+      alias: other.alias.toLowerCase(),
+    })
+    expect(duplicate.status).toBe(409)
+    expect(await duplicate.json()).toEqual({ error: "duplicate_alias" })
   })
 
   it("creates groups and rejects unknown group assignments", async () => {
@@ -205,7 +246,6 @@ describe("admin users", () => {
     const second = await createUser(env, {
       email: "second.admin@pangda.app",
       name: "Second Admin",
-      userType: "internal",
     })
     await env.DB.prepare(
       "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",
@@ -274,7 +314,6 @@ describe("admin users", () => {
     const second = await createUser(env, {
       email: "group.admin@pangda.app",
       name: "Group Admin",
-      userType: "internal",
     })
     await env.DB.prepare(
       "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",

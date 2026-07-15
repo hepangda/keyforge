@@ -1,4 +1,4 @@
-import type { ClientKind, ClientType, OAuthClient } from "../../types/domain"
+import type { ClientKind, ClientType, OAuthClient, OAuthResource } from "../../types/domain"
 import { escapeHtml } from "../layout"
 import {
   csrfField,
@@ -31,11 +31,11 @@ export function renderClientsList(chrome: ConsoleChrome, clients: readonly OAuth
     `<div class="actions"><a class="btn btn--ghost btn--tiny" href="/console/clients/${escapeHtml(client.clientId)}">Edit</a></div>`,
   ])
   const content = `<div class="toolbar">
-    <div><h2 class="panel__title">OAuth clients</h2><p class="panel__desc">Applications, devices, and services that use this server.</p></div>
-    <a class="btn btn--primary btn--sm btn--auto" href="/console/clients/new">New client</a>
+    <div><h2 class="panel__title">Applications</h2><p class="panel__desc">Interactive apps, devices, and services that trust this authorization server.</p></div>
+    <a class="btn btn--primary btn--sm btn--auto" href="/console/clients/new">Create application</a>
   </div>
   <section class="panel">${dataTable(["Client ID", "Name", "Kind", "Status", ""], rows, "No clients yet.")}</section>`
-  return consoleShell("Clients — Admin console", chrome, content)
+  return consoleShell("Applications — Admin console", chrome, content)
 }
 
 const GRANT_HINT =
@@ -59,7 +59,15 @@ export type ClientFormFeedback = {
   readonly error: string
 }
 
-function initialClientFormValues(client: OAuthClient | null): ClientFormValues {
+function initialClientFormValues(
+  client: OAuthClient | null,
+  resources: readonly OAuthResource[] = [],
+): ClientFormValues {
+  const defaultScopes = ["openid", "profile", "email", "offline_access"]
+  const suggestedResource = resources.find(
+    (resource) =>
+      resource.enabled && defaultScopes.every((scope) => resource.allowedScopes.includes(scope)),
+  )
   return {
     clientId: client?.clientId ?? "",
     name: client?.name ?? "",
@@ -67,11 +75,109 @@ function initialClientFormValues(client: OAuthClient | null): ClientFormValues {
     clientKind: client?.clientKind ?? "application",
     redirectUris: (client?.redirectUris ?? []).join("\n"),
     postLogoutRedirectUris: (client?.postLogoutRedirectUris ?? []).join("\n"),
-    allowedScopes: (client?.allowedScopes ?? []).join("\n"),
-    allowedGrantTypes: (client?.allowedGrantTypes ?? []).join("\n"),
-    allowedResources: (client?.allowedResources ?? []).join("\n"),
-    defaultResource: client?.defaultResource ?? "",
+    allowedScopes: (client?.allowedScopes ?? defaultScopes).join("\n"),
+    allowedGrantTypes: (client?.allowedGrantTypes ?? ["authorization_code", "refresh_token"]).join(
+      "\n",
+    ),
+    allowedResources: (
+      client?.allowedResources ??
+      (suggestedResource === undefined ? [] : [suggestedResource.resourceUri])
+    ).join("\n"),
+    defaultResource: client?.defaultResource ?? suggestedResource?.resourceUri ?? "",
   }
+}
+
+function choiceCard(
+  name: string,
+  value: string,
+  selected: string,
+  title: string,
+  description: string,
+): string {
+  return `<label class="choice-card"><input type="radio" name="${name}" value="${value}"${value === selected ? " checked" : ""} required><b>${escapeHtml(title)}</b><small>${escapeHtml(description)}</small></label>`
+}
+
+function resourceChoices(resources: readonly OAuthResource[], selected: string): string {
+  const selectedResources = new Set(
+    selected
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+  )
+  const enabled = resources.filter((resource) => resource.enabled)
+  if (enabled.length === 0) {
+    return '<div class="wizard-empty">No enabled APIs are available. <a href="/console/resources/new">Create an API first</a>.</div>'
+  }
+  return `<div class="group-choice-grid resource-choice-grid">${enabled
+    .map(
+      (resource) => `<label class="group-choice resource-choice">
+        <input type="checkbox" name="allowed_resources" value="${escapeHtml(resource.resourceUri)}" data-resource-scopes="${escapeHtml(resource.allowedScopes.join(" "))}"${selectedResources.has(resource.resourceUri) ? " checked" : ""}>
+        <span><b>${escapeHtml(resource.name)}</b><small class="mono">${escapeHtml(resource.resourceUri)}</small><small>${escapeHtml(resource.allowedScopes.join(", "))}</small></span>
+      </label>`,
+    )
+    .join("")}</div>`
+}
+
+function renderNewClientWizard(
+  chrome: ConsoleChrome,
+  csrfToken: string,
+  resources: readonly OAuthResource[],
+  feedback?: ClientFormFeedback,
+): string {
+  const values = feedback?.values ?? initialClientFormValues(null, resources)
+  const errorHtml =
+    feedback === undefined
+      ? ""
+      : `<div class="flash flash--warn" role="alert">${escapeHtml(feedback.error)}</div>`
+  const stepNames = ["Application", "Login flow", "Access", "Review"]
+  const markers = stepNames
+    .map(
+      (name, index) =>
+        `<li class="wizard-step${index === 0 ? " wizard-step--active" : ""}" data-wizard-marker="${index}"><span>${index + 1}</span><strong>${escapeHtml(name)}</strong></li>`,
+    )
+    .join("")
+  const reviewRow = (labelText: string, field: string, value: string) =>
+    `<div class="wizard-review__row"><dt>${escapeHtml(labelText)}</dt><dd data-review-for="${field}">${escapeHtml(value || "—")}</dd></div>`
+  const content = `<div class="toolbar"><div><h2 class="panel__title">Create an application</h2><p class="panel__desc">A guided setup for the OAuth flow, redirect URLs, and API access.</p></div><a class="btn btn--ghost btn--sm" href="/console/clients">Cancel</a></div>
+  <section class="panel">
+    ${errorHtml === "" ? "" : `<div class="panel__body">${errorHtml}</div>`}
+    <form method="post" action="/console/clients" data-console-wizard>
+      ${csrfField(csrfToken)}
+      <div class="wizard-shell">
+        <aside class="wizard-rail"><h3>Application setup</h3><ol class="wizard-steps">${markers}</ol></aside>
+        <div class="wizard-main">
+          <fieldset class="wizard-panel wizard-panel--active" data-wizard-step="0"><legend>Tell us what you're building</legend><p class="wizard-panel__lead">These choices determine the safest OAuth flow. You can tune advanced settings after creation.</p><div class="wizard-grid">
+            ${textField("Application name", "name", values.name, { required: true, placeholder: "Customer portal" })}
+            ${textField("Client ID", "client_id", values.clientId, { required: true, placeholder: "customer_portal" })}
+            <fieldset class="field-cluster field--wide"><legend>Application kind</legend><div class="choice-cards">
+              ${choiceCard("client_kind", "application", values.clientKind, "Web application", "Interactive browser sign-in with authorization code and PKCE.")}
+              ${choiceCard("client_kind", "device", values.clientKind, "Device or CLI", "Input-constrained devices using the OAuth device authorization grant.")}
+              ${choiceCard("client_kind", "service", values.clientKind, "Machine to machine", "A backend service authenticating without a person.")}
+            </div></fieldset>
+            <fieldset class="field-cluster field--wide"><legend>Client authentication</legend><div class="choice-cards choice-cards--two">
+              ${choiceCard("type", "public", values.type, "Public", "No stored secret. Best for browser, mobile, desktop, and CLI clients.")}
+              ${choiceCard("type", "confidential", values.type, "Confidential", "Receives a one-time client secret for a trusted backend.")}
+            </div></fieldset>
+          </div></fieldset>
+          <fieldset class="wizard-panel" data-wizard-step="1"><legend>Configure the login flow</legend><p class="wizard-panel__lead">Callback URLs must match exactly. Local loopback HTTP is allowed for development.</p><div class="wizard-grid">
+            <div class="field--wide">${textAreaField("Redirect URIs", "redirect_uris", values.redirectUris, "One exact callback URL per line.", { required: values.clientKind === "application" })}</div>
+            <div class="field--wide">${textAreaField("Post-logout redirect URIs", "post_logout_redirect_uris", values.postLogoutRedirectUris, "Where users may return after RP-Initiated Logout.")}</div>
+          </div></fieldset>
+          <fieldset class="wizard-panel" data-wizard-step="2"><legend>Choose access</legend><p class="wizard-panel__lead">Grant only the scopes and API audiences this application needs.</p><div class="wizard-grid">
+            <div>${textAreaField("Allowed scopes", "allowed_scopes", values.allowedScopes, "One scope per line, such as openid, profile, or api.read.", { required: true })}</div>
+            <div>${textAreaField("Allowed grant types", "allowed_grant_types", values.allowedGrantTypes, GRANT_HINT, { required: true })}</div>
+            <fieldset class="field-cluster field--wide"><legend>APIs</legend>${resourceChoices(resources, values.allowedResources)}<p class="form-hint">Choose at least one enabled API. The wizard suggests one whose scopes match the selected application kind.</p></fieldset>
+            <div class="field--wide">${textField("Default resource", "default_resource", values.defaultResource, { placeholder: "https://api.example.com" })}</div>
+          </div></fieldset>
+          <fieldset class="wizard-panel" data-wizard-step="3"><legend>Review and create</legend><p class="wizard-panel__lead">Check the important values before registering the application. Authorization-code clients always use S256 PKCE.</p><dl class="wizard-review">
+            ${reviewRow("Name", "name", values.name)}${reviewRow("Client ID", "client_id", values.clientId)}${reviewRow("Kind", "client_kind", label(values.clientKind))}${reviewRow("Authentication", "type", label(values.type))}${reviewRow("Redirect URIs", "redirect_uris", values.redirectUris)}${reviewRow("Scopes", "allowed_scopes", values.allowedScopes)}${reviewRow("Grant types", "allowed_grant_types", values.allowedGrantTypes)}${reviewRow("Resources", "allowed_resources", values.allowedResources)}
+          </dl></fieldset>
+          <div class="wizard-actions"><button class="btn btn--ghost btn--auto" type="button" data-wizard-back hidden>Back</button><div class="wizard-actions__right"><button class="btn btn--primary btn--auto" type="button" data-wizard-next>Continue</button><button class="btn btn--primary btn--auto" type="submit" data-wizard-submit hidden>Create application</button></div></div>
+        </div>
+      </div>
+    </form>
+  </section>`
+  return consoleShell("New application — Admin console", chrome, content)
 }
 
 export function renderClientForm(
@@ -79,7 +185,11 @@ export function renderClientForm(
   client: OAuthClient | null,
   csrfToken: string,
   feedback?: ClientFormFeedback,
+  resources: readonly OAuthResource[] = [],
 ): string {
+  if (client === null) {
+    return renderNewClientWizard(chrome, csrfToken, resources, feedback)
+  }
   const isNew = client === null
   const values = feedback?.values ?? initialClientFormValues(client)
   const action = isNew ? "/console/clients" : `/console/clients/${escapeHtml(client.clientId)}`
@@ -112,7 +222,7 @@ export function renderClientForm(
       : `<div class="flash flash--warn" role="alert">${escapeHtml(feedback.error)}</div>`
   const content = `<div class="toolbar">
     <div><h2 class="panel__title">${isNew ? "New client" : escapeHtml(client.name)}</h2><p class="panel__desc">${isNew ? "Register an OAuth client." : "Edit client configuration."}</p></div>
-    <a class="btn btn--ghost btn--sm" href="/console/clients">Back to clients</a>
+    <a class="btn btn--ghost btn--sm" href="/console/clients">Back to applications</a>
   </div>
   <section class="panel"><div class="panel__body">
     ${errorHtml}

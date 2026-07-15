@@ -62,7 +62,6 @@ async function seedRefreshFamily() {
   const user = await createUser(env, {
     email: "refresh-policy@pangda.app",
     name: "Refresh Policy",
-    userType: "internal",
     emailVerified: true,
   })
   const session = await createSession(env, {

@@ -24,13 +24,12 @@ export const ONE_TIME_TOKEN_PURPOSES = [
   "email_change",
   "password_reset",
   "account_invitation",
-  "social_state",
 ] as const
 export type OneTimeTokenPurpose = (typeof ONE_TIME_TOKEN_PURPOSES)[number]
 
 /** Data bound to a magic-link / email-verification / recovery capability. */
 export type AccountOneTimeTokenPayload = {
-  readonly purpose: Exclude<OneTimeTokenPurpose, "social_state">
+  readonly purpose: OneTimeTokenPurpose
   readonly userId: string
   readonly email: string
   readonly redirectTo: string | null
@@ -40,18 +39,7 @@ export type AccountOneTimeTokenPayload = {
   readonly reauthenticate?: boolean
 }
 
-/** Server-side state for one social OAuth ceremony. The browser holds only its opaque key. */
-export type SocialStatePayload = {
-  readonly purpose: "social_state"
-  readonly provider: "github" | "google"
-  readonly verifier: string
-  readonly returnTo: string
-  readonly linkUserId: string | null
-  readonly linkSessionId: string | null
-  readonly reauthenticate: boolean
-}
-
-export type OneTimeTokenPayload = AccountOneTimeTokenPayload | SocialStatePayload
+export type OneTimeTokenPayload = AccountOneTimeTokenPayload
 
 /** Data bound to a WebAuthn challenge (Phase 11). */
 export type WebAuthnChallengePayload = {

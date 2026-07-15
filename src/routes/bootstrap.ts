@@ -1,6 +1,13 @@
 import { Hono } from "hono"
 import { z } from "zod"
-import { countUsersInGroup, getGroupByName, getUserByEmail } from "../db/queries/users"
+import {
+  ALIAS_PATTERN,
+  countUsersInGroup,
+  getGroupByName,
+  getUserByAlias,
+  getUserByEmail,
+  MAX_ALIAS_LENGTH,
+} from "../db/queries/users"
 import { recordAudit } from "../security/audit"
 import { hashPassword, timingSafeEqualString } from "../security/crypto"
 import { checkRateLimit } from "../security/rate-limit"
@@ -14,6 +21,7 @@ export const bootstrap = new Hono<AppBindings>()
 
 const bootstrapSchema = z.object({
   email: z.email(),
+  alias: z.string().min(1).max(MAX_ALIAS_LENGTH).regex(ALIAS_PATTERN).optional(),
   name: z.string().min(1).max(120),
   password: z.string().min(16).max(128),
 })
@@ -54,20 +62,32 @@ bootstrap.post("/setup/bootstrap", async (c) => {
     return c.json({ error: "bootstrap_unavailable" }, 503)
   }
   const userId = generateId(ID_PREFIX.user)
+  const generatedAlias =
+    email
+      .split("@", 1)[0]
+      ?.replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 48) || "admin"
+  const alias = parsed.data.alias ?? `${generatedAlias}${userId.slice(-8)}`
+  if ((await getUserByAlias(c.env, alias)) !== null) {
+    return c.json({ error: "alias_in_use" }, 409)
+  }
   const now = nowSeconds()
   const passwordHash = await hashPassword(parsed.data.password)
+  const passwordId = generateId(ID_PREFIX.password)
   const statements = [
     c.env.DB.prepare(
       "INSERT INTO bootstrap_state (id, completed_at, user_id) VALUES (1, ?, ?)",
     ).bind(now, userId),
     c.env.DB.prepare(
       `INSERT INTO users
-         (id, email, email_verified, name, user_type, disabled, created_at, updated_at)
-       VALUES (?, ?, 0, ?, 'internal', 0, ?, ?)`,
-    ).bind(userId, email, parsed.data.name, now, now),
+         (id, email, alias, email_verified, name, disabled, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, 0, ?, ?)`,
+    ).bind(userId, email, alias, parsed.data.name, now, now),
     c.env.DB.prepare(
-      "INSERT INTO password_credentials (user_id, password_hash, updated_at) VALUES (?, ?, ?)",
-    ).bind(userId, passwordHash, now),
+      `INSERT INTO password_credentials
+         (id, user_id, password_hash, name, admin_eligible, created_at, updated_at)
+       VALUES (?, ?, ?, 'Primary password', 1, ?, ?)`,
+    ).bind(passwordId, userId, passwordHash, now, now),
     c.env.DB.prepare(
       "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, ?, ?)",
     ).bind(userId, admins.id, now),
@@ -95,5 +115,5 @@ bootstrap.post("/setup/bootstrap", async (c) => {
     success: true,
     detail: "initial administrator bootstrapped",
   })
-  return c.json({ user_id: userId, email }, 201)
+  return c.json({ user_id: userId, email, alias }, 201)
 })

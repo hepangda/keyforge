@@ -20,10 +20,6 @@ export const asSessionId = (value: string): SessionId => value as SessionId
 export const asResourceUri = (value: string): ResourceUri => value as ResourceUri
 export const asGroupId = (value: string): GroupId => value as GroupId
 
-/** Internal (employee) vs external (customer) principals. */
-export const USER_TYPES = ["internal", "external"] as const
-export type UserType = (typeof USER_TYPES)[number]
-
 /** OAuth client confidentiality. */
 export const CLIENT_TYPES = ["public", "confidential"] as const
 export type ClientType = (typeof CLIENT_TYPES)[number]
@@ -36,7 +32,7 @@ export type ClientKind = (typeof CLIENT_KINDS)[number]
 export const DEVICE_STATUSES = ["pending", "approved", "denied", "expired", "consumed"] as const
 export type DeviceStatus = (typeof DEVICE_STATUSES)[number]
 
-export const AUTH_METHODS = ["password", "magic_link", "passkey", "github", "google"] as const
+export const AUTH_METHODS = ["password", "magic_link", "passkey"] as const
 export type AuthMethod = (typeof AUTH_METHODS)[number]
 
 export type SessionRecord = {
@@ -54,10 +50,10 @@ export type SessionRecord = {
 export type User = {
   readonly id: UserId
   readonly email: string
+  readonly alias: string
   readonly emailVerified: boolean
   readonly name: string | null
   readonly picture: string | null
-  readonly userType: UserType
   readonly disabled: boolean
   readonly createdAt: number
 }

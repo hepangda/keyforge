@@ -31,7 +31,6 @@ beforeEach(async () => {
   const user = await createUser(env, {
     email: EMAIL,
     name: "E2E User",
-    userType: "internal",
     emailVerified: true,
   })
   userId = user.id

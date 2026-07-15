@@ -36,7 +36,11 @@ async function login(): Promise<string> {
       "content-type": "application/x-www-form-urlencoded",
       cookie: `__Host-keyforge_csrf=${csrf}`,
     },
-    body: new URLSearchParams({ email: "admin", password: "admin", csrf_token: csrf }).toString(),
+    body: new URLSearchParams({
+      email: "admin",
+      password: "test-admin-password-2026",
+      csrf_token: csrf,
+    }).toString(),
     redirect: "manual",
   })
   return cookieValue(res.headers.getSetCookie(), "__Host-keyforge_session")
@@ -94,7 +98,7 @@ describe("account dashboard", () => {
     expect(res.headers.get("location")).toBe("/login")
   })
 
-  it("renders the dashboard with identity and admin nav for an admin", async () => {
+  it("renders the dashboard with username and admin nav for an admin", async () => {
     const token = await login()
     const res = await SELF.fetch(`${ISSUER}/`, {
       headers: { cookie: `__Host-keyforge_session=${token}` },
@@ -106,6 +110,21 @@ describe("account dashboard", () => {
     expect(html).toContain("section=admin")
     expect(html).toContain('<main class="shell-main">')
     expect(html).toContain('<h1 class="sr-only">Profile</h1>')
+    expect(html).not.toContain("Connected accounts")
+    expect(html).not.toContain("Account type")
+  })
+
+  it("keeps passwords and passkeys together under Login methods", async () => {
+    const token = await login()
+    const res = await SELF.fetch(`${ISSUER}/?section=login-methods`, {
+      headers: { cookie: `__Host-keyforge_session=${token}` },
+    })
+    const html = await res.text()
+    expect(html).toContain("Login methods")
+    expect(html).toContain("Passwords and passkeys")
+    expect(html).toContain("Add passkey")
+    expect(html).toContain("Add a password")
+    expect(html).not.toContain("Connected accounts")
   })
 
   it("shows only the selected section on the right", async () => {
@@ -114,11 +133,11 @@ describe("account dashboard", () => {
     const sessions = await SELF.fetch(`${ISSUER}/?section=sessions`, { headers: { cookie } })
     const sessionsHtml = await sessions.text()
     expect(sessionsHtml).toContain("Devices and browsers currently signed in")
-    expect(sessionsHtml).not.toContain("Your personal information and account status")
+    expect(sessionsHtml).not.toContain("Your account identity and information")
 
     const profile = await SELF.fetch(`${ISSUER}/`, { headers: { cookie } })
     const profileHtml = await profile.text()
-    expect(profileHtml).toContain("Your personal information and account status")
+    expect(profileHtml).toContain("Your account identity and information")
     expect(profileHtml).not.toContain("Devices and browsers currently signed in")
   })
 

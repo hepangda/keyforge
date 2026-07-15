@@ -36,8 +36,8 @@ beforeEach(async () => {
     .run()
   const user = await createUser(env, {
     email: "alice@pangda.app",
+    alias: "alice",
     name: "Alice",
-    userType: "internal",
     emailVerified: true,
   })
   userId = user.id
@@ -142,7 +142,7 @@ describe("authorization_code + PKCE flow", () => {
     expect(id.sub).toBe(userId)
     expect(id["nonce"]).toBe("nonce-abc")
     expect(id["email"]).toBe("alice@pangda.app")
-    expect(id["user_type"]).toBe("internal")
+    expect(id["preferred_username"]).toBe("alice")
     expect(id["groups"]).toContain("employees")
 
     const { payload: at } = await jwtVerify(body.access_token, jwks, {

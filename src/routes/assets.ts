@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import type { AppBindings } from "../types/app"
 import {
   ACCOUNT_BROWSER_SCRIPT,
+  CONSOLE_BROWSER_SCRIPT,
   FORMS_BROWSER_SCRIPT,
   LOGIN_BROWSER_SCRIPT,
 } from "../views/browser-scripts"
@@ -20,3 +21,4 @@ function script(body: string): Response {
 assets.get("/assets/login.js", () => script(LOGIN_BROWSER_SCRIPT))
 assets.get("/assets/account.js", () => script(ACCOUNT_BROWSER_SCRIPT))
 assets.get("/assets/forms.js", () => script(FORMS_BROWSER_SCRIPT))
+assets.get("/assets/console.js", () => script(CONSOLE_BROWSER_SCRIPT))

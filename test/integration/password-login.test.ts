@@ -1,7 +1,17 @@
 import { env, SELF } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
-import { setUserPassword } from "../../src/auth/password"
-import { createUser } from "../../src/db/queries/users"
+import {
+  addUserPassword,
+  listPasswordCredentials,
+  setUserPassword,
+  verifyLoginPassword,
+} from "../../src/auth/password"
+import {
+  createUser,
+  getGroupByName,
+  getUserByEmail,
+  setUserGroups,
+} from "../../src/db/queries/users"
 import { requestCorrelationHash } from "../../src/security/request-meta"
 
 const ISSUER = "https://auth.pangda.app"
@@ -15,15 +25,18 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM users"),
   ])
   const accountHash = await requestCorrelationHash(env, "login-account", EMAIL)
+  const aliasHash = await requestCorrelationHash(env, "login-account", "alice")
   await Promise.all([
     env.RATE_LIMIT.getByName(`login:ip-account:unknown:${accountHash}`).reset(),
     env.RATE_LIMIT.getByName(`login:account:${accountHash}`).reset(),
+    env.RATE_LIMIT.getByName(`login:ip-account:unknown:${aliasHash}`).reset(),
+    env.RATE_LIMIT.getByName(`login:account:${aliasHash}`).reset(),
     env.RATE_LIMIT.getByName("login:ip:unknown").reset(),
   ])
   const user = await createUser(env, {
     email: EMAIL,
+    alias: "alice",
     name: "Alice",
-    userType: "internal",
     emailVerified: true,
   })
   await setUserPassword(env, user.id, PASSWORD)
@@ -72,6 +85,17 @@ describe("password login + session", () => {
     expect(res.headers.get("permissions-policy")).toContain("camera=()")
   })
 
+  it("does not expose the retired social login endpoints", async () => {
+    for (const path of [
+      "/login/github",
+      "/login/google",
+      "/login/github/callback",
+      "/login/google/callback",
+    ]) {
+      expect((await SELF.fetch(`${ISSUER}${path}`)).status).toBe(404)
+    }
+  })
+
   it("logs in with correct credentials and authenticates the session", async () => {
     const { token, cookieHeader } = await getCsrf()
     const res = await postLogin(
@@ -89,6 +113,46 @@ describe("password login + session", () => {
     expect(home.status).toBe(200)
     expect(await home.text()).toContain(EMAIL)
   })
+
+  it("accepts the alphanumeric username as the login identifier", async () => {
+    const { token, cookieHeader } = await getCsrf()
+    const res = await postLogin(
+      { email: "ALICE", password: PASSWORD, csrf_token: token, return_to: "/" },
+      cookieHeader,
+    )
+    expect(res.status).toBe(302)
+    expect(cookieValue(res.headers.getSetCookie(), "__Host-keyforge_session")).not.toBeNull()
+  })
+
+  it("supports a six-character password and multiple named passwords", async () => {
+    const user = await getUserByEmail(env, EMAIL)
+    expect(user).not.toBeNull()
+    if (user === null) return
+    await setUserPassword(env, user.id, "abc123", "Primary")
+    expect(await addUserPassword(env, user.id, "backup7", "Backup")).not.toBeNull()
+    expect((await listPasswordCredentials(env, user.id)).map((item) => item.name)).toEqual([
+      "Primary",
+      "Backup",
+    ])
+    expect(await verifyLoginPassword(env, user.id, "abc123")).toBe(true)
+    expect(await verifyLoginPassword(env, user.id, "backup7")).toBe(true)
+  }, 15_000)
+
+  it("does not allow an administrator to use a short password", async () => {
+    const user = await getUserByEmail(env, EMAIL)
+    const admins = await getGroupByName(env, "admins")
+    expect(user).not.toBeNull()
+    expect(admins).not.toBeNull()
+    if (user === null || admins === null) return
+    await setUserPassword(env, user.id, "abc123", "Short before promotion")
+    await setUserGroups(env, user.id, [admins.id])
+    expect(await verifyLoginPassword(env, user.id, "abc123")).toBe(false)
+    expect(await addUserPassword(env, user.id, "short7", "Rejected")).toBeNull()
+    expect(
+      await addUserPassword(env, user.id, "administrator-safe", "Admin password"),
+    ).not.toBeNull()
+    expect(await verifyLoginPassword(env, user.id, "administrator-safe")).toBe(true)
+  }, 15_000)
 
   it("rejects a wrong password with 401 and no session cookie", async () => {
     const { token, cookieHeader } = await getCsrf()

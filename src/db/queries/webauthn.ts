@@ -172,15 +172,7 @@ export async function deleteCredentialPreservingLoginMethod(
   env: Env,
   credentialId: string,
   userId: string,
-  configuredProviders: readonly string[],
 ): Promise<ProtectedCredentialDeleteResult> {
-  const providerClause =
-    configuredProviders.length === 0
-      ? "0"
-      : `EXISTS (
-          SELECT 1 FROM identities i
-          WHERE i.user_id = ? AND i.provider IN (${configuredProviders.map(() => "?").join(",")})
-        )`
   const result = await env.DB.prepare(
     `DELETE FROM webauthn_credentials
      WHERE id = ? AND user_id = ?
@@ -190,17 +182,9 @@ export async function deleteCredentialPreservingLoginMethod(
            SELECT 1 FROM webauthn_credentials w
            WHERE w.user_id = ? AND w.id != ?
          )
-         OR ${providerClause}
        )`,
   )
-    .bind(
-      credentialId,
-      userId,
-      userId,
-      userId,
-      credentialId,
-      ...(configuredProviders.length === 0 ? [] : [userId, ...configuredProviders]),
-    )
+    .bind(credentialId, userId, userId, userId, credentialId)
     .run()
   if (result.meta.changes === 1) return "deleted"
   const exists = await env.DB.prepare(

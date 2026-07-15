@@ -26,6 +26,46 @@ export function renderOverview(
   stats: ConsoleStats,
   recent: readonly AuditLogEntry[],
 ): string {
+  const setup = [
+    {
+      done: stats.clients > 0,
+      title: "Register an application",
+      description: "Choose an OAuth flow and configure callback URLs.",
+      href: "/console/clients/new",
+      action: "Create application",
+    },
+    {
+      done: stats.users > 1,
+      title: "Provision your first user",
+      description: "Create a username and choose password, invitation, and group access.",
+      href: "/console/users/new",
+      action: "Add user",
+    },
+    {
+      done: stats.resources > 0,
+      title: "Define an API",
+      description: "Register an audience and the scopes applications may request.",
+      href: "/console/resources/new",
+      action: "Create API",
+    },
+    {
+      done: recent.length > 0,
+      title: "Review security activity",
+      description: "Use the audit log to verify setup and sign-in events.",
+      href: "/console/audit",
+      action: "Open audit log",
+    },
+  ]
+  const completed = setup.filter((step) => step.done).length
+  const setupRows = setup
+    .map(
+      (step, index) => `<li class="setup-step${step.done ? " setup-step--done" : ""}">
+      <span class="setup-step__mark">${step.done ? "✓" : index + 1}</span>
+      <div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description)}</p></div>
+      <a class="btn btn--ghost btn--tiny" href="${step.href}">${step.done ? "Review" : escapeHtml(step.action)}</a>
+    </li>`,
+    )
+    .join("")
   const tiles = TILES.map(
     (tile) =>
       `<a class="stat" href="${tile.href}"><span class="stat__num">${stats[tile.key]}</span><span class="stat__label">${escapeHtml(tile.label)}</span></a>`,
@@ -41,7 +81,11 @@ export function renderOverview(
         : "—",
     entry.userId === null ? "—" : `<span class="mono">${escapeHtml(entry.userId)}</span>`,
   ])
-  const content = `<div class="stat-grid">${tiles}</div>
+  const content = `<section class="setup-card">
+    <div class="setup-card__intro"><h2>${completed === setup.length ? "Your workspace is ready" : "Get KeyForge ready"}</h2><p>${completed === setup.length ? "Core configuration is in place. Revisit any step when your integration changes." : "Follow these steps to move from a new tenant to a working sign-in flow."}</p><div class="setup-progress" role="progressbar" aria-label="Setup progress" aria-valuemin="0" aria-valuemax="${setup.length}" aria-valuenow="${completed}"><span style="width:${(completed / setup.length) * 100}%"></span></div><span class="setup-card__count">${completed} of ${setup.length} steps complete</span></div>
+    <ol class="setup-list">${setupRows}</ol>
+  </section>
+  <div class="stat-grid">${tiles}</div>
   <section class="panel">
     <div class="panel__head">
       <div><h2 class="panel__title">Recent activity</h2><p class="panel__desc">The latest security events across the server.</p></div>

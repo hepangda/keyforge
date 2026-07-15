@@ -35,8 +35,8 @@ beforeEach(async () => {
   ])
   const user = await createUser(env, {
     email: "bob@pangda.app",
+    alias: "bob",
     name: "Bob",
-    userType: "internal",
     emailVerified: true,
   })
   userId = user.id
@@ -122,10 +122,10 @@ describe("GET /oauth/userinfo", () => {
       headers: { authorization: `Bearer ${access_token}` },
     })
     expect(res.status).toBe(200)
-    const body = await res.json<{ sub: string; email: string; user_type: string }>()
+    const body = await res.json<{ sub: string; email: string; preferred_username: string }>()
     expect(body.sub).toBe(userId)
     expect(body.email).toBe("bob@pangda.app")
-    expect(body.user_type).toBe("internal")
+    expect(body.preferred_username).toBe("bob")
   })
 
   it("rejects a missing token with a 401 and WWW-Authenticate", async () => {
@@ -150,11 +150,12 @@ describe("GET /oauth/userinfo", () => {
     expect(res.headers.get("www-authenticate")).toContain("invalid_token")
   })
 
-  it("withholds groups and user_type when the groups scope was not granted", async () => {
+  it("withholds groups when the groups scope was not granted", async () => {
     const tokens = await obtainTokens("openid profile email api.read")
     expect(decodeJwt(tokens.access_token)["user_type"]).toBeUndefined()
     expect(decodeJwt(tokens.id_token)["groups"]).toBeUndefined()
     expect(decodeJwt(tokens.id_token)["user_type"]).toBeUndefined()
+    expect(decodeJwt(tokens.id_token)["preferred_username"]).toBe("bob")
 
     const res = await SELF.fetch(`${ISSUER}/oauth/userinfo`, {
       headers: { authorization: `Bearer ${tokens.access_token}` },
@@ -163,6 +164,7 @@ describe("GET /oauth/userinfo", () => {
     expect(res.status).toBe(200)
     expect(body["groups"]).toBeUndefined()
     expect(body["user_type"]).toBeUndefined()
+    expect(body["preferred_username"]).toBe("bob")
   })
 
   it("rejects an access token that was not issued for the OpenID UserInfo purpose", async () => {
@@ -179,7 +181,6 @@ describe("GET /oauth/userinfo", () => {
       clientId: CLIENT,
       resource: "https://unregistered.example",
       scope: "openid",
-      userType: "internal",
     })
     const res = await SELF.fetch(`${ISSUER}/oauth/userinfo`, {
       headers: { authorization: `Bearer ${issued.token}` },
@@ -253,7 +254,6 @@ describe("POST /oauth/introspect", () => {
       clientId: CLIENT,
       resource: "https://app.pangda.app",
       scope: "openid app.read",
-      userType: "internal",
     })
     const body = await (await post("/oauth/introspect", { token: issued.token }, svcAuth)).json<{
       active: boolean

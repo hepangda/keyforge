@@ -9,10 +9,9 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS)
 const admin = await createUser(env, {
   email: "admin",
   name: "Administrator",
-  userType: "internal",
   emailVerified: true,
 })
-await setUserPassword(env, admin.id, "admin")
+await setUserPassword(env, admin.id, "test-admin-password-2026")
 const admins = await getGroupByName(env, "admins")
 const employees = await getGroupByName(env, "employees")
 if (admins !== null) {

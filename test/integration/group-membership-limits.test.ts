@@ -33,7 +33,6 @@ beforeEach(async () => {
     await createUser(env, {
       email: "group-limit@example.test",
       name: "Group Limit",
-      userType: "internal",
     })
   ).id
 })

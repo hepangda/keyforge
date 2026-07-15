@@ -28,8 +28,8 @@ beforeEach(async () => {
   ])
   const user = await createUser(env, {
     email: "passkey@pangda.app",
+    alias: "passkeyuser",
     name: "Passkey",
-    userType: "internal",
   })
   userId = user.id
   sessionCookie = `__Host-keyforge_session=${(await createSession(env, { userId: user.id, authMethod: "password", ttlSeconds: 3600 })).token}`
@@ -62,7 +62,7 @@ describe("passkey registration ceremony", () => {
     const body = await res.json<{ challenge: string; rp: { id: string }; user: { name: string } }>()
     expect(body.challenge).toBeTruthy()
     expect(body.rp.id).toBe("auth.pangda.app")
-    expect(body.user.name).toBe("passkey@pangda.app")
+    expect(body.user.name).toBe("passkeyuser")
     expect(firstSetCookie(res, "__Host-keyforge_webauthn")).not.toBe("")
   })
 
@@ -81,7 +81,7 @@ describe("passkey registration ceremony", () => {
     expect(res.status).toBe(403)
     const body = await res.json<{ error: string; reauthenticate_url: string }>()
     expect(body.error).toBe("recent_authentication_required")
-    expect(body.reauthenticate_url).toBe("/login?reauth=1&return_to=%2F%3Fsection%3Dpasskeys")
+    expect(body.reauthenticate_url).toBe("/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods")
   })
 
   it("rejects register verify without a valid challenge", async () => {
@@ -212,7 +212,7 @@ describe("webauthn credential storage", () => {
     const credentials = await listCredentialSummaries(env, userId)
     const results = await Promise.all(
       credentials.map((credential) =>
-        deleteCredentialPreservingLoginMethod(env, credential.id, userId, []),
+        deleteCredentialPreservingLoginMethod(env, credential.id, userId),
       ),
     )
 

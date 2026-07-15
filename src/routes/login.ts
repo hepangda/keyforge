@@ -1,12 +1,11 @@
 import type { Context } from "hono"
 import { Hono } from "hono"
 import { decodeProtectedHeader } from "jose"
-import { getProviderCredentials } from "../auth/oauth-providers"
 import { verifyLoginPassword } from "../auth/password"
 import { createSession, revokeSessionByToken } from "../auth/session"
 import { JWT_TYP, SESSION_TTL } from "../config"
 import { getClientById } from "../db/queries/clients"
-import { getUserByEmail } from "../db/queries/users"
+import { getUserByLogin } from "../db/queries/users"
 import { isSafePostLogoutRedirectUri } from "../oauth/post-logout"
 import { buildRedirectUrl } from "../oauth/redirect"
 import { validateOAuthParameterSet } from "../oauth/request-limits"
@@ -38,13 +37,7 @@ export const login = new Hono<AppBindings>()
 const LOGIN_RATE_LIMIT = 10
 const LOGIN_IP_RATE_LIMIT = 50
 const LOGIN_RATE_WINDOW_SECONDS = 300
-const GENERIC_LOGIN_ERROR = "Invalid email or password."
-
-function configuredSocialProviders(env: Env): readonly ("github" | "google")[] {
-  return (["github", "google"] as const).filter(
-    (provider) => getProviderCredentials(env, provider) !== null,
-  )
-}
+const GENERIC_LOGIN_ERROR = "Invalid email, username, or password."
 
 login.get("/login", (c) => {
   const reauthenticating = c.req.query("reauth") === "1"
@@ -52,22 +45,12 @@ login.get("/login", (c) => {
     return c.redirect(safeLocalPath(c.req.query("return_to") ?? null))
   }
   const csrfToken = issueCsrfToken(c)
-  const socialProviders = configuredSocialProviders(c.env)
-  const queryError = c.req.query("error")
   const notice = c.req.query("notice")
-  const error =
-    queryError === "account_exists"
-      ? "An account already uses that email. Sign in first, then connect the provider from your account."
-      : queryError === "signup_disabled"
-        ? "This account has not been provisioned. Contact your administrator for access."
-        : notice === "account_deleted"
-          ? "Your account has been deleted."
-          : undefined
+  const error = notice === "account_deleted" ? "Your account has been deleted." : undefined
   return c.html(
     renderLoginPage({
       csrfToken,
       returnTo: safeLocalPath(c.req.query("return_to") ?? null),
-      socialProviders,
       reauthenticating,
       ...(error === undefined ? {} : { error }),
     }),
@@ -76,8 +59,8 @@ login.get("/login", (c) => {
 
 login.post("/login", async (c) => {
   const form = await c.req.raw.formData()
-  const email = readFormField(form, "email").toLowerCase()
-  const displayEmail = email.length <= EMAIL_INPUT_MAX_LENGTH ? email : ""
+  const identifier = readFormField(form, "email").trim()
+  const displayIdentifier = identifier.length <= EMAIL_INPUT_MAX_LENGTH ? identifier : ""
   const password = readFormField(form, "password")
   const returnTo = safeLocalPath(readFormField(form, "return_to") || null)
   const reauthenticating = readFormField(form, "reauth") === "1"
@@ -89,8 +72,7 @@ login.post("/login", async (c) => {
       renderLoginPage({
         csrfToken: issueCsrfToken(c),
         returnTo,
-        email: displayEmail,
-        socialProviders: configuredSocialProviders(c.env),
+        email: displayIdentifier,
         error: GENERIC_LOGIN_ERROR,
         reauthenticating,
       }),
@@ -119,8 +101,7 @@ login.post("/login", async (c) => {
       renderLoginPage({
         csrfToken: issueCsrfToken(c),
         returnTo,
-        email: displayEmail,
-        socialProviders: configuredSocialProviders(c.env),
+        email: displayIdentifier,
         error: "Too many attempts. Please wait and try again.",
         reauthenticating,
       }),
@@ -131,7 +112,7 @@ login.post("/login", async (c) => {
   const accountHash = await requestCorrelationHash(
     c.env,
     "login-account",
-    emailCorrelationValue(email),
+    emailCorrelationValue(identifier),
   )
   const [ipAccountRate, accountRate] = await Promise.all([
     checkRateLimit(
@@ -160,8 +141,7 @@ login.post("/login", async (c) => {
       renderLoginPage({
         csrfToken: issueCsrfToken(c),
         returnTo,
-        email: displayEmail,
-        socialProviders: configuredSocialProviders(c.env),
+        email: displayIdentifier,
         error: "Too many attempts. Please wait and try again.",
         reauthenticating,
       }),
@@ -169,7 +149,8 @@ login.post("/login", async (c) => {
     )
   }
 
-  const user = email.length <= EMAIL_INPUT_MAX_LENGTH ? await getUserByEmail(c.env, email) : null
+  const user =
+    identifier.length <= EMAIL_INPUT_MAX_LENGTH ? await getUserByLogin(c.env, identifier) : null
   const passwordValid = await verifyLoginPassword(c.env, user?.id ?? null, password)
   if (user === null || user.disabled || !passwordValid) {
     await recordAudit(c.env, {
@@ -184,8 +165,7 @@ login.post("/login", async (c) => {
       renderLoginPage({
         csrfToken: issueCsrfToken(c),
         returnTo,
-        email: displayEmail,
-        socialProviders: configuredSocialProviders(c.env),
+        email: displayIdentifier,
         error: GENERIC_LOGIN_ERROR,
         reauthenticating,
       }),

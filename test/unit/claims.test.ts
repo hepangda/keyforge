@@ -5,24 +5,24 @@ import { asUserId, type User } from "../../src/types/domain"
 const user: User = {
   id: asUserId("usr_claims"),
   email: "claims@pangda.app",
+  alias: "claimsuser",
   emailVerified: true,
   name: "Claims User",
   picture: null,
-  userType: "internal",
   disabled: false,
   createdAt: 1,
 }
 
 describe("OIDC claim scope policy", () => {
-  it("withholds groups and user_type without the groups scope", () => {
+  it("releases the username with profile while withholding groups", () => {
     const claims = buildUserClaims(user, ["employees"], ["openid", "profile"])
     expect(claims.groups).toBeUndefined()
-    expect(claims.user_type).toBeUndefined()
+    expect(claims.preferred_username).toBe("claimsuser")
   })
 
-  it("releases groups and user_type only with the groups scope", () => {
+  it("releases groups only with the groups scope", () => {
     const claims = buildUserClaims(user, ["employees"], ["openid", "groups"])
     expect(claims.groups).toEqual(["employees"])
-    expect(claims.user_type).toBe("internal")
+    expect(claims.preferred_username).toBeUndefined()
   })
 })

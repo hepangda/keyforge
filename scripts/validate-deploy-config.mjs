@@ -200,10 +200,6 @@ export function validateDeployConfig(source, environment) {
   if (stringValue(vars, "EMAIL_DELIVERY_MODE") !== "resend") {
     throw new Error(`${environment} must set EMAIL_DELIVERY_MODE=resend`)
   }
-  const signup = stringValue(vars, "ALLOW_SELF_SIGNUP")
-  if (signup !== "true" && signup !== "false") {
-    throw new Error("ALLOW_SELF_SIGNUP must be explicitly true or false")
-  }
   for (const [name, [minimum, maximum]] of NUMERIC_BOUNDS) {
     const raw = stringValue(vars, name)
     const parsed = Number(raw)

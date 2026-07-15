@@ -1,28 +1,43 @@
 import type { Context, Hono } from "hono"
 import { z } from "zod"
 import { createManagedUser } from "../admin/user-management"
+import { createMagicLink } from "../auth/magic-link"
+import {
+  addUserPassword,
+  deletePasswordCredentialPreservingLoginMethod,
+  listPasswordCredentials,
+  minimumPasswordLength,
+} from "../auth/password"
 import { revokeAllUserSessions } from "../auth/session"
 import {
+  ALIAS_PATTERN,
   createGroup,
   deleteGroup,
   getGroupByName,
+  getUserByAlias,
   getUserById,
   getUserGroupIds,
   listGroups,
   listUsers,
+  MAX_ALIAS_LENGTH,
   MAX_USER_GROUPS,
   setUserGroupsPreservingActiveAdmin,
   updateGroup,
   updateUser,
+  updateUserAlias,
 } from "../db/queries/users"
+import {
+  deleteCredentialPreservingLoginMethod,
+  listCredentialSummaries,
+} from "../db/queries/webauthn"
 import { recordAudit } from "../security/audit"
 import { issueCsrfToken } from "../security/csrf"
 import type { AppBindings } from "../types/app"
-import type { UserType } from "../types/domain"
 import { readFormField } from "../utils/form"
 import { parsePagination } from "../utils/http"
 import {
   renderGroupDeleteConfirmation,
+  renderMagicLinkResult,
   renderUserCreate,
   renderUserDetail,
   renderUsersList,
@@ -32,10 +47,10 @@ import { chrome, readVerifiedForm } from "./shared"
 
 const createUserSchema = z.object({
   email: z.email().max(254),
+  alias: z.string().min(1).max(MAX_ALIAS_LENGTH).regex(ALIAS_PATTERN),
   name: z.string().trim().max(120),
-  userType: z.enum(["internal", "external"]),
   emailVerified: z.boolean(),
-  password: z.string().min(12).max(128).optional(),
+  password: z.string().min(6).max(128).optional(),
   groupIds: z.array(z.string().min(1)).max(MAX_USER_GROUPS),
 })
 
@@ -58,8 +73,8 @@ function readGroupIds(form: FormData): string[] {
 function userCreateValues(form: FormData): UserCreateValues {
   return {
     email: readFormField(form, "email"),
+    alias: readFormField(form, "alias"),
     name: readFormField(form, "name"),
-    userType: readFormField(form, "user_type") === "internal" ? "internal" : "external",
     emailVerified: form.get("email_verified") !== null,
     groupIds: readGroupIds(form),
   }
@@ -110,11 +125,10 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
     }
     const values = userCreateValues(form)
     const rawPassword = readFormField(form, "password")
-    const rawUserType = readFormField(form, "user_type")
     const parsed = createUserSchema.safeParse({
       email: values.email.trim().toLowerCase(),
+      alias: values.alias.trim(),
       name: values.name,
-      userType: rawUserType,
       emailVerified: values.emailVerified,
       groupIds: values.groupIds,
       ...(rawPassword === "" ? {} : { password: rawPassword }),
@@ -124,21 +138,23 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
       const error =
         field === "email"
           ? "Enter a valid email address of at most 254 characters."
-          : field === "name"
-            ? "Display names must contain at most 120 characters."
-            : field === "password"
-              ? "Initial passwords must contain 12–128 characters."
-              : field === "groupIds"
-                ? `Select no more than ${MAX_USER_GROUPS} valid groups.`
-                : "Choose a valid account type and check the form values."
+          : field === "alias"
+            ? "Usernames may contain only English letters and numbers."
+            : field === "name"
+              ? "Display names must contain at most 120 characters."
+              : field === "password"
+                ? "Initial passwords must contain 6–128 characters (12 for administrators)."
+                : field === "groupIds"
+                  ? `Select no more than ${MAX_USER_GROUPS} valid groups.`
+                  : "Check the form values."
       return renderUserCreateError(c, values, passwordCleared(error, rawPassword !== ""))
     }
     const data = parsed.data
     try {
       const result = await createManagedUser(c.env, {
         email: data.email,
+        alias: data.alias,
         name: data.name === "" ? null : data.name,
-        userType: data.userType,
         emailVerified: data.emailVerified,
         groupIds: data.groupIds,
         ...(data.password === undefined ? {} : { password: data.password }),
@@ -150,7 +166,11 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
           passwordCleared(
             result.reason === "duplicate_email"
               ? "An account already uses that email address."
-              : "One or more selected groups no longer exist. Review the group selection.",
+              : result.reason === "duplicate_alias"
+                ? "An account already uses that username."
+                : result.reason === "invalid_password"
+                  ? "That password does not meet the policy for the selected groups."
+                  : "One or more selected groups no longer exist. Review the group selection.",
             rawPassword !== "",
           ),
         )
@@ -283,12 +303,27 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
     if (user === null) {
       return c.redirect("/console/users?flash=not_found")
     }
-    const [groups, selectedIds] = await Promise.all([
+    const [groups, selectedIds, passwords, passkeys] = await Promise.all([
       listGroups(c.env),
       getUserGroupIds(c.env, user.id),
+      listPasswordCredentials(c.env, user.id),
+      listCredentialSummaries(c.env, user.id),
     ])
+    const selectedIdSet = new Set(selectedIds)
+    const administrator = groups.some(
+      (group) => group.name === "admins" && selectedIdSet.has(group.id),
+    )
     return c.html(
-      renderUserDetail(chrome(c, "users"), user, groups, new Set(selectedIds), issueCsrfToken(c)),
+      renderUserDetail(
+        chrome(c, "users"),
+        user,
+        groups,
+        selectedIdSet,
+        passwords,
+        passkeys,
+        minimumPasswordLength(administrator),
+        issueCsrfToken(c),
+      ),
     )
   })
 
@@ -302,12 +337,20 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
       return c.redirect("/console/users?flash=not_found")
     }
     const name = readFormField(form, "name").trim()
-    const userType: UserType =
-      readFormField(form, "user_type") === "internal" ? "internal" : "external"
+    const alias = readFormField(form, "alias").trim()
+    if (!ALIAS_PATTERN.test(alias) || alias.length > MAX_ALIAS_LENGTH) {
+      return c.redirect(`/console/users/${id}?flash=invalid_alias`)
+    }
+    const aliasOwner = await getUserByAlias(c.env, alias)
+    if (aliasOwner !== null && aliasOwner.id !== id) {
+      return c.redirect(`/console/users/${id}?flash=duplicate_alias`)
+    }
+    if ((await updateUserAlias(c.env, id, alias)) !== "updated") {
+      return c.redirect(`/console/users/${id}?flash=invalid_alias`)
+    }
     const disabled = form.get("disabled") !== null
     const updated = await updateUser(c.env, id, {
       name: name === "" ? null : name,
-      userType,
       emailVerified: form.get("email_verified") !== null,
       disabled,
     })
@@ -363,6 +406,82 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
       metadata: { groups: names },
     })
     return c.redirect(`/console/users/${user.id}?flash=groups_updated`)
+  })
+
+  app.post("/console/users/:id/passwords", async (c) => {
+    const id = c.req.param("id")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/users/${id}?flash=invalid`)
+    const user = await getUserById(c.env, id)
+    if (user === null) return c.redirect("/console/users?flash=not_found")
+    const password = readFormField(form, "password")
+    if (password !== readFormField(form, "password_confirm")) {
+      return c.redirect(`/console/users/${id}?flash=invalid_password`)
+    }
+    const rawName = readFormField(form, "name").trim()
+    const result = await addUserPassword(c.env, user.id, password, rawName === "" ? null : rawName)
+    if (result === null) {
+      return c.redirect(`/console/users/${id}?flash=invalid_password`)
+    }
+    await recordAudit(c.env, {
+      type: "admin.user.updated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "console added password login method",
+    })
+    return c.redirect(`/console/users/${id}?flash=password_added`)
+  })
+
+  app.post("/console/users/:id/passwords/:credentialId/delete", async (c) => {
+    const id = c.req.param("id")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/users/${id}?flash=invalid`)
+    const user = await getUserById(c.env, id)
+    if (user === null) return c.redirect("/console/users?flash=not_found")
+    const result = await deletePasswordCredentialPreservingLoginMethod(
+      c.env,
+      c.req.param("credentialId"),
+      user.id,
+    )
+    return c.redirect(
+      `/console/users/${id}?flash=${result === "deleted" ? "password_deleted" : result === "last_login_method" ? "last_login_method" : "not_found"}`,
+    )
+  })
+
+  app.post("/console/users/:id/passkeys/:credentialId/delete", async (c) => {
+    const id = c.req.param("id")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/users/${id}?flash=invalid`)
+    const user = await getUserById(c.env, id)
+    if (user === null) return c.redirect("/console/users?flash=not_found")
+    const result = await deleteCredentialPreservingLoginMethod(
+      c.env,
+      c.req.param("credentialId"),
+      user.id,
+    )
+    return c.redirect(
+      `/console/users/${id}?flash=${result === "deleted" ? "passkey_deleted" : result === "last_login_method" ? "last_login_method" : "not_found"}`,
+    )
+  })
+
+  app.post("/console/users/:id/magic-link", async (c) => {
+    const id = c.req.param("id")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/users/${id}?flash=invalid`)
+    const user = await getUserById(c.env, id)
+    if (user === null) return c.redirect("/console/users?flash=not_found")
+    if (user.disabled) return c.redirect(`/console/users/${id}?flash=user_disabled`)
+    const link = await createMagicLink(c.env, { userId: user.id, redirectTo: "/" })
+    await recordAudit(c.env, {
+      type: "admin.user.magic_link.generated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+    })
+    return c.html(renderMagicLinkResult(chrome(c, "users"), user, link.url))
   })
 
   app.post("/console/users/:id/revoke-sessions", async (c) => {

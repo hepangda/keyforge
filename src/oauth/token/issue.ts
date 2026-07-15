@@ -40,7 +40,6 @@ export async function issueUserTokens(
     clientId: input.client.clientId,
     resource: input.resource,
     scope: input.scope,
-    userType: input.user.userType,
   })
   const response: TokenResponse = {
     access_token: accessToken.token,

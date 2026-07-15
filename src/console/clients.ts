@@ -8,6 +8,7 @@ import {
   setClientSecretHash,
   updateClient,
 } from "../db/queries/clients"
+import { listResources } from "../db/queries/resources"
 import { type ClientConfiguration, validateClientConfiguration } from "../oauth/client-config"
 import { isSafePostLogoutRedirectUri } from "../oauth/post-logout"
 import { recordAudit } from "../security/audit"
@@ -35,6 +36,10 @@ function parseKind(raw: string): ClientKind {
 }
 
 function readClientFormValues(form: FormData, current?: OAuthClient): ClientFormValues {
+  const allowedResources = form
+    .getAll("allowed_resources")
+    .flatMap((value) => (typeof value === "string" ? [value] : []))
+    .join("\n")
   return {
     clientId: current?.clientId ?? readFormField(form, "client_id"),
     name: readFormField(form, "name"),
@@ -44,7 +49,7 @@ function readClientFormValues(form: FormData, current?: OAuthClient): ClientForm
     postLogoutRedirectUris: readFormField(form, "post_logout_redirect_uris"),
     allowedScopes: readFormField(form, "allowed_scopes"),
     allowedGrantTypes: readFormField(form, "allowed_grant_types"),
-    allowedResources: readFormField(form, "allowed_resources"),
+    allowedResources,
     defaultResource: readFormField(form, "default_resource"),
   }
 }
@@ -78,14 +83,15 @@ async function clientConfigurationError(
   return validation.ok ? undefined : `Configuration error: ${validation.reason}.`
 }
 
-function renderClientFormError(
+async function renderClientFormError(
   c: Context<AppBindings>,
   client: OAuthClient | null,
   values: ClientFormValues,
   error: string,
-): Response {
+): Promise<Response> {
+  const resources = client === null ? await listResources(c.env) : []
   return c.html(
-    renderClientForm(chrome(c, "clients"), client, issueCsrfToken(c), { values, error }),
+    renderClientForm(chrome(c, "clients"), client, issueCsrfToken(c), { values, error }, resources),
     400,
   )
 }
@@ -95,8 +101,16 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
     c.html(renderClientsList(chrome(c, "clients"), await listClients(c.env))),
   )
 
-  app.get("/console/clients/new", (c) =>
-    c.html(renderClientForm(chrome(c, "clients"), null, issueCsrfToken(c))),
+  app.get("/console/clients/new", async (c) =>
+    c.html(
+      renderClientForm(
+        chrome(c, "clients"),
+        null,
+        issueCsrfToken(c),
+        undefined,
+        await listResources(c.env),
+      ),
+    ),
   )
 
   app.post("/console/clients", async (c) => {

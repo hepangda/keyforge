@@ -97,7 +97,7 @@ async function driveLoginFlow() {
     headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie(authJar) },
     body: new URLSearchParams({
       email: "demo-admin",
-      password: "admin",
+      password: "demo-admin-2026",
       csrf_token: authJar["__Host-keyforge_csrf"],
       return_to: returnTo,
     }),

@@ -2,7 +2,7 @@
 
 KeyForge is a single-tenant OpenID Connect and OAuth 2.1 authorization server
 for Cloudflare Workers. It provides browser SSO, CLI device authorization,
-machine-to-machine credentials, account recovery, passkeys, social login, and
+machine-to-machine credentials, account recovery, passwords, passkeys, and
 an administrator console/API.
 
 The checked-in staging and production profiles currently target the Pangda
@@ -48,7 +48,7 @@ pnpm exec wrangler d1 execute keyforge --local --file=examples/demo-app/seed-tes
 pnpm dev
 ```
 
-Open <http://localhost:8787/login> and sign in as `demo-admin` / `admin`. This
+Open <http://localhost:8787/login> and sign in as `demo-admin` / `demo-admin-2026`. This
 weak credential exists only in the explicit local demo seed and must never be
 used outside a disposable development database.
 
@@ -62,15 +62,13 @@ export BOOTSTRAP_TOKEN='paste-the-same-64-character-token-here'
 curl -fsS http://localhost:8787/setup/bootstrap \
   -H 'content-type: application/json' \
   -H "x-bootstrap-token: $BOOTSTRAP_TOKEN" \
-  --data '{"email":"owner@example.test","name":"Local Owner","password":"replace-with-a-unique-16+-character-password"}'
+  --data '{"email":"owner@example.test","alias":"localowner","name":"Local Owner","password":"replace-with-a-unique-16+-character-password"}'
 ```
 
 Then sign in with that email and password. Clear `BOOTSTRAP_TOKEN` from
 `.dev.vars` and restart the Worker after bootstrap succeeds.
 
-The local issuer is `http://localhost:8787`. Account creation through a
-first-time social login is disabled unless `ALLOW_SELF_SIGNUP=true` is set
-explicitly. Set `REQUEST_HASH_SECRET` to a random value when stable,
+The local issuer is `http://localhost:8787`. Set `REQUEST_HASH_SECRET` to a random value when stable,
 privacy-preserving request metadata hashes are useful during local testing.
 
 The base Wrangler configuration is local/test-only. Remote commands must select

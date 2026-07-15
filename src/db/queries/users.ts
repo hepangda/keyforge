@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { revokeRefreshFamilyDurableObjects } from "../../tokens/refresh-token-revocation"
-import type { User, UserType } from "../../types/domain"
+import type { User } from "../../types/domain"
 import { asUserId } from "../../types/domain"
 import { generateId, ID_PREFIX } from "../../utils/id"
 import { nowSeconds } from "../../utils/time"
@@ -8,10 +8,10 @@ import { nowSeconds } from "../../utils/time"
 const userRowSchema = z.object({
   id: z.string(),
   email: z.string(),
+  alias: z.string(),
   email_verified: z.number(),
   name: z.string().nullable(),
   picture: z.string().nullable(),
-  user_type: z.enum(["internal", "external"]),
   disabled: z.number(),
   created_at: z.number(),
 })
@@ -20,20 +20,22 @@ const userSecurityRowSchema = userRowSchema.extend({
   security_version: z.number(),
 })
 
-const USER_COLUMNS = "id, email, email_verified, name, picture, user_type, disabled, created_at"
+const USER_COLUMNS = "id, email, alias, email_verified, name, picture, disabled, created_at"
 
 /** Keep administrative payloads bounded without coupling them to D1 placeholder limits. */
 export const MAX_USER_GROUPS = 100
+export const MAX_ALIAS_LENGTH = 64
+export const ALIAS_PATTERN = /^[A-Za-z0-9]+$/
 
 function mapUser(row: unknown): User {
   const parsed = userRowSchema.parse(row)
   return {
     id: asUserId(parsed.id),
     email: parsed.email,
+    alias: parsed.alias,
     emailVerified: parsed.email_verified === 1,
     name: parsed.name,
     picture: parsed.picture,
-    userType: parsed.user_type,
     disabled: parsed.disabled === 1,
     createdAt: parsed.created_at,
   }
@@ -53,6 +55,28 @@ export async function getUserByEmail(env: Env, email: string): Promise<User | nu
   return row === null ? null : mapUser(row)
 }
 
+export async function getUserByAlias(env: Env, alias: string): Promise<User | null> {
+  const row = await env.DB.prepare(
+    `SELECT ${USER_COLUMNS} FROM users WHERE lower(alias) = lower(?)`,
+  )
+    .bind(alias)
+    .first()
+  return row === null ? null : mapUser(row)
+}
+
+/** Resolve the identifier accepted by the login form without changing email-only flows. */
+export async function getUserByLogin(env: Env, login: string): Promise<User | null> {
+  const normalized = login.trim().toLowerCase()
+  const row = await env.DB.prepare(
+    `SELECT ${USER_COLUMNS} FROM users
+     WHERE email = ? OR lower(alias) = ?
+     LIMIT 1`,
+  )
+    .bind(normalized, normalized)
+    .first()
+  return row === null ? null : mapUser(row)
+}
+
 export async function getUserSecurityVersion(env: Env, id: string): Promise<number | null> {
   const row = await env.DB.prepare("SELECT security_version FROM users WHERE id = ?")
     .bind(id)
@@ -62,31 +86,45 @@ export async function getUserSecurityVersion(env: Env, id: string): Promise<numb
 
 export type CreateUserInput = {
   readonly email: string
+  readonly alias?: string
   readonly name?: string | null
   readonly picture?: string | null
-  readonly userType?: UserType
   readonly emailVerified?: boolean
+}
+
+function generatedAlias(email: string, id: string): string {
+  const local =
+    email
+      .split("@", 1)[0]
+      ?.replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 48) || "user"
+  const suffix = id.replace(/[^A-Za-z0-9]/g, "").slice(-10)
+  return `${local}${suffix}`.slice(0, MAX_ALIAS_LENGTH)
 }
 
 export async function createUser(env: Env, input: CreateUserInput): Promise<User> {
   const id = generateId(ID_PREFIX.user)
   const email = input.email.toLowerCase()
+  const alias = input.alias?.trim() || generatedAlias(email, id)
+  if (!ALIAS_PATTERN.test(alias) || alias.length > MAX_ALIAS_LENGTH) {
+    throw new RangeError("alias must contain only English letters and numbers")
+  }
   const now = nowSeconds()
   const user: User = {
     id: asUserId(id),
     email,
+    alias,
     emailVerified: input.emailVerified ?? false,
     name: input.name ?? null,
     picture: input.picture ?? null,
-    userType: input.userType ?? "external",
     disabled: false,
     createdAt: now,
   }
   await env.DB.prepare(
-    `INSERT INTO users (id, email, email_verified, name, picture, user_type, disabled, created_at, updated_at)
+    `INSERT INTO users (id, email, alias, email_verified, name, picture, disabled, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
   )
-    .bind(id, email, user.emailVerified ? 1 : 0, user.name, user.picture, user.userType, now, now)
+    .bind(id, email, alias, user.emailVerified ? 1 : 0, user.name, user.picture, now, now)
     .run()
   return user
 }
@@ -99,6 +137,19 @@ export async function getUserGroupNames(env: Env, userId: string): Promise<strin
     .all()
   const parsed = z.array(z.object({ name: z.string() })).safeParse(result.results)
   return parsed.success ? parsed.data.map((entry) => entry.name) : []
+}
+
+export async function isUserAdmin(env: Env, userId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT 1 AS present
+     FROM user_groups ug
+     JOIN groups g ON g.id = ug.group_id
+     WHERE ug.user_id = ? AND g.name = 'admins'
+     LIMIT 1`,
+  )
+    .bind(userId)
+    .first()
+  return row !== null
 }
 
 export async function getUserGroupIds(env: Env, userId: string): Promise<string[]> {
@@ -128,7 +179,6 @@ export async function countUsers(env: Env): Promise<number> {
 
 export type UserPatch = {
   readonly name?: string | null
-  readonly userType?: UserType
   readonly disabled?: boolean
   readonly emailVerified?: boolean
 }
@@ -147,7 +197,6 @@ export async function updateUser(env: Env, id: string, patch: UserPatch): Promis
   const next: User = {
     ...current,
     name: patch.name === undefined ? current.name : patch.name,
-    userType: patch.userType ?? current.userType,
     disabled: patch.disabled ?? current.disabled,
     emailVerified: patch.emailVerified ?? current.emailVerified,
   }
@@ -157,8 +206,7 @@ export async function updateUser(env: Env, id: string, patch: UserPatch): Promis
   const results = await env.DB.batch([
     env.DB.prepare(
       `UPDATE users
-       SET name = ?, user_type = ?,
-           security_version = security_version + ?,
+       SET name = ?, security_version = security_version + ?,
            disabled = ?, email_verified = ?, updated_at = ?
        WHERE id = ? AND disabled = ? AND security_version = ?
          AND (
@@ -177,7 +225,6 @@ export async function updateUser(env: Env, id: string, patch: UserPatch): Promis
        RETURNING ${USER_COLUMNS}`,
     ).bind(
       next.name,
-      next.userType,
       disabledChanged ? 1 : 0,
       next.disabled ? 1 : 0,
       next.emailVerified ? 1 : 0,
@@ -228,6 +275,30 @@ export async function updateUser(env: Env, id: string, patch: UserPatch): Promis
   await revokeRefreshFamilyDurableObjects(env, refreshFamilyIds)
   const row = results[0]?.results[0]
   return row === undefined ? null : mapUser(row)
+}
+
+export type UpdateUserAliasResult = "updated" | "not_found" | "conflict"
+
+export async function updateUserAlias(
+  env: Env,
+  id: string,
+  alias: string,
+): Promise<UpdateUserAliasResult> {
+  const normalized = alias.trim()
+  if (!ALIAS_PATTERN.test(normalized) || normalized.length > MAX_ALIAS_LENGTH) {
+    return "conflict"
+  }
+  const result = await env.DB.prepare(
+    `UPDATE users SET alias = ?, updated_at = ?
+     WHERE id = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM users other WHERE lower(other.alias) = lower(?) AND other.id != ?
+       )`,
+  )
+    .bind(normalized, nowSeconds(), id, normalized, id)
+    .run()
+  if (result.meta.changes === 1) return "updated"
+  return (await getUserById(env, id)) === null ? "not_found" : "conflict"
 }
 
 export type UpdateUserEmailResult = "updated" | "not_found" | "conflict"

@@ -49,6 +49,23 @@ app.use("*", async (c, next) => {
 
 app.use("*", i18nMiddleware)
 
+// The consent form posts to this origin, then /oauth/authorize/decision redirects
+// to the client's registered callback. Browsers apply form-action to that full
+// redirect chain, so the consent page must allow its one validated callback
+// source. Keep every other page at the stricter self-only default.
+app.use("*", async (c, next) => {
+  await next()
+  const redirectSource = c.get("oauthRedirectFormAction")
+  if (redirectSource === undefined) return
+
+  const policy = c.res.headers.get("content-security-policy")
+  if (policy === null) return
+  c.header(
+    "content-security-policy",
+    policy.replace("form-action 'self';", `form-action 'self' ${redirectSource};`),
+  )
+})
+
 app.use(
   "*",
   secureHeaders({

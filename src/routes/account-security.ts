@@ -12,13 +12,10 @@ import {
   verifyUserPassword,
 } from "../auth/password"
 import {
-  ALIAS_PATTERN,
   deleteUserPreservingActiveAdmin,
   getUserByEmail,
   isUserAdmin,
-  MAX_ALIAS_LENGTH,
   updateUser,
-  updateUserAlias,
 } from "../db/queries/users"
 import { deleteCredentialPreservingLoginMethod, renameCredential } from "../db/queries/webauthn"
 import { enqueueEmail } from "../email/sender"
@@ -97,16 +94,27 @@ function reauthenticationRedirect(returnTo: string): string {
   return `/login?reauth=1&return_to=${encodeURIComponent(returnTo)}`
 }
 
+function accountFlow(
+  section: "profile" | "login-methods",
+  flow: string,
+  options: {
+    readonly credentialId?: string
+    readonly notice?: string
+    readonly verified?: boolean
+  } = {},
+): string {
+  const query = new URLSearchParams({ section, flow })
+  if (options.credentialId !== undefined) query.set("credential", options.credentialId)
+  if (options.notice !== undefined) query.set("notice", options.notice)
+  if (options.verified === true) query.set("verified", "1")
+  return `/?${query.toString()}`
+}
+
 accountSecurity.post("/account/profile", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
-  if (user === null || form === null) return c.redirect("/?section=profile&notice=invalid")
-  const alias = readFormField(form, "alias").trim()
-  if (!ALIAS_PATTERN.test(alias) || alias.length > MAX_ALIAS_LENGTH) {
-    return c.redirect("/?section=profile&notice=alias_invalid")
-  }
-  if ((await updateUserAlias(c.env, user.id, alias)) !== "updated") {
-    return c.redirect("/?section=profile&notice=alias_invalid")
+  if (user === null || form === null) {
+    return c.redirect(accountFlow("profile", "edit-profile", { notice: "invalid" }))
   }
   const rawName = readFormField(form, "name").trim()
   await updateUser(c.env, user.id, { name: rawName === "" ? null : rawName.slice(0, 120) })
@@ -116,34 +124,43 @@ accountSecurity.post("/account/profile", async (c) => {
     requestId: c.get("requestId"),
     success: true,
   })
-  return c.redirect("/?section=profile&notice=profile_updated")
+  return c.redirect(accountFlow("profile", "edit-profile", { notice: "profile_updated" }))
 })
 
 accountSecurity.post("/account/passwords", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
   if (user === null || form === null) {
-    return c.redirect("/?section=login-methods&notice=invalid")
+    return c.redirect(accountFlow("login-methods", "add-password", { notice: "invalid" }))
   }
-  const authorization = await authorizeSensitivePasswordAction(c, user, form, "add_password")
-  if (authorization === "reauthentication_required") {
-    return c.redirect(reauthenticationRedirect("/?section=login-methods"))
+  const returnTo = accountFlow("login-methods", "add-password", { verified: true })
+  if (!hasRecentAuthentication(c.get("session"))) {
+    return c.redirect(reauthenticationRedirect(returnTo))
   }
   const password = readFormField(form, "password")
   const confirmation = readFormField(form, "password_confirm")
   const administrator = await isUserAdmin(c.env, user.id)
   const minimum = minimumPasswordLength(administrator)
   if (
-    authorization !== "authorized" ||
     password.length < minimum ||
     password.length > PASSWORD_POLICY.maximum ||
     password !== confirmation
   ) {
-    return c.redirect("/?section=login-methods&notice=password_invalid")
+    return c.redirect(
+      accountFlow("login-methods", "add-password", {
+        notice: "password_invalid",
+        verified: true,
+      }),
+    )
   }
   const rawName = readFormField(form, "name").trim()
   if ((await addUserPassword(c.env, user.id, password, rawName === "" ? null : rawName)) === null) {
-    return c.redirect("/?section=login-methods&notice=password_invalid")
+    return c.redirect(
+      accountFlow("login-methods", "add-password", {
+        notice: "password_invalid",
+        verified: true,
+      }),
+    )
   }
   await recordAudit(c.env, {
     type: "user.password.changed",
@@ -152,19 +169,32 @@ accountSecurity.post("/account/passwords", async (c) => {
     success: true,
     detail: "password login method added",
   })
-  return c.redirect("/?section=login-methods&notice=password_added")
+  return c.redirect(accountFlow("login-methods", "add-password", { notice: "password_added" }))
 })
 
 accountSecurity.post("/account/passwords/:id/rename", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
+  const credentialId = c.req.param("id")
   if (user === null || form === null) {
-    return c.redirect("/?section=login-methods&notice=invalid")
+    return c.redirect(
+      accountFlow("login-methods", "manage-password", {
+        credentialId,
+        notice: "invalid",
+      }),
+    )
+  }
+  const returnTo = accountFlow("login-methods", "manage-password", {
+    credentialId,
+    verified: true,
+  })
+  if (!hasRecentAuthentication(c.get("session"))) {
+    return c.redirect(reauthenticationRedirect(returnTo))
   }
   const rawName = readFormField(form, "name").trim()
   const renamed = await renamePasswordCredential(
     c.env,
-    c.req.param("id"),
+    credentialId,
     user.id,
     rawName === "" ? null : rawName,
   )
@@ -177,23 +207,37 @@ accountSecurity.post("/account/passwords/:id/rename", async (c) => {
       detail: "password login method renamed",
     })
   }
-  return c.redirect(`/?section=login-methods&notice=${renamed ? "password_renamed" : "not_found"}`)
+  return c.redirect(
+    accountFlow("login-methods", "manage-password", {
+      credentialId,
+      notice: renamed ? "password_renamed" : "not_found",
+    }),
+  )
 })
 
 accountSecurity.post("/account/passwords/:id/delete", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
+  const credentialId = c.req.param("id")
   if (user === null || form === null) {
-    return c.redirect("/?section=login-methods&notice=invalid")
+    return c.redirect(
+      accountFlow("login-methods", "manage-password", {
+        credentialId,
+        notice: "invalid",
+      }),
+    )
   }
   if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect(reauthenticationRedirect("/?section=login-methods"))
+    return c.redirect(
+      reauthenticationRedirect(
+        accountFlow("login-methods", "manage-password", {
+          credentialId,
+          verified: true,
+        }),
+      ),
+    )
   }
-  const result = await deletePasswordCredentialPreservingLoginMethod(
-    c.env,
-    c.req.param("id"),
-    user.id,
-  )
+  const result = await deletePasswordCredentialPreservingLoginMethod(c.env, credentialId, user.id)
   if (result === "deleted") {
     await recordAudit(c.env, {
       type: "user.password.changed",
@@ -209,7 +253,7 @@ accountSecurity.post("/account/passwords/:id/delete", async (c) => {
       : result === "last_login_method"
         ? "last_login_method"
         : "not_found"
-  return c.redirect(`/?section=login-methods&notice=${notice}`)
+  return c.redirect(accountFlow("login-methods", "manage-password", { credentialId, notice }))
 })
 
 accountSecurity.post("/account/email/verify", async (c) => {
@@ -239,21 +283,23 @@ accountSecurity.post("/account/email/verify", async (c) => {
 accountSecurity.post("/account/email/change", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
-  if (user === null || form === null) return c.redirect("/?section=profile&notice=invalid")
+  if (user === null || form === null) {
+    return c.redirect(accountFlow("profile", "change-email", { notice: "invalid" }))
+  }
   const parsedEmail = emailSchema.safeParse(readFormField(form, "new_email").trim().toLowerCase())
   if (!parsedEmail.success) {
-    return c.redirect("/?section=profile&notice=email_change_invalid")
+    return c.redirect(accountFlow("profile", "change-email", { notice: "email_change_invalid" }))
   }
   const newEmail = parsedEmail.data
   if (newEmail === user.email || (await getUserByEmail(c.env, newEmail)) !== null) {
-    return c.redirect("/?section=profile&notice=email_change_invalid")
+    return c.redirect(accountFlow("profile", "change-email", { notice: "email_change_invalid" }))
   }
   const authorization = await authorizeSensitivePasswordAction(c, user, form, "change_email")
   if (authorization === "reauthentication_required") {
-    return c.redirect(reauthenticationRedirect("/?section=profile"))
+    return c.redirect(reauthenticationRedirect(accountFlow("profile", "change-email")))
   }
   if (authorization !== "authorized") {
-    return c.redirect("/?section=profile&notice=email_change_invalid")
+    return c.redirect(accountFlow("profile", "change-email", { notice: "email_change_invalid" }))
   }
   try {
     const { url } = await createEmailChangeToken(c.env, user.id, newEmail)
@@ -268,23 +314,39 @@ accountSecurity.post("/account/email/change", async (c) => {
       success: true,
       detail: "email change confirmation sent",
     })
-    return c.redirect("/?section=profile&notice=email_change_sent")
+    return c.redirect(accountFlow("profile", "change-email", { notice: "email_change_sent" }))
   } catch (error) {
     console.error("email.change_failed", c.get("requestId"), error)
-    return c.redirect("/?section=profile&notice=email_unavailable")
+    return c.redirect(accountFlow("profile", "change-email", { notice: "email_unavailable" }))
   }
 })
 
 accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
+  const credentialId = c.req.param("id")
   if (user === null || form === null) {
-    return c.redirect("/?section=login-methods&notice=invalid")
+    return c.redirect(
+      accountFlow("login-methods", "manage-passkey", {
+        credentialId,
+        notice: "invalid",
+      }),
+    )
+  }
+  if (!hasRecentAuthentication(c.get("session"))) {
+    return c.redirect(
+      reauthenticationRedirect(
+        accountFlow("login-methods", "manage-passkey", {
+          credentialId,
+          verified: true,
+        }),
+      ),
+    )
   }
   const rawName = readFormField(form, "name").trim()
   const renamed = await renameCredential(
     c.env,
-    c.req.param("id"),
+    credentialId,
     user.id,
     rawName === "" ? null : rawName.slice(0, 80),
   )
@@ -297,19 +359,37 @@ accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
       detail: "passkey renamed",
     })
   }
-  return c.redirect(`/?section=login-methods&notice=${renamed ? "passkey_renamed" : "not_found"}`)
+  return c.redirect(
+    accountFlow("login-methods", "manage-passkey", {
+      credentialId,
+      notice: renamed ? "passkey_renamed" : "not_found",
+    }),
+  )
 })
 
 accountSecurity.post("/account/passkeys/:id/delete", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
+  const credentialId = c.req.param("id")
   if (user === null || form === null) {
-    return c.redirect("/?section=login-methods&notice=invalid")
+    return c.redirect(
+      accountFlow("login-methods", "manage-passkey", {
+        credentialId,
+        notice: "invalid",
+      }),
+    )
   }
   if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect(reauthenticationRedirect("/?section=login-methods"))
+    return c.redirect(
+      reauthenticationRedirect(
+        accountFlow("login-methods", "manage-passkey", {
+          credentialId,
+          verified: true,
+        }),
+      ),
+    )
   }
-  const result = await deleteCredentialPreservingLoginMethod(c.env, c.req.param("id"), user.id)
+  const result = await deleteCredentialPreservingLoginMethod(c.env, credentialId, user.id)
   if (result === "deleted") {
     await recordAudit(c.env, {
       type: "user.passkey.updated",
@@ -325,23 +405,25 @@ accountSecurity.post("/account/passkeys/:id/delete", async (c) => {
       : result === "last_login_method"
         ? "last_login_method"
         : "not_found"
-  return c.redirect(`/?section=login-methods&notice=${notice}`)
+  return c.redirect(accountFlow("login-methods", "manage-passkey", { credentialId, notice }))
 })
 
 accountSecurity.post("/account/delete", async (c) => {
   const user = currentUser(c)
   const form = await verifiedForm(c)
-  if (user === null || form === null) return c.redirect("/?section=profile&notice=invalid")
+  if (user === null || form === null) {
+    return c.redirect(accountFlow("profile", "delete-account", { notice: "invalid" }))
+  }
   const confirmed = readFormField(form, "confirmation") === user.email
   const authorization = await authorizeSensitivePasswordAction(c, user, form, "delete_account")
   if (authorization === "reauthentication_required") {
-    return c.redirect(reauthenticationRedirect("/?section=profile"))
+    return c.redirect(reauthenticationRedirect(accountFlow("profile", "delete-account")))
   }
   if (!confirmed || authorization !== "authorized") {
-    return c.redirect("/?section=profile&notice=delete_invalid")
+    return c.redirect(accountFlow("profile", "delete-account", { notice: "delete_invalid" }))
   }
   if (!(await deleteUserPreservingActiveAdmin(c.env, user.id))) {
-    return c.redirect("/?section=profile&notice=last_active_admin")
+    return c.redirect(accountFlow("profile", "delete-account", { notice: "last_active_admin" }))
   }
   await recordAudit(c.env, {
     type: "user.deleted",

@@ -279,6 +279,7 @@ export async function updateUser(env: Env, id: string, patch: UserPatch): Promis
 
 export type UpdateUserAliasResult = "updated" | "not_found" | "conflict"
 
+/** Atomically change the administrator-managed sign-in name when it remains unique. */
 export async function updateUserAlias(
   env: Env,
   id: string,

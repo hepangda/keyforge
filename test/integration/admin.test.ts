@@ -6,6 +6,7 @@ import {
   createUser,
   getGroupByName,
   getUserByEmail,
+  getUserById,
   getUserGroupNames,
   getUserSecurityVersion,
   setUserGroupsPreservingActiveAdmin,
@@ -194,21 +195,28 @@ describe("admin users", () => {
     expect(await confirmation.text()).toContain("Confirm sign in")
   }, 10_000)
 
-  it("rejects invalid and duplicate aliases", async () => {
-    const invalid = await req("PATCH", `/admin/users/${regularUserId}`, {
-      alias: "not-valid!",
+  it("lets an administrator change a username without changing the stable user id", async () => {
+    const response = await req("PATCH", `/admin/users/${regularUserId}`, {
+      alias: "renameduser",
     })
-    expect(invalid.status).toBe(400)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ id: regularUserId, alias: "renameduser" }),
+    )
+    expect((await getUserById(env, regularUserId))?.alias).toBe("renameduser")
 
-    const other = await createUser(env, {
-      email: "alias-owner@pangda.app",
-      alias: "AliasOwner",
-    })
+    const admin = await getUserById(env, adminUserId)
     const duplicate = await req("PATCH", `/admin/users/${regularUserId}`, {
-      alias: other.alias.toLowerCase(),
+      alias: admin?.alias,
     })
     expect(duplicate.status).toBe(409)
     expect(await duplicate.json()).toEqual({ error: "duplicate_alias" })
+    expect((await getUserById(env, regularUserId))?.alias).toBe("renameduser")
+
+    const invalid = await req("PATCH", `/admin/users/${regularUserId}`, {
+      alias: "not-valid",
+    })
+    expect(invalid.status).toBe(400)
   })
 
   it("creates groups and rejects unknown group assignments", async () => {

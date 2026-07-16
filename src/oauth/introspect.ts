@@ -25,7 +25,7 @@ export async function handleIntrospect(
     return c.json({ error: "invalid_request", error_description: "Missing token" }, 400)
   }
 
-  const jwtResult = await introspectAccessToken(c, token, introspector.allowedResources)
+  const jwtResult = await introspectAccessToken(c, token, introspector)
   if (jwtResult !== null) {
     return c.json(jwtResult, 200, { "cache-control": "no-store" })
   }
@@ -36,6 +36,9 @@ export async function handleIntrospect(
   }
   const familyState = await c.env.REFRESH_TOKEN_FAMILY.getByName(record.familyId).getState()
   if (familyState === null || familyState.revoked) {
+    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+  }
+  if (!mayInspectClientTokens(introspector, record.clientId)) {
     return c.json(INACTIVE, 200, { "cache-control": "no-store" })
   }
   if (!introspector.allowedResources.includes(record.resource)) {
@@ -87,14 +90,19 @@ export async function handleIntrospect(
 async function introspectAccessToken(
   c: Context<AppBindings>,
   token: string,
-  allowedAudiences: readonly string[],
+  introspector: OAuthClient,
 ): Promise<Record<string, unknown> | null> {
   try {
-    if (allowedAudiences.length === 0) {
+    if (introspector.allowedResources.length === 0) {
       return null
     }
-    const payload = await verifyAccessToken(c.env, token, { audience: allowedAudiences })
+    const payload = await verifyAccessToken(c.env, token, {
+      audience: introspector.allowedResources,
+    })
     if (typeof payload.aud !== "string" || typeof payload["client_id"] !== "string") {
+      return null
+    }
+    if (!mayInspectClientTokens(introspector, payload["client_id"])) {
       return null
     }
     const tokenClient = await getClientById(c.env, payload["client_id"])
@@ -138,4 +146,17 @@ async function introspectAccessToken(
     }
     throw error
   }
+}
+
+/**
+ * Resource services may inspect any token for an audience they protect.
+ * Confidential web applications may inspect only tokens issued to themselves;
+ * this lets an RP observe upstream session revocation without becoming a token
+ * oracle for another client.
+ */
+function mayInspectClientTokens(introspector: OAuthClient, tokenClientId: string): boolean {
+  return (
+    introspector.clientKind === "service" ||
+    (introspector.clientKind === "application" && introspector.clientId === tokenClientId)
+  )
 }

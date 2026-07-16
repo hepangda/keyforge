@@ -68,20 +68,29 @@ return `400`. The optional `group_ids` array accepts at most 100 entries.
 
 ### `GET /admin/users/:id`
 
-Returns one user plus its `groups` array.
+Returns one user plus its `groups` array. The returned `id` is the user's stable,
+unique identifier and is also emitted as the standard `sub` claim in ID Tokens.
 
 ### `PATCH /admin/users/:id`
 
-Accepts any subset of:
+Accepts any subset of the mutable fields below. Only administrators can change
+the username (`alias`); there is no self-service username update endpoint.
 
 ```json
 {
-  "alias": "adalovelace",
+  "alias": "ada",
   "name": "Ada Lovelace",
   "disabled": false,
   "emailVerified": true
 }
 ```
+
+Changing `alias` changes the value accepted at username sign-in and the
+`preferred_username` claim issued in future tokens. It can therefore disrupt
+saved sign-in details, external mappings, or automation that treats that claim
+as a key. The stable user `id` and ID Token `sub` do not change. Invalid aliases
+return `400`; a case-insensitive alias conflict returns
+`409 {"error":"duplicate_alias"}`.
 
 Disabling a user also revokes active sessions and refresh-token access. The API
 returns `409 {"error":"last_active_admin"}` rather than disabling the sole

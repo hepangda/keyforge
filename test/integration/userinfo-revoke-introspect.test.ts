@@ -6,6 +6,7 @@ import { saveConsent } from "../../src/db/queries/consents"
 import { createUser } from "../../src/db/queries/users"
 import { hashClientSecret } from "../../src/security/client-secret"
 import { issueUserAccessToken } from "../../src/tokens/access-token"
+import { issueRefreshToken } from "../../src/tokens/refresh-token"
 
 const ISSUER = "https://auth.pangda.app"
 const CLIENT = "pangda_app"
@@ -16,6 +17,7 @@ const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 const SVC = "svc_internal_worker"
 const SVC_SECRET = "introspect-secret-abc123xyz"
+const APP_SECRET = "application-introspect-secret"
 
 let sessionToken = ""
 let userId = ""
@@ -231,6 +233,43 @@ describe("POST /oauth/introspect", () => {
     }>()
     expect(body.active).toBe(true)
     expect(body.token_type).toBe("refresh_token")
+  })
+
+  it("lets a confidential application inspect only its own refresh tokens", async () => {
+    const { refresh_token: ownRefreshToken } = await obtainTokens()
+    const otherRefreshToken = await issueRefreshToken(env, {
+      userId,
+      clientId: "pangda_admin",
+      sessionId: null,
+      resource: RESOURCE,
+      scope: "openid offline_access",
+      authTime: Math.floor(Date.now() / 1000),
+      rememberMe: false,
+    })
+    await env.DB.prepare(
+      "UPDATE oauth_clients SET type = 'confidential', client_secret_hash = ? WHERE client_id = ?",
+    )
+      .bind(await hashClientSecret(APP_SECRET), CLIENT)
+      .run()
+
+    try {
+      const appAuth = `Basic ${btoa(`${CLIENT}:${APP_SECRET}`)}`
+      const own = await (
+        await post("/oauth/introspect", { token: ownRefreshToken }, appAuth)
+      ).json<{ active: boolean }>()
+      const other = await (
+        await post("/oauth/introspect", { token: otherRefreshToken.token }, appAuth)
+      ).json<{ active: boolean }>()
+
+      expect(own.active).toBe(true)
+      expect(other.active).toBe(false)
+    } finally {
+      await env.DB.prepare(
+        "UPDATE oauth_clients SET type = 'public', client_secret_hash = NULL WHERE client_id = ?",
+      )
+        .bind(CLIENT)
+        .run()
+    }
   })
 
   it("reports inactive for a garbage token", async () => {

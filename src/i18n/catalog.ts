@@ -504,6 +504,59 @@ export const MESSAGE_CATALOG = {
   Groups: { "zh-CN": "群组", ja: "グループ" },
   "Member since": { "zh-CN": "加入时间", ja: "登録日" },
   "Public profile": { "zh-CN": "公开资料", ja: "公開プロフィール" },
+  "Account actions": { "zh-CN": "账户操作", ja: "アカウント操作" },
+  "Review your identity, then choose one account detail to manage.": {
+    "zh-CN": "查看您的身份信息，然后选择一项账户资料进行管理。",
+    ja: "本人情報を確認し、管理するアカウント項目を1つ選択してください。",
+  },
+  Permanent: { "zh-CN": "不可更改", ja: "変更不可" },
+  "No display name set.": { "zh-CN": "尚未设置显示名称。", ja: "表示名は未設定です。" },
+  "Email address": { "zh-CN": "电子邮箱地址", ja: "メールアドレス" },
+  "Change your sign-in email or verify the current address.": {
+    "zh-CN": "更改登录电子邮箱，或验证当前地址。",
+    ja: "ログイン用メールアドレスの変更、または現在のアドレスの確認を行います。",
+  },
+  Change: { "zh-CN": "更改", ja: "変更" },
+  "Edit profile": { "zh-CN": "编辑个人资料", ja: "プロフィールを編集" },
+  "Usernames are permanent after account creation.": {
+    "zh-CN": "账户创建后，用户名不可更改。",
+    ja: "ユーザー名はアカウント作成後に変更できません。",
+  },
+  "Only an administrator can change your username.": {
+    "zh-CN": "只有管理员可以更改您的用户名。",
+    ja: "ユーザー名を変更できるのは管理者だけです。",
+  },
+  "Your username stays fixed; you can update the name shown to applications.": {
+    "zh-CN": "用户名保持不变；您可以更新向应用显示的名称。",
+    ja: "ユーザー名は固定です。アプリに表示する名前は更新できます。",
+  },
+  "Your username is managed by an administrator; you can update the name shown to applications.": {
+    "zh-CN": "用户名由管理员管理；您可以更新向应用显示的名称。",
+    ja: "ユーザー名は管理者が管理します。アプリに表示する名前は更新できます。",
+  },
+  "Request change": { "zh-CN": "请求更改", ja: "変更を申請" },
+  "Enter and authorize the new address.": {
+    "zh-CN": "输入新地址并完成授权。",
+    ja: "新しいアドレスを入力して承認します。",
+  },
+  "Confirm email": { "zh-CN": "确认电子邮箱", ja: "メールを確認" },
+  "Open the single-use link we send.": {
+    "zh-CN": "打开我们发送的一次性链接。",
+    ja: "送信された1回限りのリンクを開きます。",
+  },
+  "Your sign-in email changes only after the new address is confirmed.": {
+    "zh-CN": "只有确认新地址后，登录电子邮箱才会更改。",
+    ja: "新しいアドレスの確認後にのみ、ログイン用メールアドレスが変更されます。",
+  },
+  "This cannot be undone.": { "zh-CN": "此操作无法撤销。", ja: "この操作は元に戻せません。" },
+  "Every session, login method, and application grant will be removed.": {
+    "zh-CN": "所有会话、登录方式和应用授权都将被移除。",
+    ja: "すべてのセッション、ログイン方法、アプリ権限が削除されます。",
+  },
+  "Review the impact and confirm only if you want to permanently remove this account.": {
+    "zh-CN": "请查看影响，并仅在确定永久移除此账户时确认。",
+    ja: "影響を確認し、このアカウントを完全に削除する場合のみ確定してください。",
+  },
   "Your username may contain only English letters and numbers.": {
     "zh-CN": "用户名只能包含英文字母和数字。",
     ja: "ユーザー名には英字と数字のみ使用できます。",
@@ -550,7 +603,97 @@ export const MESSAGE_CATALOG = {
       "zh-CN": "密码和通行密钥是访问此账户的独立方式。建议添加多种方式以便恢复。",
       ja: "パスワードとパスキーは独立したログイン方法です。復旧に備えて複数追加してください。",
     },
+  "Choose one method to manage, or add a recovery method.": {
+    "zh-CN": "选择一种登录方式进行管理，或添加一种恢复方式。",
+    ja: "管理するログイン方法を1つ選ぶか、復旧用の方法を追加してください。",
+  },
+  "Add login method": { "zh-CN": "添加登录方式", ja: "ログイン方法を追加" },
+  "Add a login method": { "zh-CN": "添加一种登录方式", ja: "ログイン方法を追加" },
+  "Choose the method you want to set up. You’ll verify your identity next.": {
+    "zh-CN": "选择要设置的方式。下一步将验证您的身份。",
+    ja: "設定する方法を選択してください。次に本人確認を行います。",
+  },
+  "Choose the method you want to set up. Verification occurs only when you apply the change.": {
+    "zh-CN": "选择要设置的方式。只有应用更改时才会验证身份。",
+    ja: "設定する方法を選択してください。本人確認は変更を適用するときだけ行います。",
+  },
+  "Add a separate password for recovery or another password manager.": {
+    "zh-CN": "添加一个独立密码，用于恢复或存储在另一密码管理器中。",
+    ja: "復旧用、または別のパスワードマネージャー用の独立したパスワードを追加します。",
+  },
+  "Use a device, security key, or password manager without typing a password.": {
+    "zh-CN": "无需输入密码，即可使用设备、安全密钥或密码管理器。",
+    ja: "パスワードを入力せず、デバイス、セキュリティキー、またはパスワードマネージャーを使用します。",
+  },
+  Progress: { "zh-CN": "进度", ja: "進行状況" },
+  "Verify identity": { "zh-CN": "验证身份", ja: "本人確認" },
+  "Sign in again to protect this change.": {
+    "zh-CN": "重新登录以保护此次更改。",
+    ja: "この変更を保護するため、再度ログインします。",
+  },
+  "Review and confirm the change.": {
+    "zh-CN": "查看并确认更改。",
+    ja: "変更内容を確認して確定します。",
+  },
+  "Verify it’s you": { "zh-CN": "验证是您本人", ja: "本人確認" },
+  "Before changing a login method, sign in again with one of your current methods.": {
+    "zh-CN": "更改登录方式前，请使用一种当前方式重新登录。",
+    ja: "ログイン方法を変更する前に、現在の方法のいずれかで再度ログインしてください。",
+  },
+  "Verify and continue": { "zh-CN": "验证并继续", ja: "確認して続行" },
+  "Verification happens when you submit.": {
+    "zh-CN": "提交时才会验证身份。",
+    ja: "本人確認は送信時に行います。",
+  },
+  "If your sign-in is no longer recent, we’ll ask you to verify before applying the change.": {
+    "zh-CN": "如果上次登录已不再满足近期验证要求，我们会在应用更改前要求您验证身份。",
+    ja: "直近のログイン確認が期限切れの場合は、変更を適用する前に本人確認を求めます。",
+  },
+  "Complete both steps before the new password can be used to sign in.": {
+    "zh-CN": "完成两个步骤后，新密码才可用于登录。",
+    ja: "2つの手順を完了すると、新しいパスワードでログインできます。",
+  },
+  "Choose the password details first. We verify your identity only when you submit them.": {
+    "zh-CN": "先填写密码信息；只有提交时才会验证您的身份。",
+    ja: "先にパスワード情報を入力してください。本人確認は送信時だけ行います。",
+  },
+  "Complete both steps before the new passkey can be used to sign in.": {
+    "zh-CN": "完成两个步骤后，新通行密钥才可用于登录。",
+    ja: "2つの手順を完了すると、新しいパスキーでログインできます。",
+  },
+  "Start from this page. We verify your identity only when you create the passkey.": {
+    "zh-CN": "从此页面开始；只有创建通行密钥时才会验证您的身份。",
+    ja: "このページから開始してください。本人確認はパスキー作成時だけ行います。",
+  },
+  "Create your passkey": { "zh-CN": "创建通行密钥", ja: "パスキーを作成" },
+  "Your browser will ask where to save the new passkey.": {
+    "zh-CN": "浏览器将询问新通行密钥的保存位置。",
+    ja: "ブラウザーが新しいパスキーの保存先を確認します。",
+  },
+  "Review change": { "zh-CN": "查看更改", ja: "変更を確認" },
+  "Manage password": { "zh-CN": "管理密码", ja: "パスワードを管理" },
+  "Manage passkey": { "zh-CN": "管理通行密钥", ja: "パスキーを管理" },
+  "Verify your identity before renaming or removing this login method.": {
+    "zh-CN": "重命名或移除此登录方式前，请先验证身份。",
+    ja: "このログイン方法の名前変更または削除の前に、本人確認を行ってください。",
+  },
+  "Rename or remove this login method. Verification occurs only when you submit a change.": {
+    "zh-CN": "重命名或移除此登录方式；只有提交更改时才会验证身份。",
+    ja: "このログイン方法の名前変更または削除を行います。本人確認は変更の送信時だけ行います。",
+  },
+  "Use a name that helps you recognize where this method is stored.": {
+    "zh-CN": "使用便于识别此方式存储位置的名称。",
+    ja: "この方法の保存場所を識別しやすい名前を付けてください。",
+  },
+  "Save name": { "zh-CN": "保存名称", ja: "名前を保存" },
+  "Remove login method": { "zh-CN": "移除登录方式", ja: "ログイン方法を削除" },
+  "You will no longer be able to sign in with this method.": {
+    "zh-CN": "您将无法再使用此方式登录。",
+    ja: "この方法ではログインできなくなります。",
+  },
+  Remove: { "zh-CN": "移除", ja: "削除" },
   "Add passkey": { "zh-CN": "添加通行密钥", ja: "パスキーを追加" },
+  "Add a passkey": { "zh-CN": "添加通行密钥", ja: "パスキーを追加" },
   "No reusable login methods yet. Add a password or passkey.": {
     "zh-CN": "尚无可重复使用的登录方式。请添加密码或通行密钥。",
     ja: "再利用可能なログイン方法がありません。パスワードまたはパスキーを追加してください。",
@@ -629,6 +772,10 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "请检查当前密码、新密码策略及确认内容。",
     ja: "現在のパスワード、新しいパスワードのポリシー、確認入力を確認してください。",
   },
+  "Check the new password policy and confirmation.": {
+    "zh-CN": "请检查新密码策略和确认内容。",
+    ja: "新しいパスワードのポリシーと確認入力を確認してください。",
+  },
   "Verification email sent.": { "zh-CN": "验证邮件已发送。", ja: "確認メールを送信しました。" },
   "Your email is already verified.": {
     "zh-CN": "您的电子邮箱已验证。",
@@ -652,6 +799,15 @@ export const MESSAGE_CATALOG = {
   "Device access revoked.": {
     "zh-CN": "设备访问权限已撤销。",
     ja: "デバイスのアクセスを取り消しました。",
+  },
+  "Session signed out.": { "zh-CN": "该会话已退出。", ja: "セッションをログアウトしました。" },
+  "Other sessions signed out.": {
+    "zh-CN": "其他会话已退出。",
+    ja: "他のセッションをログアウトしました。",
+  },
+  "Application access revoked.": {
+    "zh-CN": "应用访问权限已撤销。",
+    ja: "アプリのアクセス権を取り消しました。",
   },
   "Add another password or passkey before removing this one.": {
     "zh-CN": "请先添加另一个密码或通行密钥，再移除此项。",
@@ -711,6 +867,7 @@ export const MESSAGE_CATALOG = {
     ja: "アクセス拒否 — KeyForge",
   },
   "Signed in as": { "zh-CN": "登录身份", ja: "ログイン中" },
+  "Switch account": { "zh-CN": "切换账号", ja: "アカウントを切り替え" },
   "Admin console": { "zh-CN": "管理控制台", ja: "管理コンソール" },
   "No results on this page.": { "zh-CN": "此页没有结果。", ja: "このページに結果はありません。" },
   "Showing {start}–{end}": { "zh-CN": "显示 {start}–{end}", ja: "{start}〜{end}件を表示" },
@@ -917,6 +1074,24 @@ export const MESSAGE_CATALOG = {
   "English letters and numbers only. Users can sign in with this username.": {
     "zh-CN": "仅限英文字母和数字。用户可以使用此用户名登录。",
     ja: "英字と数字のみ使用できます。ユーザーはこのユーザー名でログインできます。",
+  },
+  "This stable ID is exposed as sub in ID tokens and does not change when the username changes.": {
+    "zh-CN": "这个稳定 ID 会在 ID Token 中以 sub 公开，并且不会随用户名更改。",
+    ja: "この安定したIDはIDトークンでsubとして公開され、ユーザー名を変更しても変わりません。",
+  },
+  "Changing a username can disrupt sign-in and integrations.": {
+    "zh-CN": "更改用户名可能影响登录和集成。",
+    ja: "ユーザー名の変更はログインや連携に影響する可能性があります。",
+  },
+  "The user must sign in with the new username. Saved sign-in details, external mappings, or automation that uses preferred_username may need to be updated.":
+    {
+      "zh-CN":
+        "用户之后必须使用新用户名登录。保存的登录信息、外部映射，或使用 preferred_username 的自动化可能需要更新。",
+      ja: "以後は新しいユーザー名でログインする必要があります。保存済みのログイン情報、外部マッピング、preferred_usernameを使う自動化は更新が必要になる場合があります。",
+    },
+  "English letters and numbers only. Only administrators can change this value.": {
+    "zh-CN": "仅限英文字母和数字。只有管理员可以更改此值。",
+    ja: "英字と数字のみ使用できます。この値を変更できるのは管理者だけです。",
   },
   "No name set": { "zh-CN": "未设置名称", ja: "名前未設定" },
   "Account disabled (blocks sign-in)": {

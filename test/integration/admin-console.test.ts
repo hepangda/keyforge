@@ -278,16 +278,27 @@ describe("console users", () => {
     expect(await getUserByEmail(env, "draft.user@example.com")).toBeNull()
   })
 
-  it("disables a user through the edit form", async () => {
+  it("shows the stable id and lets an administrator rename and disable a user", async () => {
     const target = await createUser(env, { email: "target@pangda.app" })
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
+    const detail = await SELF.fetch(`${ISSUER}/console/users/${target.id}`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    const detailHtml = await detail.text()
+    expect(detailHtml).toContain('name="user_id_display"')
+    expect(detailHtml).toContain(target.id)
+    expect(detailHtml).toContain("exposed as sub in ID tokens")
+    expect(detailHtml).toContain("Changing a username can disrupt sign-in and integrations")
+    expect(detailHtml).toContain('name="alias"')
     const res = await postForm(`/console/users/${target.id}`, session, csrf, {
-      alias: target.alias,
+      alias: "renamedtarget",
       disabled: "1",
     })
     expect(res.status).toBe(302)
     expect((await getUserById(env, target.id))?.disabled).toBe(true)
+    expect((await getUserById(env, target.id))?.alias).toBe("renamedtarget")
+    expect((await getUserById(env, target.id))?.id).toBe(target.id)
   })
 
   it("revokes a user's sessions", async () => {

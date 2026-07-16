@@ -78,6 +78,9 @@ html{scrollbar-gutter:stable}
 .form-grid--method .form-hint{grid-column:1/-1}
 .form-hint{margin:.3rem 0 0;color:var(--ink-3);font-size:.78rem}
 .form-hint--standalone{margin:-.6rem 0 0}
+.username-impact{display:grid;gap:.18rem;margin:0;padding:.78rem .9rem;font-size:.82rem}
+.username-impact strong{color:var(--brass-2);font-size:.84rem}
+.username-impact span{color:var(--ink-2)}
 .field-cluster{margin:0;padding:0;border:0;min-width:0}
 .field-cluster legend{margin-bottom:.55rem;color:var(--ink-2);font-size:.78rem;font-weight:600}
 .group-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}

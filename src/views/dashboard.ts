@@ -55,6 +55,23 @@ export type DashboardData = {
 export const DASHBOARD_SECTIONS = ["profile", "login-methods", "sessions", "apps", "admin"] as const
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number]
 
+export const DASHBOARD_FLOWS = [
+  "edit-profile",
+  "change-email",
+  "delete-account",
+  "choose-login-method",
+  "add-password",
+  "add-passkey",
+  "manage-password",
+  "manage-passkey",
+] as const
+export type DashboardFlow = (typeof DASHBOARD_FLOWS)[number]
+
+export type DashboardView = {
+  readonly flow: DashboardFlow | null
+  readonly credentialId: string | null
+}
+
 const NAV_ITEMS: readonly { readonly section: DashboardSection; readonly label: string }[] = [
   { section: "profile", label: "Profile" },
   { section: "login-methods", label: "Login methods" },
@@ -84,7 +101,40 @@ function csrfField(token: string): string {
   return `<input type="hidden" name="csrf_token" value="${escapeHtml(token)}">`
 }
 
-function renderProfile(data: DashboardData): string {
+function dashboardHref(
+  section: DashboardSection,
+  options: {
+    readonly flow?: DashboardFlow
+    readonly credentialId?: string
+  } = {},
+): string {
+  const query = new URLSearchParams({ section })
+  if (options.flow !== undefined) query.set("flow", options.flow)
+  if (options.credentialId !== undefined) query.set("credential", options.credentialId)
+  return `/?${query.toString()}`
+}
+
+function flowPanel(
+  i18n: I18n,
+  title: string,
+  description: string,
+  backHref: string,
+  body: string,
+): string {
+  return `<section class="dash-panel flow-panel">
+    <div class="dash-panel__head flow-panel__head"><div class="flow-panel__intro"><a class="flow-back" href="${escapeHtml(backHref)}">${escapeHtml(i18n.t("Back"))}</a><h2 class="dash-panel__title">${escapeHtml(i18n.t(title))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t(description))}</p></div></div>
+    <div class="dash-panel__body flow-panel__body">${body}</div>
+  </section>`
+}
+
+function submissionVerificationNote(i18n: I18n): string {
+  return `<div class="security-note">
+    <span class="security-note__mark" aria-hidden="true">${icons.key}</span>
+    <div><strong>${escapeHtml(i18n.t("Verification happens when you submit."))}</strong><span>${escapeHtml(i18n.t("If your sign-in is no longer recent, we’ll ask you to verify before applying the change."))}</span></div>
+  </div>`
+}
+
+function renderProfileOverview(data: DashboardData): string {
   const { i18n, user, groups } = data
   const displayName = user.name ?? user.alias
   const avatar =
@@ -95,108 +145,219 @@ function renderProfile(data: DashboardData): string {
     ? `<span class="badge badge--ok"><span class="badge__dot"></span>${escapeHtml(i18n.t("Verified"))}</span>`
     : `<span class="badge badge--warn"><span class="badge__dot"></span>${escapeHtml(i18n.t("Unverified"))}</span>`
   const groupList = groups.length === 0 ? "—" : groups.map(escapeHtml).join(", ")
-  const hasPassword = data.passwords.length > 0
   const verifyEmail = user.emailVerified
     ? ""
-    : `<form method="post" action="/account/email/verify">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(i18n.t("Send verification email"))}</button></form>`
-  const emailAuthorization = hasPassword
-    ? `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>`
-    : `<div class="callout">${escapeHtml(i18n.t("A recent sign-in is required because this account has no password."))}</div>`
+    : `<form method="post" action="/account/email/verify">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm btn--auto" type="submit">${escapeHtml(i18n.t("Send verification email"))}</button></form>`
 
   return `<section class="dash-panel" id="profile">
-  <div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Profile"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Your account identity and information shared with approved applications."))}</p></div></div>
-  <div class="dash-panel__body">
-    <div class="identity">${avatar}<div class="identity__body"><div class="identity__name">${escapeHtml(displayName)}</div><div class="identity__sub">@${escapeHtml(user.alias)} · ${escapeHtml(user.email)}</div></div></div>
-    <div class="meta">
-      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Username"))}</span><span class="meta__val mono">${escapeHtml(user.alias)}</span></div>
-      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Email"))}</span><span class="meta__val">${escapeHtml(user.email)}</span></div>
-      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Verification"))}</span><span class="meta__val">${emailBadge}</span></div>
-      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Groups"))}</span><span class="meta__val">${groupList}</span></div>
-      <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Member since"))}</span><span class="meta__val mono">${escapeHtml(i18n.formatDate(user.createdAt))}</span></div>
+    <div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Profile"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Review your identity, then choose one account detail to manage."))}</p></div></div>
+    <div class="dash-panel__body">
+      <div class="identity">${avatar}<div class="identity__body"><div class="identity__name">${escapeHtml(displayName)}</div><div class="identity__sub">@${escapeHtml(user.alias)} · ${escapeHtml(user.email)}</div></div></div>
+      <div class="meta">
+        <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Username"))}</span><span class="meta__val mono">${escapeHtml(user.alias)}</span></div>
+        <div class="meta__row meta__row--identity"><span class="meta__key">${escapeHtml(i18n.t("User ID"))}</span><span class="meta__val mono">${escapeHtml(user.id)}</span></div>
+        <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Email"))}</span><span class="meta__val">${escapeHtml(user.email)}</span></div>
+        <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Verification"))}</span><span class="meta__val">${emailBadge}</span></div>
+        <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Groups"))}</span><span class="meta__val">${groupList}</span></div>
+        <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Member since"))}</span><span class="meta__val mono">${escapeHtml(i18n.formatDate(user.createdAt))}</span></div>
+      </div>
+      <div class="action-list" aria-label="${escapeHtml(i18n.t("Account actions"))}">
+        <div class="action-row"><div><h3>${escapeHtml(i18n.t("Display name"))}</h3><p>${escapeHtml(user.name ?? i18n.t("No display name set."))}</p></div><a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("profile", { flow: "edit-profile" })}">${escapeHtml(i18n.t("Edit"))}</a></div>
+        <div class="action-row"><div><h3>${escapeHtml(i18n.t("Email address"))}</h3><p>${escapeHtml(i18n.t("Change your sign-in email or verify the current address."))}</p></div><div class="action-row__actions">${verifyEmail}<a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("profile", { flow: "change-email" })}">${escapeHtml(i18n.t("Change"))}</a></div></div>
+        <div class="action-row action-row--danger"><div><h3>${escapeHtml(i18n.t("Delete account"))}</h3><p>${escapeHtml(i18n.t("Permanently removes sessions, login methods, and application grants."))}</p></div><a class="btn btn--danger btn--sm btn--auto" href="${dashboardHref("profile", { flow: "delete-account" })}">${escapeHtml(i18n.t("Review"))}</a></div>
+      </div>
     </div>
-    <div class="settings-grid">
-      <form method="post" action="/account/profile" class="setting-card">
+  </section>`
+}
+
+function renderProfile(data: DashboardData, view: DashboardView): string {
+  const { i18n, user } = data
+  const backHref = dashboardHref("profile")
+  if (view.flow === "edit-profile") {
+    const body = `<div class="readonly-field"><span>${escapeHtml(i18n.t("Username"))}</span><strong class="mono">${escapeHtml(user.alias)}</strong><small>${escapeHtml(i18n.t("Only an administrator can change your username."))}</small></div>
+      <form method="post" action="/account/profile" class="flow-form">
         ${csrfField(data.csrfToken)}
-        <div><h3>${escapeHtml(i18n.t("Public profile"))}</h3><p>${escapeHtml(i18n.t("Your username may contain only English letters and numbers."))}</p></div>
-        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Username"))}</span><input class="input" name="alias" pattern="[A-Za-z0-9]+" maxlength="64" value="${escapeHtml(user.alias)}" autocomplete="username" required></label>
         <label class="field"><span class="field__label">${escapeHtml(i18n.t("Display name"))}</span><input class="input" name="name" maxlength="120" value="${escapeHtml(user.name ?? "")}" autocomplete="name"></label>
-        <button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(i18n.t("Save profile"))}</button>
-      </form>
-      <div class="setting-card"><div><h3>${escapeHtml(i18n.t("Email verification"))}</h3><p>${escapeHtml(i18n.t(user.emailVerified ? "This address has been verified." : "Verify this address before applications treat it as confirmed."))}</p></div>${verifyEmail}</div>
-      <form method="post" action="/account/email/change" class="setting-card">
+        <button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Save profile"))}</button>
+      </form>`
+    return flowPanel(
+      i18n,
+      "Edit profile",
+      "Your username is managed by an administrator; you can update the name shown to applications.",
+      backHref,
+      body,
+    )
+  }
+  if (view.flow === "change-email") {
+    const hasPassword = data.passwords.length > 0
+    const authorization = hasPassword
+      ? `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>`
+      : `<div class="callout">${escapeHtml(i18n.t("A recent sign-in is required because this account has no password."))}</div>`
+    const body = `<div class="flow-steps flow-steps--email"><div class="flow-step flow-step--active"><span>1</span><div><b>${escapeHtml(i18n.t("Request change"))}</b><small>${escapeHtml(i18n.t("Enter and authorize the new address."))}</small></div></div><div class="flow-step"><span>2</span><div><b>${escapeHtml(i18n.t("Confirm email"))}</b><small>${escapeHtml(i18n.t("Open the single-use link we send."))}</small></div></div></div>
+      <form method="post" action="/account/email/change" class="flow-form">
         ${csrfField(data.csrfToken)}
-        <div><h3>${escapeHtml(i18n.t("Change email"))}</h3><p>${escapeHtml(i18n.t("We confirm the new address before changing your sign-in email."))}</p></div>
         <label class="field"><span class="field__label">${escapeHtml(i18n.t("New email"))}</span><input class="input" type="email" name="new_email" autocomplete="email" maxlength="254" required></label>
-        ${emailAuthorization}
-        <button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(i18n.t("Send confirmation"))}</button>
-      </form>
-      <form method="post" action="/account/delete" class="setting-card setting-card--danger">
+        ${authorization}
+        <button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Send confirmation"))}</button>
+      </form>`
+    return flowPanel(
+      i18n,
+      "Change email",
+      "Your sign-in email changes only after the new address is confirmed.",
+      backHref,
+      body,
+    )
+  }
+  if (view.flow === "delete-account") {
+    const hasPassword = data.passwords.length > 0
+    const password = hasPassword
+      ? `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>`
+      : ""
+    const body = `<div class="alert" role="alert">${icons.alert}<div><strong>${escapeHtml(i18n.t("This cannot be undone."))}</strong><br>${escapeHtml(i18n.t("Every session, login method, and application grant will be removed."))}</div></div>
+      <form method="post" action="/account/delete" class="flow-form">
         ${csrfField(data.csrfToken)}
-        <div><h3>${escapeHtml(i18n.t("Delete account"))}</h3><p>${escapeHtml(i18n.t("Permanently removes sessions, login methods, and application grants."))}</p></div>
         <label class="field"><span class="field__label">${escapeHtml(i18n.t("Type {value} to confirm", { value: user.email }))}</span><input class="input" name="confirmation" autocomplete="off" required></label>
-        ${hasPassword ? `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>` : ""}
-        <button class="btn btn--danger btn--sm" type="submit">${escapeHtml(i18n.t("Delete account"))}</button>
-      </form>
-    </div>
-  </div>
-</section>`
+        ${password}
+        <button class="btn btn--danger btn--auto" type="submit">${escapeHtml(i18n.t("Delete account"))}</button>
+      </form>`
+    return flowPanel(
+      i18n,
+      "Delete account",
+      "Review the impact and confirm only if you want to permanently remove this account.",
+      backHref,
+      body,
+    )
+  }
+  return renderProfileOverview(data)
 }
 
-function credentialActions(
-  data: DashboardData,
-  kind: "passwords" | "passkeys",
-  id: string,
-  name: string | null,
-): string {
-  const label = data.i18n.t(kind === "passwords" ? "Password name" : "Passkey name")
-  return `<div class="credential-actions">
-    <form method="post" action="/account/${kind}/${escapeHtml(id)}/rename" class="credential-rename">
-      ${csrfField(data.csrfToken)}
-      <input class="input" name="name" maxlength="80" aria-label="${label}" placeholder="${label}" value="${escapeHtml(name ?? "")}">
-      <button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(data.i18n.t("Rename"))}</button>
-    </form>
-    <form method="post" action="/account/${kind}/${escapeHtml(id)}/delete">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm" type="submit">${escapeHtml(data.i18n.t("Delete"))}</button></form>
-  </div>`
-}
-
-function renderLoginMethods(data: DashboardData): string {
+function renderLoginMethodsOverview(data: DashboardData): string {
   const { i18n } = data
   const passwordRows = data.passwords.map(
     (password) => `<li class="dash-list__item">
       <div class="method-mark" aria-hidden="true">${icons.key}</div>
       <div class="dash-item__main"><div class="dash-item__title">${escapeHtml(password.name ?? i18n.t("Password"))} <span class="method-kind">${escapeHtml(i18n.t("Password"))}</span></div><div class="dash-item__meta">${escapeHtml(i18n.t("Added"))} <span class="mono">${i18n.formatDate(password.createdAt)}</span>${password.lastUsedAt === null ? "" : ` · ${escapeHtml(i18n.t("Last used"))} <span class="mono">${i18n.formatDate(password.lastUsedAt)}</span>`}${data.isAdmin && !password.adminEligible ? ` · ${escapeHtml(i18n.t("Not available for administrator sign-in"))}` : ""}</div></div>
-      ${credentialActions(data, "passwords", password.id, password.name)}
+      <a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("login-methods", { flow: "manage-password", credentialId: password.id })}">${escapeHtml(i18n.t("Manage"))}</a>
     </li>`,
   )
   const passkeyRows = data.passkeys.map(
     (passkey) => `<li class="dash-list__item">
       <div class="method-mark method-mark--passkey" aria-hidden="true">${icons.key}</div>
       <div class="dash-item__main"><div class="dash-item__title">${escapeHtml(passkey.name ?? i18n.t("Passkey"))} <span class="method-kind">${escapeHtml(i18n.t("Passkey"))}</span></div><div class="dash-item__meta">${escapeHtml(i18n.t("Added"))} <span class="mono">${i18n.formatDate(passkey.createdAt)}</span>${passkey.lastUsedAt === null ? "" : ` · ${escapeHtml(i18n.t("Last used"))} <span class="mono">${i18n.formatDate(passkey.lastUsedAt)}</span>`}</div></div>
-      ${credentialActions(data, "passkeys", passkey.id, passkey.name)}
+      <a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("login-methods", { flow: "manage-passkey", credentialId: passkey.id })}">${escapeHtml(i18n.t("Manage"))}</a>
     </li>`,
   )
   const rows = [...passwordRows, ...passkeyRows]
-  const currentPassword =
-    data.passwords.length === 0
-      ? `<div class="callout">${escapeHtml(i18n.t("You are adding the first password to this account. A recent sign-in is required."))}</div>`
-      : `<label class="field"><span class="field__label">${escapeHtml(i18n.t("Current password"))}</span><input class="input" type="password" name="current_password" autocomplete="current-password" required></label>`
   return `<section class="dash-panel" id="login-methods">
-    <div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Login methods"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Passwords and passkeys are independent ways to access this account. Add more than one for recovery."))}</p></div><button class="btn btn--primary btn--sm btn--auto" type="button" data-passkey-register data-csrf="${escapeHtml(data.csrfToken)}" data-waiting-message="${escapeHtml(i18n.t("Follow your browser's passkey prompt…"))}" data-cancelled-message="${escapeHtml(i18n.t("Passkey creation was cancelled."))}" data-error-message="${escapeHtml(i18n.t("Passkey creation could not be completed."))}">${escapeHtml(i18n.t("Add passkey"))}</button></div>
+    <div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Login methods"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Choose one method to manage, or add a recovery method."))}</p></div><a class="btn btn--primary btn--sm btn--auto" href="${dashboardHref("login-methods", { flow: "choose-login-method" })}">${escapeHtml(i18n.t("Add login method"))}</a></div>
     <ul class="dash-list">${rows.length === 0 ? `<li class="dash-list__item--empty">${escapeHtml(i18n.t("No reusable login methods yet. Add a password or passkey."))}</li>` : rows.join("\n")}</ul>
-    <div class="dash-panel__foot login-method-add">
-      <form method="post" action="/account/passwords" class="method-form">
-        ${csrfField(data.csrfToken)}
-        <div class="method-form__intro"><h3>${escapeHtml(i18n.t("Add a password"))}</h3><p>${escapeHtml(i18n.t(data.isAdmin ? "Use {minimum}–128 characters; administrator passwords require at least 12." : "Use {minimum}–128 characters.", { minimum: data.passwordMinimum }))}</p></div>
-        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Name"))}</span><input class="input" name="name" maxlength="80" placeholder="${escapeHtml(i18n.t("e.g. Password manager"))}"></label>
-        ${currentPassword}
-        <label class="field"><span class="field__label">${escapeHtml(i18n.t("New password"))}</span><input class="input" type="password" name="password" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
-        <label class="field"><span class="field__label">${escapeHtml(i18n.t("Confirm password"))}</span><input class="input" type="password" name="password_confirm" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
-        <button class="btn btn--ghost btn--sm btn--auto" type="submit">${escapeHtml(i18n.t("Add password"))}</button>
-      </form>
-      <p class="inline-status" data-passkey-status role="status" hidden></p>
-    </div>
-    <script src="/assets/account.js" defer></script>
   </section>`
+}
+
+function renderChooseLoginMethod(data: DashboardData): string {
+  const { i18n } = data
+  const body = `<div class="choice-list">
+    <a class="choice-row" href="${dashboardHref("login-methods", { flow: "add-password" })}"><div class="method-mark" aria-hidden="true">${icons.key}</div><div><h3>${escapeHtml(i18n.t("Password"))}</h3><p>${escapeHtml(i18n.t("Add a separate password for recovery or another password manager."))}</p></div><span>${escapeHtml(i18n.t("Continue"))}</span></a>
+    <a class="choice-row" href="${dashboardHref("login-methods", { flow: "add-passkey" })}"><div class="method-mark method-mark--passkey" aria-hidden="true">${icons.key}</div><div><h3>${escapeHtml(i18n.t("Passkey"))}</h3><p>${escapeHtml(i18n.t("Use a device, security key, or password manager without typing a password."))}</p></div><span>${escapeHtml(i18n.t("Continue"))}</span></a>
+  </div>`
+  return flowPanel(
+    i18n,
+    "Add a login method",
+    "Choose the method you want to set up. Verification occurs only when you apply the change.",
+    dashboardHref("login-methods"),
+    body,
+  )
+}
+
+function renderAddPassword(data: DashboardData): string {
+  const { i18n } = data
+  const content = `<form method="post" action="/account/passwords" class="flow-form">
+      ${csrfField(data.csrfToken)}
+      <label class="field"><span class="field__label">${escapeHtml(i18n.t("Name"))}</span><input class="input" name="name" maxlength="80" placeholder="${escapeHtml(i18n.t("e.g. Password manager"))}"></label>
+      <label class="field"><span class="field__label">${escapeHtml(i18n.t("New password"))}</span><input class="input" type="password" name="password" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
+      <label class="field"><span class="field__label">${escapeHtml(i18n.t("Confirm password"))}</span><input class="input" type="password" name="password_confirm" minlength="${data.passwordMinimum}" maxlength="128" autocomplete="new-password" required></label>
+      <p class="form-hint">${escapeHtml(i18n.t(data.isAdmin ? "Use {minimum}–128 characters; administrator passwords require at least 12." : "Use {minimum}–128 characters.", { minimum: data.passwordMinimum }))}</p>
+      ${submissionVerificationNote(i18n)}
+      <div class="flow-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Add password"))}</button></div>
+    </form>`
+  return flowPanel(
+    i18n,
+    "Add a password",
+    "Choose the password details first. We verify your identity only when you submit them.",
+    dashboardHref("login-methods", { flow: "choose-login-method" }),
+    content,
+  )
+}
+
+function passkeyButton(data: DashboardData): string {
+  const { i18n } = data
+  return `<div class="passkey-setup"><div class="passkey-setup__intro"><div class="method-mark method-mark--passkey" aria-hidden="true">${icons.key}</div><div><h3>${escapeHtml(i18n.t("Create your passkey"))}</h3><p>${escapeHtml(i18n.t("Your browser will ask where to save the new passkey."))}</p></div></div>${submissionVerificationNote(i18n)}<div class="flow-actions"><button class="btn btn--primary btn--auto" type="button" data-passkey-register data-csrf="${escapeHtml(data.csrfToken)}" data-waiting-message="${escapeHtml(i18n.t("Follow your browser's passkey prompt…"))}" data-cancelled-message="${escapeHtml(i18n.t("Passkey creation was cancelled."))}" data-error-message="${escapeHtml(i18n.t("Passkey creation could not be completed."))}">${escapeHtml(i18n.t("Add passkey"))}</button></div></div><p class="inline-status" data-passkey-status role="status" hidden></p><script src="/assets/account.js" defer></script>`
+}
+
+function renderAddPasskey(data: DashboardData): string {
+  const { i18n } = data
+  return flowPanel(
+    i18n,
+    "Add a passkey",
+    "Start from this page. We verify your identity only when you create the passkey.",
+    dashboardHref("login-methods", { flow: "choose-login-method" }),
+    passkeyButton(data),
+  )
+}
+
+function renderManageCredential(
+  data: DashboardData,
+  view: DashboardView,
+  kind: "password" | "passkey",
+): string {
+  const { i18n } = data
+  const credential =
+    kind === "password"
+      ? data.passwords.find((item) => item.id === view.credentialId)
+      : data.passkeys.find((item) => item.id === view.credentialId)
+  if (credential === undefined) return renderLoginMethodsOverview(data)
+  const plural = kind === "password" ? "passwords" : "passkeys"
+  const fallbackName = i18n.t(kind === "password" ? "Password" : "Passkey")
+  const displayName = credential.name ?? fallbackName
+  const content = `<div class="credential-summary"><div class="method-mark${kind === "passkey" ? " method-mark--passkey" : ""}" aria-hidden="true">${icons.key}</div><div><strong>${escapeHtml(displayName)}</strong><span>${escapeHtml(fallbackName)} · ${escapeHtml(i18n.t("Added"))} ${escapeHtml(i18n.formatDate(credential.createdAt))}</span></div></div>
+    ${submissionVerificationNote(i18n)}
+    <div class="manage-stack">
+      <form method="post" action="/account/${plural}/${escapeHtml(credential.id)}/rename" class="flow-form manage-form">
+        ${csrfField(data.csrfToken)}
+        <div><h3>${escapeHtml(i18n.t("Rename"))}</h3><p>${escapeHtml(i18n.t("Use a name that helps you recognize where this method is stored."))}</p></div>
+        <label class="field"><span class="field__label">${escapeHtml(i18n.t(kind === "password" ? "Password name" : "Passkey name"))}</span><input class="input" name="name" maxlength="80" value="${escapeHtml(credential.name ?? "")}"></label>
+        <div class="flow-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Save name"))}</button></div>
+      </form>
+      <form method="post" action="/account/${plural}/${escapeHtml(credential.id)}/delete" class="flow-form manage-form manage-form--danger">
+        ${csrfField(data.csrfToken)}
+        <div><h3>${escapeHtml(i18n.t("Remove login method"))}</h3><p>${escapeHtml(i18n.t("You will no longer be able to sign in with this method."))}</p></div>
+        <div class="flow-actions"><button class="btn btn--danger btn--auto" type="submit">${escapeHtml(i18n.t("Remove"))}</button></div>
+      </form>
+    </div>`
+  return flowPanel(
+    i18n,
+    kind === "password" ? "Manage password" : "Manage passkey",
+    "Rename or remove this login method. Verification occurs only when you submit a change.",
+    dashboardHref("login-methods"),
+    content,
+  )
+}
+
+function renderLoginMethods(data: DashboardData, view: DashboardView): string {
+  switch (view.flow) {
+    case "choose-login-method":
+      return renderChooseLoginMethod(data)
+    case "add-password":
+      return renderAddPassword(data)
+    case "add-passkey":
+      return renderAddPasskey(data)
+    case "manage-password":
+      return renderManageCredential(data, view, "password")
+    case "manage-passkey":
+      return renderManageCredential(data, view, "passkey")
+    default:
+      return renderLoginMethodsOverview(data)
+  }
 }
 
 function renderSessions(data: DashboardData): string {
@@ -234,12 +395,16 @@ function renderAdmin(data: DashboardData): string {
   return `<section class="dash-panel" id="admin"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(data.i18n.t("Administration"))}</h2><p class="dash-panel__desc">${escapeHtml(data.i18n.t("Configure applications, users, resources, devices, and audit activity."))}</p></div><a href="/console" class="btn btn--primary btn--sm">${escapeHtml(data.i18n.t("Open admin console"))}</a></div></section>`
 }
 
-function renderSection(data: DashboardData, section: DashboardSection): string {
+function renderSection(
+  data: DashboardData,
+  section: DashboardSection,
+  view: DashboardView,
+): string {
   switch (section) {
     case "profile":
-      return renderProfile(data)
+      return renderProfile(data, view)
     case "login-methods":
-      return renderLoginMethods(data)
+      return renderLoginMethods(data, view)
     case "sessions":
       return renderSessions(data)
     case "apps":
@@ -251,11 +416,10 @@ function renderSection(data: DashboardData, section: DashboardSection): string {
 
 const NOTICES: Readonly<Record<string, string>> = {
   profile_updated: "Profile saved.",
-  alias_invalid: "Choose an available username using only English letters and numbers.",
   password_added: "Password added.",
   password_renamed: "Password renamed.",
   password_deleted: "Password deleted.",
-  password_invalid: "Check the current password, new password policy, and confirmation.",
+  password_invalid: "Check the new password policy and confirmation.",
   verification_sent: "Verification email sent.",
   email_verified: "Your email is already verified.",
   email_unavailable: "Email delivery is temporarily unavailable.",
@@ -264,6 +428,9 @@ const NOTICES: Readonly<Record<string, string>> = {
   passkey_added: "Passkey added.",
   passkey_renamed: "Passkey renamed.",
   passkey_deleted: "Passkey deleted.",
+  session_revoked: "Session signed out.",
+  sessions_revoked: "Other sessions signed out.",
+  app_revoked: "Application access revoked.",
   device_revoked: "Device access revoked.",
   last_login_method: "Add another password or passkey before removing this one.",
   delete_invalid: "Account deletion confirmation did not match.",
@@ -283,10 +450,91 @@ const SUCCESS_NOTICES = new Set([
   "passkey_added",
   "passkey_renamed",
   "passkey_deleted",
+  "session_revoked",
+  "sessions_revoked",
+  "app_revoked",
   "device_revoked",
 ])
 
-export function renderDashboard(data: DashboardData, section: DashboardSection): string {
+const DASHBOARD_STYLES = `
+.stage{padding-top:1rem;padding-bottom:1.5rem}
+.shell{gap:1rem;padding-top:0}
+.shell-main{gap:1rem}
+.action-list{display:flex;flex-direction:column;margin-top:1.1rem;border:1px solid var(--line);border-radius:var(--r-field);overflow:hidden}
+.action-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.9rem 1rem;background:var(--surface)}
+.action-row+.action-row{border-top:1px solid var(--line)}
+.action-row h3,.choice-row h3,.manage-form h3,.passkey-setup h3{margin:0;font-size:.9rem}
+.action-row p,.choice-row p,.manage-form p,.passkey-setup p{margin:.18rem 0 0;color:var(--ink-2);font-size:.8rem;line-height:1.45}
+.action-row--danger{background:color-mix(in srgb,var(--danger-bg) 35%,var(--surface))}
+.action-row__actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
+.btn--auto{width:auto}
+.flow-panel{width:min(100%,720px);align-self:center}
+.flow-panel__head{align-items:flex-start;padding:1rem 1.25rem .85rem;border-bottom:1px solid var(--line)}
+.flow-panel__intro{max-width:620px}
+.flow-panel__body{max-width:none;padding:1rem 1.25rem 1.1rem}
+.flow-back{display:inline-block;margin-bottom:.42rem;color:var(--ink-2);font-size:.77rem}
+.flow-form{display:grid;gap:.7rem;max-width:none}
+.flow-form .field{margin:0}
+.flow-panel .input{padding:.58rem .75rem;font-size:.92rem}
+.flow-actions{display:flex;align-items:center;justify-content:flex-start;padding-top:.05rem}
+.readonly-field{display:grid;gap:.18rem;margin-bottom:.9rem;padding:.78rem .9rem;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-field)}
+.readonly-field>span{font-size:.72rem;color:var(--ink-3)}
+.readonly-field>small{font-size:.76rem;color:var(--ink-2)}
+.flow-steps{margin:0 0 1rem;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;overflow:hidden;background:var(--line);border:1px solid var(--line);border-radius:var(--r-field)}
+.flow-step{display:flex;align-items:flex-start;gap:.62rem;padding:.7rem .8rem;background:var(--surface-2);color:var(--ink-3)}
+.flow-step>span{display:grid;place-items:center;flex:none;width:1.4rem;height:1.4rem;border:1px solid var(--line-2);border-radius:50%;font:600 .66rem/1 var(--font-mono)}
+.flow-step>div{display:grid}
+.flow-step b{font-size:.78rem;color:inherit}
+.flow-step small{font-size:.69rem;color:var(--ink-3)}
+.flow-step--active{color:var(--brass);background:var(--brass-soft)}
+.security-note{display:flex;align-items:flex-start;gap:.62rem;padding:.6rem .72rem;color:var(--ink-2);background:var(--brass-soft);border:1px solid var(--brass-line);border-radius:var(--r-field)}
+.security-note__mark{display:grid;place-items:center;flex:none;width:28px;height:28px;color:var(--brass)}
+.security-note__mark svg{width:18px;height:18px}
+.security-note>div{display:grid;gap:.04rem}
+.security-note strong{font-size:.78rem;color:var(--ink)}
+.security-note span{font-size:.73rem;line-height:1.4}
+.choice-list{display:grid;gap:1px;overflow:hidden;background:var(--line);border:1px solid var(--line);border-radius:var(--r-field)}
+.choice-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.85rem;padding:.9rem;color:var(--ink);background:var(--surface-2)}
+.choice-row:hover{text-decoration:none;background:var(--surface-3)}
+.choice-row>span{color:var(--brass);font-size:.78rem;font-weight:600}
+.method-mark{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:9px;color:var(--brass);background:var(--brass-soft);border:1px solid var(--brass-line)}
+.method-mark svg{width:18px;height:18px}
+.method-mark--passkey{color:var(--ok);background:var(--ok-soft);border-color:transparent}
+.method-kind{font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);border:1px solid var(--line-2);border-radius:var(--r-pill);padding:.07rem .34rem}
+.passkey-setup{display:grid;gap:.85rem}
+.passkey-setup__intro{display:flex;align-items:center;gap:.75rem;padding:.78rem .85rem;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-field)}
+.credential-summary{display:flex;align-items:center;gap:.75rem;margin-bottom:.85rem;padding:.75rem .82rem;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-field)}
+.credential-summary>div:last-child{display:grid}
+.credential-summary span{color:var(--ink-2);font-size:.76rem}
+.manage-stack{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(220px,.8fr);gap:1px;margin-top:.85rem;overflow:hidden;background:var(--line);border:1px solid var(--line);border-radius:var(--r-field)}
+.manage-form{align-content:start;padding:.95rem 1rem;background:var(--surface)}
+.manage-form--danger{display:flex;flex-direction:column;background:color-mix(in srgb,var(--danger-bg) 32%,var(--surface))}
+.manage-form--danger .flow-actions{margin-top:auto;padding-top:.7rem}
+.form-hint{margin:0;color:var(--ink-2);font-size:.76rem}
+.inline-status{margin:.7rem 0 0;color:var(--ink-2);font-size:.8rem}
+.dash-notice{padding:.75rem .9rem;color:var(--ok);background:var(--ok-soft);border:1px solid rgba(121,211,165,.25);border-radius:var(--r-field)}
+.dash-notice--error{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-line)}
+@media(max-width:720px){
+  .meta__row--identity{align-items:flex-start;flex-direction:column;gap:.35rem}
+  .meta__row--identity .meta__val{text-align:left}
+  .flow-panel__head{padding:1rem 1.05rem .9rem}
+  .flow-panel__body{padding:1rem 1.05rem 1.1rem}
+  .flow-steps{grid-template-columns:1fr}
+  .manage-stack{grid-template-columns:1fr}
+  .choice-row{grid-template-columns:auto minmax(0,1fr)}
+  .choice-row>span{grid-column:2}
+  .action-row{align-items:flex-start;flex-direction:column}
+  .action-row__actions{justify-content:flex-start;width:100%}
+  .flow-actions .btn{width:100%}
+  .dash-list__item .method-mark{display:none}
+}
+`
+
+export function renderDashboard(
+  data: DashboardData,
+  section: DashboardSection,
+  view: DashboardView,
+): string {
   const { i18n } = data
   const displayName = data.user.name ?? data.user.alias
   const heading = i18n.t(
@@ -298,7 +546,7 @@ export function renderDashboard(data: DashboardData, section: DashboardSection):
       : `<img class="avatar" src="${escapeHtml(data.user.picture)}" alt="" referrerpolicy="no-referrer">`
   const tabs = NAV_ITEMS.filter((item) => item.section !== "admin" || data.isAdmin).map((item) => ({
     label: i18n.t(item.label),
-    href: `/?section=${item.section}`,
+    href: dashboardHref(item.section),
     active: item.section === section,
   }))
   const barRight = `<div class="shell-user">${avatar}<span class="shell-user__name">${escapeHtml(displayName)}</span></div><form method="post" action="/logout">${csrfField(data.csrfToken)}<button type="submit" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Sign out"))}</button></form>`
@@ -315,7 +563,7 @@ export function renderDashboard(data: DashboardData, section: DashboardSection):
     heading,
     barRight,
     tabs,
-    content: `${noticeHtml}${renderSection(data, section)}`,
-    extraStyles: `.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:1.2rem}.setting-card{display:flex;flex-direction:column;align-items:flex-start;gap:.8rem;padding:1rem;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-field)}.setting-card h3,.method-form h3{margin:0;font-size:.92rem}.setting-card p,.method-form p{margin:.2rem 0 0;color:var(--ink-2);font-size:.82rem}.setting-card .field,.method-form .field{width:100%;margin:0}.setting-card--danger{border-color:var(--danger-line)}.credential-actions,.credential-rename{display:flex;align-items:center;gap:.5rem}.credential-actions{flex:none}.credential-rename .input{width:10rem;padding:.42rem .6rem;font-size:.82rem}.method-mark{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:10px;color:var(--brass);background:var(--brass-soft);border:1px solid var(--brass-line)}.method-mark--passkey{color:var(--ok);background:var(--ok-soft);border-color:transparent}.method-kind{font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);border:1px solid var(--line-2);border-radius:var(--r-pill);padding:.08rem .38rem}.login-method-add{padding:1.35rem 1.6rem}.method-form{display:grid;grid-template-columns:1.2fr repeat(3,minmax(150px,1fr)) auto;gap:.8rem;align-items:end}.method-form__intro{align-self:center}.btn--auto{width:auto}.inline-status{margin:.8rem 0 0;color:var(--ink-2);font-size:.84rem}.dash-notice{padding:.8rem 1rem;color:var(--ok);background:var(--ok-soft);border:1px solid rgba(121,211,165,.25);border-radius:var(--r-field)}.dash-notice--error{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-line)}@media(max-width:920px){.method-form{grid-template-columns:1fr 1fr}.method-form__intro{grid-column:1/-1}}@media(max-width:720px){.settings-grid,.method-form{grid-template-columns:1fr}.credential-actions,.credential-rename{width:100%;flex-wrap:wrap}.credential-rename .input{width:auto;flex:1}.dash-list__item .method-mark{display:none}}`,
+    content: `${noticeHtml}${renderSection(data, section, view)}`,
+    extraStyles: DASHBOARD_STYLES,
   })
 }

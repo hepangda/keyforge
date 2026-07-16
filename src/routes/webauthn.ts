@@ -31,7 +31,8 @@ const CEREMONY_COOKIE = "__Host-keyforge_webauthn"
 const PASSKEY_RATE_LIMIT = 20
 const PASSKEY_VERIFY_RATE_LIMIT = 40
 const PASSKEY_RATE_WINDOW_SECONDS = 5 * 60
-const PASSKEY_REAUTHENTICATION_URL = "/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods"
+const PASSKEY_REAUTHENTICATION_URL =
+  "/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey%26verified%3D1"
 
 function recentAuthenticationRequired(c: Context<AppBindings>): Response {
   return c.json(

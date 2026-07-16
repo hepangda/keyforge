@@ -168,7 +168,42 @@ describe("OIDC prompt and max_age", () => {
     const response = await fetchWithSession(authorizeUrl({ prompt: "consent" }))
 
     expect(response.status).toBe(200)
-    expect(await response.text()).toContain("Authorize Pangda App")
+    const html = await response.text()
+    expect(html).toContain("Authorize Pangda App")
+    expect(html).toContain("Signed in as")
+    expect(html).toContain("OIDC Interactions")
+    expect(html).toContain(user.email)
+    expect(html).toContain('value="switch_account"')
+    expect(html).toContain('value="sign_out"')
+  })
+
+  it("switches accounts without losing the authorization request", async () => {
+    const request = new URL(authorizeUrl({ prompt: "consent", state: "switch-state" }))
+    const page = await fetchWithSession(request.toString())
+    expect(page.status).toBe(200)
+    const csrf = cookieValue(page, "__Host-keyforge_csrf")
+    expect(csrf).not.toBe("")
+    const continueTo = `${request.pathname}${request.search}`
+
+    const response = await SELF.fetch(`${ISSUER}/logout`, {
+      method: "POST",
+      headers: {
+        cookie: `__Host-keyforge_session=${sessionToken}; __Host-keyforge_csrf=${csrf}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        csrf_token: csrf,
+        intent: "switch_account",
+        continue_to: continueTo,
+      }).toString(),
+      redirect: "manual",
+    })
+
+    expect(response.status).toBe(302)
+    const login = new URL(response.headers.get("location") ?? "", ISSUER)
+    expect(login.pathname).toBe("/login")
+    expect(login.searchParams.get("return_to")).toBe(continueTo)
+    expect(await getSessionByToken(env, sessionToken)).toBeNull()
   })
 
   it("preserves prompt=login until a real reauthentication proof is consumed", async () => {

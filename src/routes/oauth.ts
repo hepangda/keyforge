@@ -191,11 +191,14 @@ oauth.post("/oauth/introspect", async (c) => {
   await enforceOAuthRateLimit(c, `oauth:introspect:ip:${ipHash ?? "unknown"}`, 120)
   const form = await readFormBody(c)
   const { client } = await authenticateClient(c, form)
-  if (client.type !== "confidential" || client.clientKind !== "service") {
+  if (
+    client.type !== "confidential" ||
+    (client.clientKind !== "service" && client.clientKind !== "application")
+  ) {
     throw new OAuthError("invalid_client", {
       status: 403,
-      description: "Introspection requires an authorized resource service",
-      detail: `non-service client ${client.clientId} attempted introspection`,
+      description: "Introspection requires an authorized confidential client",
+      detail: `ineligible client ${client.clientId} attempted introspection`,
     })
   }
   await enforceOAuthRateLimit(c, `oauth:introspect:client:${client.clientId}`, 600)

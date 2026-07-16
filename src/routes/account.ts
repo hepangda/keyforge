@@ -18,11 +18,11 @@ account.post("/account/sessions/revoke-others", async (c) => {
   const user = c.get("user")
   const session = c.get("session")
   if (user === undefined || session === undefined) {
-    return c.redirect("/")
+    return c.redirect("/?section=sessions")
   }
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.redirect("/")
+    return c.redirect("/?section=sessions&notice=invalid")
   }
   await revokeOtherUserSessions(c.env, user.id, session.id)
   await recordAudit(c.env, {
@@ -32,17 +32,17 @@ account.post("/account/sessions/revoke-others", async (c) => {
     success: true,
     detail: "revoked other sessions",
   })
-  return c.redirect("/")
+  return c.redirect("/?section=sessions&notice=sessions_revoked")
 })
 
 account.post("/account/sessions/:id/revoke", async (c) => {
   const user = c.get("user")
   if (user === undefined) {
-    return c.redirect("/")
+    return c.redirect("/?section=sessions")
   }
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.redirect("/")
+    return c.redirect("/?section=sessions&notice=invalid")
   }
   const revoked = await revokeSessionById(c.env, c.req.param("id"), user.id)
   if (revoked) {
@@ -54,17 +54,17 @@ account.post("/account/sessions/:id/revoke", async (c) => {
       detail: "revoked a session",
     })
   }
-  return c.redirect("/")
+  return c.redirect(`/?section=sessions&notice=${revoked ? "session_revoked" : "not_found"}`)
 })
 
 account.post("/account/apps/:clientId/revoke", async (c) => {
   const user = c.get("user")
   if (user === undefined) {
-    return c.redirect("/")
+    return c.redirect("/?section=apps")
   }
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.redirect("/")
+    return c.redirect("/?section=apps&notice=invalid")
   }
   const clientId = c.req.param("clientId")
   const removed = await deleteConsent(c.env, user.id, clientId)
@@ -80,7 +80,7 @@ account.post("/account/apps/:clientId/revoke", async (c) => {
       detail: "revoked app consent",
     })
   }
-  return c.redirect("/")
+  return c.redirect("/?section=apps&notice=app_revoked")
 })
 
 account.post("/account/devices/:familyId/revoke", async (c) => {

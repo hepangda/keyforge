@@ -231,6 +231,10 @@ login.post("/logout", async (c) => {
       success: true,
     })
   }
+  if (readFormField(form, "intent") === "switch_account") {
+    const continueTo = safeLocalPath(readFormField(form, "continue_to") || null)
+    return c.redirect(`/login?return_to=${encodeURIComponent(continueTo)}`)
+  }
   return c.redirect("/login")
 })
 

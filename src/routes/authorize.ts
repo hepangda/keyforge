@@ -222,9 +222,21 @@ async function handleAuthorized(
       clientName: params.client.name,
       scopes: params.scopes,
       resource: params.resource,
+      user,
+      authorizationReturnTo: authorizationReturnTo(hiddenFields),
       hiddenFields,
     }),
   )
+}
+
+function authorizationReturnTo(hiddenFields: HiddenFields): string {
+  const query = new URLSearchParams()
+  for (const key of AUTHORIZE_PARAM_KEYS) {
+    const value = hiddenFields[key]
+    if (value !== undefined) query.set(key, value)
+  }
+  const serialized = query.toString()
+  return `/oauth/authorize${serialized === "" ? "" : `?${serialized}`}`
 }
 
 function redirectToLogin(c: Context<AppBindings>, forceReauthentication: boolean): Response {

@@ -94,13 +94,13 @@ describe("account security settings", () => {
     expect(
       (
         await postAccount("/account/profile", browser, {
-          alias: "settingsuser",
+          alias: "attemptedchange",
           name: "After",
         })
       ).headers.get("location"),
-    ).toContain("profile_updated")
+    ).toContain("flow=edit-profile")
     expect((await getUserById(env, user.id))?.name).toBe("After")
-    expect((await getUserById(env, user.id))?.alias).toBe("settingsuser")
+    expect((await getUserById(env, user.id))?.alias).toBe(user.alias)
 
     const changed = await postAccount("/account/passwords", browser, {
       name: "Backup password",
@@ -110,6 +110,7 @@ describe("account security settings", () => {
     })
     expect(changed.status).toBe(302)
     expect(changed.headers.get("location")).toContain("password_added")
+    expect(changed.headers.get("location")).toContain("flow=add-password")
     expect(await verifyUserPassword(env, user.id, "old password with enough length")).toBe(true)
     expect(await verifyUserPassword(env, user.id, "new password with enough length")).toBe(true)
 
@@ -162,10 +163,14 @@ describe("account security settings", () => {
           password: "a new password with enough length",
           password_confirm: "a new password with enough length",
         },
-        "/?section=login-methods",
+        "/?section=login-methods&flow=add-password&verified=1",
       ],
-      ["/account/email/change", { new_email: "passwordless-new@pangda.app" }, "/?section=profile"],
-      ["/account/delete", { confirmation: user.email }, "/?section=profile"],
+      [
+        "/account/email/change",
+        { new_email: "passwordless-new@pangda.app" },
+        "/?section=profile&flow=change-email",
+      ],
+      ["/account/delete", { confirmation: user.email }, "/?section=profile&flow=delete-account"],
     ] as const) {
       const response = await postAccount(path, browser, fields)
       expect(response.status).toBe(302)
@@ -203,6 +208,35 @@ describe("account security settings", () => {
     const removed = await postAccount(`/account/passkeys/${credential.id}/delete`, browser)
     expect(removed.headers.get("location")).toContain("passkey_deleted")
     expect(await listCredentialSummaries(env, user.id)).toHaveLength(0)
+  })
+
+  it("requires a fresh identity check before renaming a login method", async () => {
+    const user = await createUser(env, { email: "stale-login-method@pangda.app" })
+    await setUserPassword(env, user.id, "stale password is long enough")
+    const browser = await authenticatedBrowser(user.id)
+    const password = await env.DB.prepare(
+      "SELECT id, name FROM password_credentials WHERE user_id = ?",
+    )
+      .bind(user.id)
+      .first<{ id: string; name: string | null }>()
+    expect(password).not.toBeNull()
+    if (password === null) return
+    await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE id = ?")
+      .bind(browser.sessionId)
+      .run()
+
+    const response = await postAccount(`/account/passwords/${password.id}/rename`, browser, {
+      name: "Should not change",
+    })
+    const location = response.headers.get("location") ?? ""
+    expect(location).toContain("/login?reauth=1")
+    expect(new URL(location, ISSUER).searchParams.get("return_to")).toBe(
+      `/?section=login-methods&flow=manage-password&credential=${password.id}&verified=1`,
+    )
+    const stored = await env.DB.prepare("SELECT name FROM password_credentials WHERE id = ?")
+      .bind(password.id)
+      .first<{ name: string | null }>()
+    expect(stored?.name).toBe(password.name)
   })
 
   it("changes email only after confirming the new address and then revokes sessions", async () => {

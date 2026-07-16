@@ -338,7 +338,8 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
     if (form === null) {
       return c.redirect(`/console/users/${id}?flash=invalid`)
     }
-    if ((await getUserById(c.env, id)) === null) {
+    const current = await getUserById(c.env, id)
+    if (current === null) {
       return c.redirect("/console/users?flash=not_found")
     }
     const name = readFormField(form, "name").trim()
@@ -350,7 +351,7 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
     if (aliasOwner !== null && aliasOwner.id !== id) {
       return c.redirect(`/console/users/${id}?flash=duplicate_alias`)
     }
-    if ((await updateUserAlias(c.env, id, alias)) !== "updated") {
+    if (alias !== current.alias && (await updateUserAlias(c.env, id, alias)) !== "updated") {
       return c.redirect(`/console/users/${id}?flash=invalid_alias`)
     }
     const disabled = form.get("disabled") !== null

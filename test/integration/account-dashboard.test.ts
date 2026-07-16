@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
+import { listPasswordCredentials } from "../../src/auth/password"
 import { getSessionByToken, listSessionsByUser, revokeSessionById } from "../../src/auth/session"
 import { getConsent, saveConsent } from "../../src/db/queries/consents"
 import { recordAuthorizationGrant } from "../../src/db/queries/grants"
@@ -100,6 +101,8 @@ describe("account dashboard", () => {
 
   it("renders the dashboard with username and admin nav for an admin", async () => {
     const token = await login()
+    const admin = await getUserByEmail(env, "admin")
+    expect(admin).not.toBeNull()
     const res = await SELF.fetch(`${ISSUER}/`, {
       headers: { cookie: `__Host-keyforge_session=${token}` },
     })
@@ -112,19 +115,69 @@ describe("account dashboard", () => {
     expect(html).toContain('<h1 class="sr-only">Profile</h1>')
     expect(html).not.toContain("Connected accounts")
     expect(html).not.toContain("Account type")
+    expect(html).toContain(admin?.id ?? "missing-user-id")
+    expect(html).not.toContain("Exposed as sub in ID tokens")
+    expect(html).not.toContain("Administrator only")
   })
 
   it("keeps passwords and passkeys together under Login methods", async () => {
     const token = await login()
+    const cookie = `__Host-keyforge_session=${token}`
     const res = await SELF.fetch(`${ISSUER}/?section=login-methods`, {
-      headers: { cookie: `__Host-keyforge_session=${token}` },
+      headers: { cookie },
     })
     const html = await res.text()
     expect(html).toContain("Login methods")
-    expect(html).toContain("Passwords and passkeys")
-    expect(html).toContain("Add passkey")
-    expect(html).toContain("Add a password")
-    expect(html).not.toContain("Connected accounts")
+    expect(html).toContain("Choose one method to manage")
+    expect(html).toContain("Add login method")
+    expect(html).toContain("flow=choose-login-method")
+    expect(html).not.toContain('action="/account/passwords"')
+    expect(html).not.toContain("data-passkey-register")
+
+    const chooser = await SELF.fetch(`${ISSUER}/?section=login-methods&flow=choose-login-method`, {
+      headers: { cookie },
+    })
+    const chooserHtml = await chooser.text()
+    expect(chooserHtml).toContain("Add a login method")
+    expect(chooserHtml).toContain("flow=add-password")
+    expect(chooserHtml).toContain("flow=add-passkey")
+
+    const configure = await SELF.fetch(`${ISSUER}/?section=login-methods&flow=add-password`, {
+      headers: { cookie },
+    })
+    const configureHtml = await configure.text()
+    expect(configureHtml).toContain('action="/account/passwords"')
+    expect(configureHtml).toContain("Verification happens when you submit")
+    expect(configureHtml).not.toContain("Verify and continue")
+
+    const passkey = await SELF.fetch(`${ISSUER}/?section=login-methods&flow=add-passkey`, {
+      headers: { cookie },
+    })
+    expect(await passkey.text()).toContain("data-passkey-register")
+
+    const admin = await getUserByEmail(env, "admin")
+    expect(admin).not.toBeNull()
+    const password = admin === null ? undefined : (await listPasswordCredentials(env, admin.id))[0]
+    expect(password).toBeDefined()
+    const manage = await SELF.fetch(
+      `${ISSUER}/?section=login-methods&flow=manage-password&credential=${password?.id ?? "missing"}`,
+      { headers: { cookie } },
+    )
+    const manageHtml = await manage.text()
+    expect(manageHtml).toContain(`/account/passwords/${password?.id ?? "missing"}/rename`)
+    expect(manageHtml).toContain(`/account/passwords/${password?.id ?? "missing"}/delete`)
+    expect(manageHtml).toContain("Verification happens when you submit")
+  })
+
+  it("keeps the username read-only in self-service profile flows", async () => {
+    const token = await login()
+    const res = await SELF.fetch(`${ISSUER}/?section=profile&flow=edit-profile`, {
+      headers: { cookie: `__Host-keyforge_session=${token}` },
+    })
+    const html = await res.text()
+    expect(html).toContain("Only an administrator can change your username")
+    expect(html).toContain('name="name"')
+    expect(html).not.toContain('name="alias"')
   })
 
   it("shows only the selected section on the right", async () => {
@@ -137,7 +190,7 @@ describe("account dashboard", () => {
 
     const profile = await SELF.fetch(`${ISSUER}/`, { headers: { cookie } })
     const profileHtml = await profile.text()
-    expect(profileHtml).toContain("Your account identity and information")
+    expect(profileHtml).toContain("Review your identity, then choose one account detail")
     expect(profileHtml).not.toContain("Devices and browsers currently signed in")
   })
 
@@ -163,6 +216,7 @@ describe("account session management", () => {
     const csrf = await freshCsrf(current)
     const res = await postAccount("/account/sessions/revoke-others", current, csrf)
     expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toBe("/?section=sessions&notice=sessions_revoked")
 
     expect(await getSessionByToken(env, current)).not.toBeNull()
     expect(await getSessionByToken(env, other)).toBeNull()
@@ -183,6 +237,7 @@ describe("account session management", () => {
     const csrf = await freshCsrf(current)
     const res = await postAccount(`/account/sessions/${otherSession.id}/revoke`, current, csrf)
     expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toBe("/?section=sessions&notice=session_revoked")
 
     expect(await getSessionByToken(env, other)).toBeNull()
     expect(await getSessionByToken(env, current)).not.toBeNull()
@@ -250,6 +305,7 @@ describe("account app access", () => {
     const csrf = await freshCsrf(token)
     const res = await postAccount("/account/apps/cloudflare_one/revoke", token, csrf)
     expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toBe("/?section=apps&notice=app_revoked")
     expect(await getConsent(env, admin.id, "cloudflare_one")).toBeNull()
     await expectFamilyRevoked(family.familyId, true)
     const grant = await env.DB.prepare(
@@ -282,6 +338,7 @@ describe("account app access", () => {
       redirect: "manual",
     })
     expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toBe("/?section=apps&notice=invalid")
     expect(await getConsent(env, admin.id, "cloudflare_one")).not.toBeNull()
   })
 

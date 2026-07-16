@@ -33,7 +33,7 @@ export const ACCOUNT_BROWSER_SCRIPT = `
   const decode=(value)=>{const base=value.replace(/-/g,"+").replace(/_/g,"/");const raw=atob(base+"=".repeat((4-base.length%4)%4));return Uint8Array.from(raw,c=>c.charCodeAt(0)).buffer};
   const encode=(value)=>{const bytes=new Uint8Array(value);let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);return btoa(raw).split("+").join("-").split("/").join("_").replace(/=+$/g,"")};
   const message=(value)=>{if(status){status.textContent=value;status.hidden=value===""}};
-  const redirectForReauthentication=async(response)=>{if(response.status!==403)return false;try{const body=await response.clone().json();if(body.error==="recent_authentication_required"){window.location.assign(body.reauthenticate_url||"/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods");return true}}catch(error){}return false};
+  const redirectForReauthentication=async(response)=>{if(response.status!==403)return false;try{const body=await response.clone().json();if(body.error==="recent_authentication_required"){window.location.assign(body.reauthenticate_url||"/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey%26verified%3D1");return true}}catch(error){}return false};
   button.addEventListener("click",async()=>{
     button.disabled=true;message(button.dataset.waitingMessage||"");
     try{
@@ -47,7 +47,7 @@ export const ACCOUNT_BROWSER_SCRIPT = `
       const response={id:credential.id,rawId:encode(credential.rawId),type:credential.type,authenticatorAttachment:credential.authenticatorAttachment,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(credential.response.clientDataJSON),attestationObject:encode(credential.response.attestationObject),transports}};
       const verified=await fetch("/webauthn/register/verify",{method:"POST",headers:{"content-type":"application/json",accept:"application/json","x-keyforge-csrf":csrf},body:JSON.stringify(response)});
       if(!verified.ok){if(await redirectForReauthentication(verified))return;throw new Error("verify")}const body=await verified.json();if(!body.verified)throw new Error("verify");
-      window.location.assign("/?section=login-methods&notice=passkey_added");
+      window.location.assign("/?section=login-methods&flow=add-passkey&notice=passkey_added");
     }catch(error){if(error&&error.name==="NotAllowedError")message(button.dataset.cancelledMessage||"");else message(button.dataset.errorMessage||"");button.disabled=false}
   });
 })();`

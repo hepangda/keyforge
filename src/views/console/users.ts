@@ -222,8 +222,11 @@ export function renderUserDetail(
     <div class="panel__body">
       <form method="post" action="/console/users/${escapeHtml(user.id)}" class="form-grid">
         ${csrfField(csrfToken)}
+        ${textField(i18n, "User ID", "user_id_display", user.id, { readonly: true })}
+        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("This stable ID is exposed as sub in ID tokens and does not change when the username changes."))}</p>
+        <div class="callout username-impact" role="note"><strong>${escapeHtml(i18n.t("Changing a username can disrupt sign-in and integrations."))}</strong><span>${escapeHtml(i18n.t("The user must sign in with the new username. Saved sign-in details, external mappings, or automation that uses preferred_username may need to be updated."))}</span></div>
         ${textField(i18n, "Username", "alias", user.alias, { required: true })}
-        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("English letters and numbers only. Users can sign in with this username."))}</p>
+        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("English letters and numbers only. Only administrators can change this value."))}</p>
         ${textField(i18n, "Display name", "name", user.name ?? "", { placeholder: "No name set" })}
         ${checkboxField(i18n, "Email verified", "email_verified", user.emailVerified)}
         ${checkboxField(i18n, "Account disabled (blocks sign-in)", "disabled", user.disabled)}

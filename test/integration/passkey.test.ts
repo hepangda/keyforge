@@ -81,7 +81,9 @@ describe("passkey registration ceremony", () => {
     expect(res.status).toBe(403)
     const body = await res.json<{ error: string; reauthenticate_url: string }>()
     expect(body.error).toBe("recent_authentication_required")
-    expect(body.reauthenticate_url).toBe("/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods")
+    expect(body.reauthenticate_url).toBe(
+      "/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey%26verified%3D1",
+    )
   })
 
   it("rejects register verify without a valid challenge", async () => {

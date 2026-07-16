@@ -93,7 +93,9 @@ describe("request language selection", () => {
     expect(dashboardHtml).not.toContain('class="language-picker language-picker--card"')
     expect(dashboardHtml).toContain("プロフィール")
     expect(dashboardHtml).toContain("承認済みアプリ")
-    expect(dashboardHtml).toContain("アカウント情報と、承認済みアプリに共有される情報です。")
+    expect(dashboardHtml).toContain(
+      "本人情報を確認し、管理するアカウント項目を1つ選択してください。",
+    )
 
     const consoleResponse = await SELF.fetch(`${ISSUER}/console`, { headers: { cookie } })
     const consoleHtml = await consoleResponse.text()

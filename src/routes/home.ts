@@ -8,8 +8,13 @@ import { getUserGroupNames } from "../db/queries/users"
 import { listCredentialSummaries } from "../db/queries/webauthn"
 import { issueCsrfToken } from "../security/csrf"
 import type { AppBindings } from "../types/app"
-import type { DashboardApp, DashboardData, DashboardSection } from "../views/dashboard"
-import { DASHBOARD_SECTIONS, renderDashboard } from "../views/dashboard"
+import type {
+  DashboardApp,
+  DashboardData,
+  DashboardFlow,
+  DashboardSection,
+} from "../views/dashboard"
+import { DASHBOARD_FLOWS, DASHBOARD_SECTIONS, renderDashboard } from "../views/dashboard"
 
 const ADMIN_GROUP = "admins"
 
@@ -19,6 +24,23 @@ function parseSection(raw: string | undefined, isAdmin: boolean): DashboardSecti
     return "profile"
   }
   return match
+}
+
+const PROFILE_FLOWS = new Set<DashboardFlow>(["edit-profile", "change-email", "delete-account"])
+const LOGIN_METHOD_FLOWS = new Set<DashboardFlow>([
+  "choose-login-method",
+  "add-password",
+  "add-passkey",
+  "manage-password",
+  "manage-passkey",
+])
+
+function parseFlow(raw: string | undefined, section: DashboardSection): DashboardFlow | null {
+  const flow = DASHBOARD_FLOWS.find((candidate) => candidate === raw)
+  if (flow === undefined) return null
+  if (section === "profile" && PROFILE_FLOWS.has(flow)) return flow
+  if (section === "login-methods" && LOGIN_METHOD_FLOWS.has(flow)) return flow
+  return null
 }
 
 export const home = new Hono<AppBindings>()
@@ -59,6 +81,7 @@ home.get("/", async (c) => {
     }),
   )
   const isAdmin = groups.includes(ADMIN_GROUP)
+  const section = parseSection(c.req.query("section"), isAdmin)
   const notice = c.req.query("notice")
   const data: DashboardData = {
     i18n: c.get("i18n"),
@@ -87,5 +110,10 @@ home.get("/", async (c) => {
     passwordMinimum: minimumPasswordLength(isAdmin),
     ...(notice === undefined ? {} : { notice }),
   }
-  return c.html(renderDashboard(data, parseSection(c.req.query("section"), isAdmin)))
+  return c.html(
+    renderDashboard(data, section, {
+      flow: parseFlow(c.req.query("flow"), section),
+      credentialId: c.req.query("credential") ?? null,
+    }),
+  )
 })

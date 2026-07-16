@@ -33,12 +33,14 @@ import type { User } from "../types/domain"
 import { parsePagination, readJsonBody } from "../utils/http"
 import { createManagedUser } from "./user-management"
 
-const patchSchema = z.object({
-  alias: z.string().trim().min(1).max(MAX_ALIAS_LENGTH).regex(ALIAS_PATTERN).optional(),
-  name: z.string().trim().min(1).max(120).nullable().optional(),
-  disabled: z.boolean().optional(),
-  emailVerified: z.boolean().optional(),
-})
+const patchSchema = z
+  .object({
+    alias: z.string().trim().min(1).max(MAX_ALIAS_LENGTH).regex(ALIAS_PATTERN).optional(),
+    name: z.string().trim().min(1).max(120).nullable().optional(),
+    disabled: z.boolean().optional(),
+    emailVerified: z.boolean().optional(),
+  })
+  .strict()
 
 const createUserSchema = z.object({
   email: z.email().max(254),

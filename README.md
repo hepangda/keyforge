@@ -87,6 +87,24 @@ pnpm deploy:dry-run:staging
 pnpm deploy:dry-run:production
 ```
 
+For an existing remote installation, the complete migration, deployment, and
+post-deploy verification flow is available as one command after loading the
+target readiness credential from the monitoring secret manager:
+
+```bash
+export KEYFORGE_STAGING_READINESS_TOKEN='load-from-secret-manager'
+pnpm release:staging
+unset KEYFORGE_STAGING_READINESS_TOKEN
+
+export KEYFORGE_PRODUCTION_READINESS_TOKEN='load-from-secret-manager'
+pnpm release:production
+unset KEYFORGE_PRODUCTION_READINESS_TOKEN
+```
+
+Production requires a clean `main` worktree and an explicit confirmation. See
+[the operations runbook](docs/operations.md#one-command-release) for CI usage,
+release gates, backups, and failure handling.
+
 Dry runs are build/configuration syntax checks and intentionally work while the
 checked-in D1/KV IDs are placeholders. The remote migration and deploy scripts
 run `validate-deploy-config.mjs` first and refuse placeholder IDs, shared

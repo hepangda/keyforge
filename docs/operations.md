@@ -191,6 +191,43 @@ bootstrap secret configured after the first administrator has been verified.
 
 ## Release procedure
 
+### One-command release
+
+For an existing deployment with all four required secrets, load the matching
+readiness credential from the monitoring secret manager and run one command:
+
+```bash
+export KEYFORGE_STAGING_READINESS_TOKEN='load-from-secret-manager'
+pnpm release:staging
+unset KEYFORGE_STAGING_READINESS_TOKEN
+
+export KEYFORGE_PRODUCTION_READINESS_TOKEN='load-from-secret-manager'
+pnpm release:production
+unset KEYFORGE_PRODUCTION_READINESS_TOKEN
+```
+
+`release:production` requires a clean `main` worktree and asks the operator to
+type `production` immediately before continuing. In non-interactive CI, use
+`pnpm release:production -- --yes`. Use `pnpm release:staging -- --plan` or
+`pnpm release:production -- --plan` to inspect the sequence without running
+commands or making network requests.
+
+The release orchestrator strips the readiness token from every child process,
+then performs the local gates, checks Cloudflare authentication and required
+remote secret names, runs a strict Wrangler dry run, records D1 Time Travel
+metadata, exports schema only to a mode-`0700` temporary directory, applies
+migrations, deploys the Worker, and retries liveness, authenticated readiness,
+OIDC discovery, and JWKS verification. Production also prints D1 information
+and refuses to continue if the last 30 days exceeded the 28,800-row daily audit
+cleanup capacity. A successful release deletes the temporary schema export; a
+failed release preserves it and prints its path.
+
+The one-command path intentionally does not accept a first-deploy secrets file.
+Use the first-deployment procedure below to provision secrets and the initial
+administrator, then use the release scripts for subsequent releases.
+
+### Manual equivalent
+
 1. Run local gates:
 
    ```bash

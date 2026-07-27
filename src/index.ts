@@ -49,9 +49,9 @@ app.use("*", async (c, next) => {
 
 app.use("*", i18nMiddleware)
 
-// The consent form posts to this origin, then /oauth/authorize/decision redirects
-// to the client's registered callback. Browsers apply form-action to that full
-// redirect chain, so the consent page must allow its one validated callback
+// OAuth login and consent forms post to this origin before redirecting to a
+// client's registered callback. Browsers apply form-action to that full
+// redirect chain, so those pages must allow their one validated callback
 // source. Keep every other page at the stricter self-only default.
 app.use("*", async (c, next) => {
   await next()
@@ -78,7 +78,14 @@ app.use(
       frameAncestors: ["'none'"],
       imgSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
-      scriptSrc: ["'self'"],
+      // Cloudflare automatically injects a versioned Web Analytics beacon
+      // below /beacon.min.js/. Keep the documented unversioned URL too so the
+      // policy also supports manual injection without trusting the whole host.
+      scriptSrc: [
+        "'self'",
+        "https://static.cloudflareinsights.com/beacon.min.js",
+        "https://static.cloudflareinsights.com/beacon.min.js/",
+      ],
       styleSrc: ["'unsafe-inline'"],
       workerSrc: ["'none'"],
     },

@@ -7,7 +7,7 @@ import { JWT_TYP, SESSION_TTL } from "../config"
 import { getClientById } from "../db/queries/clients"
 import { getUserByLogin } from "../db/queries/users"
 import { isSafePostLogoutRedirectUri } from "../oauth/post-logout"
-import { buildRedirectUrl } from "../oauth/redirect"
+import { buildRedirectUrl, formActionSource, isRegisteredRedirectUri } from "../oauth/redirect"
 import { validateOAuthParameterSet } from "../oauth/request-limits"
 import { recordAudit } from "../security/audit"
 import { clearSessionCookie, getSessionCookie, setSessionCookie } from "../security/cookies"
@@ -39,11 +39,46 @@ const LOGIN_IP_RATE_LIMIT = 50
 const LOGIN_RATE_WINDOW_SECONDS = 300
 const GENERIC_LOGIN_ERROR = "Invalid email, username, or password."
 
-login.get("/login", (c) => {
-  const reauthenticating = c.req.query("reauth") === "1"
-  if (c.get("user") !== undefined && !reauthenticating) {
-    return c.redirect(safeLocalPath(c.req.query("return_to") ?? null))
+async function allowRegisteredOAuthCallback(
+  c: Context<AppBindings>,
+  returnTo: string,
+): Promise<void> {
+  const requestUrl = new URL(c.req.url)
+  const authorizationUrl = new URL(returnTo, requestUrl.origin)
+  if (
+    authorizationUrl.origin !== requestUrl.origin ||
+    authorizationUrl.pathname !== "/oauth/authorize" ||
+    validateOAuthParameterSet(authorizationUrl.searchParams) !== null ||
+    authorizationUrl.searchParams.getAll("client_id").length !== 1 ||
+    authorizationUrl.searchParams.getAll("redirect_uri").length !== 1
+  ) {
+    return
   }
+
+  const clientId = authorizationUrl.searchParams.get("client_id")
+  const redirectUri = authorizationUrl.searchParams.get("redirect_uri")
+  if (clientId === null || redirectUri === null) return
+
+  const client = await getClientById(c.env, clientId)
+  if (
+    client === null ||
+    !client.enabled ||
+    !client.allowedGrantTypes.includes("authorization_code") ||
+    !isRegisteredRedirectUri(client, redirectUri)
+  ) {
+    return
+  }
+
+  c.set("oauthRedirectFormAction", formActionSource(redirectUri))
+}
+
+login.get("/login", async (c) => {
+  const reauthenticating = c.req.query("reauth") === "1"
+  const returnTo = safeLocalPath(c.req.query("return_to") ?? null)
+  if (c.get("user") !== undefined && !reauthenticating) {
+    return c.redirect(returnTo)
+  }
+  await allowRegisteredOAuthCallback(c, returnTo)
   const csrfToken = issueCsrfToken(c)
   const notice = c.req.query("notice")
   const error = notice === "account_deleted" ? "Your account has been deleted." : undefined
@@ -51,7 +86,7 @@ login.get("/login", (c) => {
     renderLoginPage({
       i18n: c.get("i18n"),
       csrfToken,
-      returnTo: safeLocalPath(c.req.query("return_to") ?? null),
+      returnTo,
       reauthenticating,
       ...(error === undefined ? {} : { error }),
     }),
@@ -64,6 +99,7 @@ login.post("/login", async (c) => {
   const displayIdentifier = identifier.length <= EMAIL_INPUT_MAX_LENGTH ? identifier : ""
   const password = readFormField(form, "password")
   const returnTo = safeLocalPath(readFormField(form, "return_to") || null)
+  await allowRegisteredOAuthCallback(c, returnTo)
   const reauthenticating = readFormField(form, "reauth") === "1"
   const requestId = c.get("requestId")
   const ipHash = await clientIpHash(c)

@@ -17,6 +17,7 @@ import { requestCorrelationHash } from "../../src/security/request-meta"
 const ISSUER = "https://auth.pangda.app"
 const EMAIL = "alice@pangda.app"
 const PASSWORD = "correct horse battery staple"
+const REGISTERED_REDIRECT = "https://app.pangda.app/auth/callback"
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -80,9 +81,37 @@ describe("password login + session", () => {
     expect(res.status).toBe(200)
     expect(await res.text()).toContain("Sign in to KeyForge")
     expect(res.headers.getSetCookie().some((c) => c.startsWith("__Host-keyforge_csrf="))).toBe(true)
-    expect(res.headers.get("content-security-policy")).toContain("script-src 'self'")
-    expect(res.headers.get("content-security-policy")).not.toContain("script-src 'unsafe-inline'")
+    const policy = res.headers.get("content-security-policy")
+    expect(policy).toContain(
+      "script-src 'self' https://static.cloudflareinsights.com/beacon.min.js https://static.cloudflareinsights.com/beacon.min.js/;",
+    )
+    expect(policy).not.toContain("script-src 'unsafe-inline'")
     expect(res.headers.get("permissions-policy")).toContain("camera=()")
+  })
+
+  it("allows only a registered OAuth callback through the login form redirect chain", async () => {
+    const registeredReturnTo = `/oauth/authorize?${new URLSearchParams({
+      client_id: "pangda_app",
+      redirect_uri: REGISTERED_REDIRECT,
+    })}`
+    const registered = await SELF.fetch(
+      `${ISSUER}/login?return_to=${encodeURIComponent(registeredReturnTo)}`,
+    )
+    expect(registered.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://app.pangda.app;",
+    )
+
+    const unregisteredReturnTo = `/oauth/authorize?${new URLSearchParams({
+      client_id: "pangda_app",
+      redirect_uri: "https://evil.example/callback",
+    })}`
+    const unregistered = await SELF.fetch(
+      `${ISSUER}/login?return_to=${encodeURIComponent(unregisteredReturnTo)}`,
+    )
+    expect(unregistered.headers.get("content-security-policy")).toContain("form-action 'self';")
+    expect(unregistered.headers.get("content-security-policy")).not.toContain(
+      "https://evil.example",
+    )
   })
 
   it("does not expose the retired social login endpoints", async () => {

@@ -4,7 +4,7 @@ import { saveConsent } from "../db/queries/consents"
 import type { AuthorizeParams, AuthorizeValidation } from "../oauth/authorize"
 import { issueAuthorizationCode, validateAuthorizeRequest } from "../oauth/authorize"
 import { consentCoversScopes } from "../oauth/consent"
-import { buildRedirectUrl } from "../oauth/redirect"
+import { buildRedirectUrl, formActionSource } from "../oauth/redirect"
 import { validateOAuthParameterSet } from "../oauth/request-limits"
 import { serializeScopes } from "../oauth/scopes"
 import { userMayReceiveScopes } from "../oauth/user-scope-policy"
@@ -36,11 +36,6 @@ const AUTHORIZE_PARAM_KEYS = [
 
 type ConsentContext = { readonly user: User; readonly session: SessionRecord }
 type HiddenFields = Readonly<Record<string, string>>
-
-function formActionSource(redirectUri: string): string {
-  const url = new URL(redirectUri)
-  return url.origin === "null" ? url.protocol : url.origin
-}
 
 function withState(params: Record<string, string>, state: string | null): Record<string, string> {
   return state === null ? params : { ...params, state }

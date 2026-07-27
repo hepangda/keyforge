@@ -7,7 +7,7 @@ export type AppVariables = {
   readonly i18n: I18n
   readonly session?: SessionRecord
   readonly user?: User
-  /** Registered OAuth callback source allowed for the current consent form. */
+  /** Registered OAuth callback source allowed for the current form redirect chain. */
   readonly oauthRedirectFormAction?: string
 }
 

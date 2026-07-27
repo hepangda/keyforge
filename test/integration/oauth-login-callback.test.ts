@@ -70,8 +70,10 @@ function authorizeUrl(extra: Record<string, string> = {}): string {
   return url.toString()
 }
 
-async function login(returnTo: string): Promise<{ session: string; location: string }> {
-  const page = await SELF.fetch(`${ISSUER}/login`)
+async function login(
+  returnTo: string,
+): Promise<{ session: string; location: string; loginPolicy: string }> {
+  const page = await SELF.fetch(`${ISSUER}/login?${new URLSearchParams({ return_to: returnTo })}`)
   const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf")
   const res = await SELF.fetch(`${ISSUER}/login`, {
     method: "POST",
@@ -90,6 +92,7 @@ async function login(returnTo: string): Promise<{ session: string; location: str
   return {
     session: cookieValue(res.headers.getSetCookie(), "__Host-keyforge_session"),
     location: res.headers.get("location") ?? "",
+    loginPolicy: page.headers.get("content-security-policy") ?? "",
   }
 }
 
@@ -143,10 +146,11 @@ describe("oauth login + callback (end to end)", () => {
     expect(returnTo).toContain("/oauth/authorize")
 
     // 2. The user signs in with a password; a session is issued and we're sent back.
-    const { session, location } = await login(returnTo)
+    const { session, location, loginPolicy } = await login(returnTo)
     expect(session).not.toBe("")
     expect(location).toContain("/oauth/authorize")
     expect(location).toContain(`client_id=${CLIENT}`)
+    expect(loginPolicy).toContain("form-action 'self' https://app.pangda.app;")
 
     // 3. Re-issuing the authorize request while signed in shows the consent page.
     const consent = await SELF.fetch(`${ISSUER}${returnTo}`, {

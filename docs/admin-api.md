@@ -46,9 +46,10 @@ returned.
 ### `POST /admin/users`
 
 Creates a login-ready user. `email` and `alias` are required. Aliases are
-case-insensitively unique and contain only English letters and numbers. When a
-`password` is supplied it must contain 6–128 characters, or at least 12 when
-the user is created in the `admins` group; otherwise the server sends a
+case-insensitively unique and may contain English letters, numbers, hyphens,
+and underscores. When a `password` is supplied it must contain 6–128
+characters, or at least 12 when the user is created in the `admins` group;
+otherwise the server sends a
 one-time account invitation through the configured email provider.
 
 ```json
@@ -68,7 +69,9 @@ return `400`. The optional `group_ids` array accepts at most 100 entries.
 
 ### `GET /admin/users/:id`
 
-Returns one user plus its `groups` array. The returned `id` is the user's stable,
+Returns one user plus its `groups` array. `picture` is the effective avatar URL
+(an uploaded avatar takes precedence over an externally hosted one) and
+`has_avatar` reports whether the account has an uploaded avatar. The returned `id` is the user's stable,
 unique identifier and is also emitted as the standard `sub` claim in ID Tokens.
 
 ### `PATCH /admin/users/:id`
@@ -127,6 +130,25 @@ remove the final reusable login method returns `409`.
 ### `DELETE /admin/users/:id/passkeys/:credentialId`
 
 Deletes one passkey under the same last-login-method guard.
+
+### `PUT /admin/users/:id/avatar`
+
+Replaces a user's avatar. Send the raw image bytes as the request body, or a
+`multipart/form-data` body with the image in an `avatar` field. PNG, JPEG,
+WebP, and GIF are accepted up to 3 MB; the type is determined from the file's
+magic bytes, so the request `content-type` is not trusted and SVG is rejected.
+Returns `{ "picture": "...", "content_type": "image/png" }`. Oversized uploads
+return `413`, unsupported or empty bodies return `400`.
+
+The returned `picture` URL contains an unguessable object key and is publicly
+readable, which is what lets a relying party place the `picture` claim straight
+into an `<img>` tag. Replacing or removing an avatar issues a new key and makes
+the old URL stop resolving.
+
+### `DELETE /admin/users/:id/avatar`
+
+Removes the user's avatar and its stored object. Returns
+`{ "deleted": true }`, or `{ "deleted": false }` if no avatar was set.
 
 ### `POST /admin/users/:id/magic-link`
 

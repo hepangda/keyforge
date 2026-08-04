@@ -54,6 +54,11 @@ export type User = {
   readonly emailVerified: boolean
   readonly name: string | null
   readonly picture: string | null
+  /** R2 object key of a locally uploaded avatar; takes precedence over `picture`. */
+  readonly avatarKey: string | null
+  readonly avatarContentType: string | null
+  readonly avatarUpdatedAt: number | null
+
   readonly disabled: boolean
   readonly createdAt: number
 }

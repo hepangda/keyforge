@@ -1,7 +1,8 @@
 import type { PasswordCredentialSummary } from "../auth/password"
 import type { I18n } from "../i18n"
+import { AVATAR_TARGET_DIMENSION, MAX_AVATAR_BYTES } from "../media/avatar"
 import type { AuthMethod, User } from "../types/domain"
-import { appShell, escapeHtml, icons } from "./layout"
+import { appShell, avatarMarkup, escapeHtml, icons } from "./layout"
 
 export type DashboardSessionRow = {
   readonly id: string
@@ -86,17 +87,6 @@ const AUTH_METHOD_LABELS: Record<AuthMethod, string> = {
   passkey: "Passkey",
 }
 
-function initialsOf(value: string): string {
-  const base = value.includes("@") ? (value.split("@")[0] ?? value) : value
-  const parts = base
-    .trim()
-    .split(/[\s._-]+/)
-    .filter(Boolean)
-  const first = parts[0] ?? ""
-  const second = parts[1] ?? ""
-  return (second ? (first[0] ?? "") + (second[0] ?? "") : first.slice(0, 2) || "?").toUpperCase()
-}
-
 function csrfField(token: string): string {
   return `<input type="hidden" name="csrf_token" value="${escapeHtml(token)}">`
 }
@@ -137,10 +127,7 @@ function submissionVerificationNote(i18n: I18n): string {
 function renderProfileOverview(data: DashboardData): string {
   const { i18n, user, groups } = data
   const displayName = user.name ?? user.alias
-  const avatar =
-    user.picture === null
-      ? `<div class="avatar avatar--fallback" aria-hidden="true">${escapeHtml(initialsOf(displayName))}</div>`
-      : `<img class="avatar" src="${escapeHtml(user.picture)}" alt="" referrerpolicy="no-referrer">`
+  const avatar = avatarMarkup(user)
   const emailBadge = user.emailVerified
     ? `<span class="badge badge--ok"><span class="badge__dot"></span>${escapeHtml(i18n.t("Verified"))}</span>`
     : `<span class="badge badge--warn"><span class="badge__dot"></span>${escapeHtml(i18n.t("Unverified"))}</span>`
@@ -162,6 +149,7 @@ function renderProfileOverview(data: DashboardData): string {
         <div class="meta__row"><span class="meta__key">${escapeHtml(i18n.t("Member since"))}</span><span class="meta__val mono">${escapeHtml(i18n.formatDate(user.createdAt))}</span></div>
       </div>
       <div class="action-list" aria-label="${escapeHtml(i18n.t("Account actions"))}">
+        <div class="action-row"><div><h3>${escapeHtml(i18n.t("Profile photo"))}</h3><p>${escapeHtml(user.avatarKey === null ? i18n.t("No photo uploaded.") : i18n.t("A photo is shown to applications you authorize."))}</p></div><a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("profile", { flow: "edit-profile" })}">${escapeHtml(i18n.t("Edit"))}</a></div>
         <div class="action-row"><div><h3>${escapeHtml(i18n.t("Display name"))}</h3><p>${escapeHtml(user.name ?? i18n.t("No display name set."))}</p></div><a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("profile", { flow: "edit-profile" })}">${escapeHtml(i18n.t("Edit"))}</a></div>
         <div class="action-row"><div><h3>${escapeHtml(i18n.t("Email address"))}</h3><p>${escapeHtml(i18n.t("Change your sign-in email or verify the current address."))}</p></div><div class="action-row__actions">${verifyEmail}<a class="btn btn--ghost btn--sm btn--auto" href="${dashboardHref("profile", { flow: "change-email" })}">${escapeHtml(i18n.t("Change"))}</a></div></div>
         <div class="action-row action-row--danger"><div><h3>${escapeHtml(i18n.t("Delete account"))}</h3><p>${escapeHtml(i18n.t("Permanently removes sessions, login methods, and application grants."))}</p></div><a class="btn btn--danger btn--sm btn--auto" href="${dashboardHref("profile", { flow: "delete-account" })}">${escapeHtml(i18n.t("Review"))}</a></div>
@@ -174,7 +162,39 @@ function renderProfile(data: DashboardData, view: DashboardView): string {
   const { i18n, user } = data
   const backHref = dashboardHref("profile")
   if (view.flow === "edit-profile") {
+    const removePhoto = `<form method="post" action="/account/avatar/delete" data-avatar-remove${user.avatarKey === null ? " hidden" : ""}>${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm btn--auto" type="submit">${escapeHtml(i18n.t("Remove photo"))}</button></form>`
+    // Uploads run in the page so the user sees a preview, progress, and a
+    // specific error instead of a full-page navigation. Without JavaScript the
+    // same form posts normally and the server redirects with a notice.
+    const avatarMessages = [
+      ["cropHint", "Drag the square to choose the part of the photo to use."],
+      ["preparing", "Preparing your photo…"],
+      ["uploading", "Uploading…"],
+      ["saved", "Profile photo updated."],
+      ["tooLarge", "That photo is too large even after resizing. Choose a smaller image."],
+      ["unsupported", "Choose a PNG, JPEG, WebP, or GIF image."],
+      ["missing", "Choose an image file to upload."],
+      ["rateLimited", "Too many photo uploads. Try again later."],
+      ["invalid", "The request could not be verified."],
+      ["failed", "The photo could not be uploaded. Try again."],
+    ]
+      .map(
+        ([key, message]) =>
+          `data-message-${key as string}="${escapeHtml(i18n.t(message as string))}"`,
+      )
+      .join(" ")
     const body = `<div class="readonly-field"><span>${escapeHtml(i18n.t("Username"))}</span><strong class="mono">${escapeHtml(user.alias)}</strong><small>${escapeHtml(i18n.t("Only an administrator can change your username."))}</small></div>
+      <form method="post" action="/account/avatar" enctype="multipart/form-data" class="flow-form avatar-form" data-avatar-form data-max-bytes="${MAX_AVATAR_BYTES}" data-dimension="${AVATAR_TARGET_DIMENSION}" ${avatarMessages}>
+        ${csrfField(data.csrfToken)}
+        <div class="avatar-editor">${avatarMarkup(user, "avatar--lg", "data-avatar-preview")}<div class="avatar-editor__body"><label class="field"><span class="field__label">${escapeHtml(i18n.t("Profile photo"))}</span><input class="input" type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" required></label><small>${escapeHtml(i18n.t("PNG, JPEG, WebP, or GIF. Choose the part of the photo to use after selecting it."))}</small></div></div>
+        <div class="avatar-crop" data-avatar-cropper hidden>
+          <canvas class="avatar-crop__canvas" data-avatar-canvas width="320" height="320" tabindex="0" role="application" aria-label="${escapeHtml(i18n.t("Drag the square to choose the part of the photo to use."))}"></canvas>
+          <p class="avatar-crop__hint">${escapeHtml(i18n.t("Drag inside the square to move it, or drag a corner to resize."))}</p>
+        </div>
+        <p class="inline-status" data-avatar-status role="status" hidden></p>
+        <div class="action-row__actions"><button class="btn btn--primary btn--auto" type="submit" data-avatar-submit>${escapeHtml(i18n.t("Save photo"))}</button><button class="btn btn--ghost btn--sm btn--auto" type="button" data-avatar-reset>${escapeHtml(i18n.t("Reset selection"))}</button><button class="btn btn--ghost btn--sm btn--auto" type="button" data-avatar-cancel>${escapeHtml(i18n.t("Cancel"))}</button>${removePhoto}</div>
+      </form>
+      <script src="/assets/avatar.js" defer></script>
       <form method="post" action="/account/profile" class="flow-form">
         ${csrfField(data.csrfToken)}
         <label class="field"><span class="field__label">${escapeHtml(i18n.t("Display name"))}</span><input class="input" name="name" maxlength="120" value="${escapeHtml(user.name ?? "")}" autocomplete="name"></label>
@@ -416,6 +436,12 @@ function renderSection(
 
 const NOTICES: Readonly<Record<string, string>> = {
   profile_updated: "Profile saved.",
+  avatar_updated: "Profile photo updated.",
+  avatar_removed: "Profile photo removed.",
+  avatar_too_large: "That photo is too large even after resizing. Choose a smaller image.",
+  avatar_unsupported: "Choose a PNG, JPEG, WebP, or GIF image.",
+  avatar_missing: "Choose an image file to upload.",
+  avatar_rate_limited: "Too many photo uploads. Try again later.",
   password_added: "Password added.",
   password_renamed: "Password renamed.",
   password_deleted: "Password deleted.",
@@ -441,6 +467,8 @@ const NOTICES: Readonly<Record<string, string>> = {
 
 const SUCCESS_NOTICES = new Set([
   "profile_updated",
+  "avatar_updated",
+  "avatar_removed",
   "password_added",
   "password_renamed",
   "password_deleted",
@@ -512,6 +540,18 @@ const DASHBOARD_STYLES = `
 .manage-form--danger .flow-actions{margin-top:auto;padding-top:.7rem}
 .form-hint{margin:0;color:var(--ink-2);font-size:.76rem}
 .inline-status{margin:.7rem 0 0;color:var(--ink-2);font-size:.8rem}
+.inline-status--error{color:var(--danger)}
+.inline-status--ok{color:var(--ok)}
+.avatar-editor{display:flex;align-items:center;gap:1rem}
+.avatar-editor__body{flex:1;min-width:0}
+.avatar-editor__body small{display:block;margin-top:.3rem;color:var(--ink-2);font-size:.75rem}
+.avatar--lg{width:64px;height:64px;font-size:1.3rem}
+.avatar-form{padding-bottom:.9rem;margin-bottom:.3rem;border-bottom:1px solid var(--line)}
+.avatar-crop{display:grid;justify-items:center;gap:.7rem;margin-top:.3rem}
+.avatar-crop[hidden]{display:none}
+.avatar-crop__canvas{max-width:100%;height:auto;border:1px solid var(--line-brass);border-radius:var(--r-field);background:var(--surface-3);touch-action:none;cursor:crosshair}
+.avatar-crop__canvas:focus-visible{outline:none;box-shadow:var(--focus)}
+.avatar-crop__hint{margin:0;color:var(--ink-2);font-size:.75rem;text-align:center}
 .dash-notice{padding:.75rem .9rem;color:var(--ok);background:var(--ok-soft);border:1px solid rgba(121,211,165,.25);border-radius:var(--r-field)}
 .dash-notice--error{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-line)}
 @media(max-width:720px){
@@ -540,10 +580,7 @@ export function renderDashboard(
   const heading = i18n.t(
     NAV_ITEMS.find((item) => item.section === section)?.label ?? "Your account",
   )
-  const avatar =
-    data.user.picture === null
-      ? `<div class="avatar avatar--fallback" aria-hidden="true">${escapeHtml(initialsOf(displayName))}</div>`
-      : `<img class="avatar" src="${escapeHtml(data.user.picture)}" alt="" referrerpolicy="no-referrer">`
+  const avatar = avatarMarkup(data.user)
   const tabs = NAV_ITEMS.filter((item) => item.section !== "admin" || data.isAdmin).map((item) => ({
     label: i18n.t(item.label),
     href: dashboardHref(item.section),

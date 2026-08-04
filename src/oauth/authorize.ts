@@ -1,5 +1,6 @@
 import { TOKEN_TTL } from "../config"
 import { getClientById } from "../db/queries/clients"
+import { isYoloEnabled } from "../operations/yolo"
 import type { OAuthErrorCode } from "../security/errors"
 import { OAuthError } from "../security/errors"
 import { hashOpaqueToken } from "../tokens/token-hash"
@@ -83,7 +84,8 @@ export async function validateAuthorizeRequest(
   env: Env,
   query: URLSearchParams,
 ): Promise<AuthorizeValidation> {
-  if (validateOAuthParameterSet(query) !== null) {
+  const yolo = isYoloEnabled(env)
+  if (!yolo && validateOAuthParameterSet(query) !== null) {
     return {
       kind: "invalid_request_page",
       description: "The authorization request contains invalid or oversized parameters.",
@@ -126,7 +128,10 @@ export async function validateAuthorizeRequest(
     }
   }
   const redirectUri = query.get("redirect_uri")
-  if (redirectUri === null || !isRegisteredRedirectUri(client, redirectUri)) {
+  // YOLO mode still requires a syntactically present redirect_uri — there is
+  // nowhere to send the response without one — but does not require that it be
+  // registered on the client.
+  if (redirectUri === null || (!yolo && !isRegisteredRedirectUri(client, redirectUri))) {
     return {
       kind: "invalid_request_page",
       description: "Invalid redirect_uri.",
@@ -156,10 +161,10 @@ export async function validateAuthorizeRequest(
     )
   }
   const state = query.get("state")
-  if (!client.allowedGrantTypes.includes("authorization_code")) {
+  if (!yolo && !client.allowedGrantTypes.includes("authorization_code")) {
     return errorRedirect(redirectUri, state, "unauthorized_client", "Flow not permitted for client")
   }
-  if (query.get("response_type") !== "code") {
+  if (!yolo && query.get("response_type") !== "code") {
     return errorRedirect(
       redirectUri,
       state,
@@ -169,14 +174,15 @@ export async function validateAuthorizeRequest(
   }
   const codeChallenge = query.get("code_challenge")
   if (
-    codeChallenge === null ||
-    !isValidS256Challenge(codeChallenge) ||
-    query.get("code_challenge_method") !== "S256"
+    !yolo &&
+    (codeChallenge === null ||
+      !isValidS256Challenge(codeChallenge) ||
+      query.get("code_challenge_method") !== "S256")
   ) {
     return errorRedirect(redirectUri, state, "invalid_request", "PKCE with S256 is required")
   }
   const scopes = parseScopeString(query.get("scope"))
-  if (scopes.length === 0) {
+  if (!yolo && scopes.length === 0) {
     return errorRedirect(redirectUri, state, "invalid_scope", "At least one scope is required")
   }
   const prompts = parsePrompts(query.get("prompt"))
@@ -216,7 +222,7 @@ export async function validateAuthorizeRequest(
         resource,
         state,
         nonce: query.get("nonce"),
-        codeChallenge,
+        codeChallenge: codeChallenge ?? "",
         prompts,
         maxAge,
       },

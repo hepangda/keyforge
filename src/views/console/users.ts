@@ -151,7 +151,7 @@ export function renderUserCreate(
         ${csrfField(csrfToken)}
         ${textField(i18n, "Email", "email", values.email, { type: "email", required: true, placeholder: "name@example.com" })}
         ${textField(i18n, "Username", "alias", values.alias, { required: true, placeholder: "janedoe" })}
-        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("English letters and numbers only; usernames are unique and can be used at sign-in."))}</p>
+        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("English letters, numbers, hyphens, and underscores only; usernames are unique and can be used at sign-in."))}</p>
         ${textField(i18n, "Display name", "name", values.name, { placeholder: "Optional" })}
         ${textField(i18n, "Initial password", "password", "", { type: "password", placeholder: "Leave blank to send an invitation" })}
         <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("Initial passwords require 6–128 characters, or at least 12 when the admins group is selected. Invitations never expose a credential to the administrator."))}</p>
@@ -226,7 +226,7 @@ export function renderUserDetail(
         <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("This stable ID is exposed as sub in ID tokens and does not change when the username changes."))}</p>
         <div class="callout username-impact" role="note"><strong>${escapeHtml(i18n.t("Changing a username can disrupt sign-in and integrations."))}</strong><span>${escapeHtml(i18n.t("The user must sign in with the new username. Saved sign-in details, external mappings, or automation that uses preferred_username may need to be updated."))}</span></div>
         ${textField(i18n, "Username", "alias", user.alias, { required: true })}
-        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("English letters and numbers only. Only administrators can change this value."))}</p>
+        <p class="form-hint form-hint--standalone">${escapeHtml(i18n.t("English letters, numbers, hyphens, and underscores only. Only administrators can change this value."))}</p>
         ${textField(i18n, "Display name", "name", user.name ?? "", { placeholder: "No name set" })}
         ${checkboxField(i18n, "Email verified", "email_verified", user.emailVerified)}
         ${checkboxField(i18n, "Account disabled (blocks sign-in)", "disabled", user.disabled)}

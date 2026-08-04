@@ -1,6 +1,9 @@
+import { isYoloEnabled } from "./yolo"
+
 const DAY_SECONDS = 24 * 60 * 60
 
-const REMOTE_ENVIRONMENTS = new Set(["staging", "production"])
+const REMOTE_ENVIRONMENTS = new Set(["dev", "production"])
+const ENVIRONMENTS = ["local", "test", "dev", "production"] as const
 
 function boundedInteger(
   name: string,
@@ -22,8 +25,8 @@ function boundedInteger(
 }
 
 function environmentName(raw: string): string {
-  if (["local", "test", "staging", "production"].includes(raw)) return raw
-  throw new Error("ENVIRONMENT must be local, test, staging, or production")
+  if ((ENVIRONMENTS as readonly string[]).includes(raw)) return raw
+  throw new Error(`ENVIRONMENT must be ${ENVIRONMENTS.join(", ")}`)
 }
 
 export type RuntimeConfig = {
@@ -38,16 +41,18 @@ export type RuntimeConfig = {
 /** Parse and bound every operator-controlled runtime value. Remote mistakes fail closed. */
 export function getRuntimeConfig(env: Env): RuntimeConfig {
   const environment = environmentName(env.ENVIRONMENT)
-  const strict = REMOTE_ENVIRONMENTS.has(environment)
+  // YOLO mode is dev-only and skips every substantive validation, including the
+  // fail-closed bounds that normally make a remote misconfiguration fatal.
+  const strict = REMOTE_ENVIRONMENTS.has(environment) && !isYoloEnabled(env)
   const auditD1RetentionDays = boundedInteger(
     "AUDIT_D1_RETENTION_DAYS",
     env.AUDIT_D1_RETENTION_DAYS,
     90,
     1,
-    environment === "staging" ? 90 : 365,
+    environment === "dev" ? 90 : 365,
     strict,
   )
-  const requiredAuditRetention = environment === "staging" ? 90 : 365
+  const requiredAuditRetention = environment === "dev" ? 90 : 365
   if (strict && auditD1RetentionDays !== requiredAuditRetention) {
     throw new Error(`AUDIT_D1_RETENTION_DAYS must be ${requiredAuditRetention} in ${environment}`)
   }

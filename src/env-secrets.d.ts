@@ -6,6 +6,11 @@ declare global {
     readonly BOOTSTRAP_TOKEN?: string
     readonly EMAIL_DELIVERY_MODE: "resend" | "console" | "test"
     readonly EMAIL_FROM?: string
+    /**
+     * Development-only escape hatch. Honoured only when ENVIRONMENT is "dev"
+     * and the value is exactly "true"; see src/operations/yolo.ts.
+     */
+    readonly YOLO_MODE?: string
   }
 }
 

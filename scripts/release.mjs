@@ -20,10 +20,10 @@ const READINESS_TOKEN_PATTERN = /^[A-Za-z0-9._~-]{32,256}$/
 const PRIVATE_JWK_FIELDS = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"]
 const MAX_PEAK_DAILY_AUDIT_ROWS = 28_800
 const TARGETS = {
-  staging: {
-    database: "keyforge_staging",
-    origin: "https://auth-staging.pangda.app",
-    tokenVariable: "KEYFORGE_STAGING_READINESS_TOKEN",
+  dev: {
+    database: "keyforge_dev",
+    origin: "https://auth-dev.pangda.app",
+    tokenVariable: "KEYFORGE_DEV_READINESS_TOKEN",
   },
   production: {
     database: "keyforge",
@@ -34,14 +34,14 @@ const TARGETS = {
 
 function usage(exitCode = 0) {
   const output = exitCode === 0 ? console.log : console.error
-  output(`Usage: node scripts/release.mjs <staging|production> [--plan] [--yes]
+  output(`Usage: node scripts/release.mjs <dev|production> [--plan] [--yes]
 
 Options:
   --plan  Print the release sequence without running commands or making requests.
   --yes   Skip the interactive production confirmation (intended for CI).
 
 Readiness token:
-  Export the target-specific variable (${TARGETS.staging.tokenVariable} or
+  Export the target-specific variable (${TARGETS.dev.tokenVariable} or
   ${TARGETS.production.tokenVariable}), or the generic READINESS_PROBE_TOKEN fallback.`)
   process.exitCode = exitCode
 }
@@ -51,7 +51,7 @@ function parseArguments(argv) {
   if (normalized.includes("--help") || normalized.includes("-h")) return { help: true }
   const rawEnvironment = normalized[0]
   const environment = rawEnvironment === "prod" ? "production" : rawEnvironment
-  if (!(environment in TARGETS)) throw new Error("target must be staging or production")
+  if (!Object.hasOwn(TARGETS, environment)) throw new Error("target must be dev or production")
 
   const flags = new Set(normalized.slice(1))
   const unknown = [...flags].filter((flag) => !["--plan", "--yes"].includes(flag))
@@ -78,7 +78,7 @@ function childEnvironment(extra = {}) {
   // The readiness credential is only used by this process for HTTPS probes.
   // Do not expose it to package scripts, git, Wrangler, or their subprocesses.
   delete environment.READINESS_PROBE_TOKEN
-  delete environment.KEYFORGE_STAGING_READINESS_TOKEN
+  delete environment.KEYFORGE_DEV_READINESS_TOKEN
   delete environment.KEYFORGE_PRODUCTION_READINESS_TOKEN
   return environment
 }
@@ -367,13 +367,23 @@ async function verifyDeployment(target, readinessToken) {
       if (new URL(jwksUri).origin !== target.origin) throw new Error("discovery jwks_uri mismatch")
     },
   )
-  const jwksUri = objectValue(discovery).jwks_uri
+  const discoveryObject = objectValue(discovery)
+  const jwksUri = typeof discoveryObject?.jwks_uri === "string" ? discoveryObject.jwks_uri : ""
   await fetchJsonWithRetry("OIDC JWKS", jwksUri, {}, (body) => {
     const keys = objectValue(body)?.keys
     if (!Array.isArray(keys) || keys.length === 0) throw new Error("JWKS has no public keys")
     for (const key of keys) {
       const jwk = objectValue(key)
-      if (jwk === null || PRIVATE_JWK_FIELDS.some((field) => field in jwk)) {
+      if (
+        jwk === null ||
+        jwk.kty !== "RSA" ||
+        jwk.use !== "sig" ||
+        typeof jwk.kid !== "string" ||
+        jwk.kid === "" ||
+        typeof jwk.n !== "string" ||
+        typeof jwk.e !== "string" ||
+        PRIVATE_JWK_FIELDS.some((field) => field in jwk)
+      ) {
         throw new Error("JWKS contains invalid or private key material")
       }
     }

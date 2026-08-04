@@ -5,11 +5,16 @@ compatibility_date = "2026-06-01"
 compatibility_flags = ["nodejs_compat"]
 
 # The top-level configuration is used by `wrangler dev` and the Workers test
-# pool. Remote releases must select `--env staging` or `--env production`.
+# pool. Remote releases must select `--env dev` or `--env production`.
 workers_dev = true
 
+# Local dev server. The port is pinned so the issuer above, the demo app, and
+# any registered redirect URIs all agree on one origin.
+[dev]
+port = 17001
+
 [vars]
-ISSUER = "http://localhost:8787"
+ISSUER = "http://localhost:17001"
 ENVIRONMENT = "local"
 EMAIL_DELIVERY_MODE = "console"
 KEY_ROTATION_INTERVAL_SECONDS = "604800"
@@ -27,6 +32,12 @@ migrations_dir = "migrations"
 [[kv_namespaces]]
 binding = "KV"
 id = "00000000000000000000000000000000"
+
+# User avatars. Objects are addressed by an unguessable key that is also the
+# public URL path segment; the bucket itself is never exposed directly.
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "keyforge-avatars-local"
 
 [[queues.producers]]
 binding = "AUDIT_QUEUE"
@@ -86,24 +97,30 @@ crons = ["15 * * * *"]
 [observability]
 enabled = true
 
-# Staging bindings are intentionally separate from production. Replace the
+# Dev bindings are intentionally separate from production. Replace the
 # zero IDs during environment provisioning; never put secrets in this file.
-[env.staging]
-name = "keyforge-staging"
+#
+# `dev` is the only environment where YOLO_MODE may be enabled. YOLO_MODE
+# disables substantive request validation and approves every request, so it is
+# rejected outright in local, test, and production.
+[env.dev]
+name = "keyforge-dev"
 workers_dev = false
-routes = [{ pattern = "auth-staging.pangda.app", custom_domain = true }]
+routes = [{ pattern = "auth-dev.pangda.app", custom_domain = true }]
 
-[env.staging.vars]
-ISSUER = "https://auth-staging.pangda.app"
-ENVIRONMENT = "staging"
+[env.dev.vars]
+ISSUER = "https://auth-dev.pangda.app"
+ENVIRONMENT = "dev"
 EMAIL_DELIVERY_MODE = "resend"
 KEY_ROTATION_INTERVAL_SECONDS = "604800"
 TERMINAL_DATA_RETENTION_DAYS = "14"
 AUDIT_D1_RETENTION_DAYS = "90"
 MAINTENANCE_BATCH_SIZE = "100"
 MAINTENANCE_LEASE_SECONDS = "900"
+# Opt-in escape hatch, dev only. "true" disables all substantive validation.
+YOLO_MODE = "true"
 
-[env.staging.secrets]
+[env.dev.secrets]
 required = [
   "RESEND_API_KEY",
   "EMAIL_FROM",
@@ -111,62 +128,66 @@ required = [
   "READINESS_PROBE_TOKEN",
 ]
 
-[[env.staging.d1_databases]]
+[[env.dev.d1_databases]]
 binding = "DB"
-database_name = "keyforge_staging"
+database_name = "keyforge_dev"
 database_id = "9b8191ff-b641-49fb-beae-3434ab96f564"
 migrations_dir = "migrations"
 
-[[env.staging.kv_namespaces]]
+[[env.dev.kv_namespaces]]
 binding = "KV"
 id = "638640e7b880467fa3f62e8c6fbe956c"
 
-[[env.staging.queues.producers]]
-binding = "AUDIT_QUEUE"
-queue = "keyforge-audit-staging"
+[[env.dev.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "keyforge-avatars-dev"
 
-[[env.staging.queues.consumers]]
-queue = "keyforge-audit-staging"
+[[env.dev.queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "keyforge-audit-dev"
+
+[[env.dev.queues.consumers]]
+queue = "keyforge-audit-dev"
 max_batch_size = 50
 max_batch_timeout = 5
 max_retries = 5
-dead_letter_queue = "keyforge-audit-staging-dlq"
+dead_letter_queue = "keyforge-audit-dev-dlq"
 
-[[env.staging.queues.producers]]
+[[env.dev.queues.producers]]
 binding = "EMAIL_QUEUE"
-queue = "keyforge-email-staging"
+queue = "keyforge-email-dev"
 
-[[env.staging.queues.consumers]]
-queue = "keyforge-email-staging"
+[[env.dev.queues.consumers]]
+queue = "keyforge-email-dev"
 max_batch_size = 10
 max_batch_timeout = 2
 max_retries = 5
-dead_letter_queue = "keyforge-email-staging-dlq"
+dead_letter_queue = "keyforge-email-dev-dlq"
 
-[[env.staging.durable_objects.bindings]]
+[[env.dev.durable_objects.bindings]]
 name = "AUTHORIZATION_CODE"
 class_name = "AuthorizationCodeDO"
 
-[[env.staging.durable_objects.bindings]]
+[[env.dev.durable_objects.bindings]]
 name = "ONE_TIME_TOKEN"
 class_name = "OneTimeTokenDO"
 
-[[env.staging.durable_objects.bindings]]
+[[env.dev.durable_objects.bindings]]
 name = "WEBAUTHN_CHALLENGE"
 class_name = "WebAuthnChallengeDO"
 
-[[env.staging.durable_objects.bindings]]
+[[env.dev.durable_objects.bindings]]
 name = "REFRESH_TOKEN_FAMILY"
 class_name = "RefreshTokenFamilyDO"
 
-[[env.staging.durable_objects.bindings]]
+[[env.dev.durable_objects.bindings]]
 name = "RATE_LIMIT"
 class_name = "RateLimitDO"
 
-[env.staging.triggers]
+[env.dev.triggers]
 crons = ["15 * * * *"]
 
-[env.staging.observability]
+[env.dev.observability]
 enabled = true
 
 [env.production]
@@ -201,6 +222,10 @@ migrations_dir = "migrations"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "8aac98a37ae74ed78b966444d79aa413"
+
+[[env.production.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "keyforge-avatars"
 
 [[env.production.queues.producers]]
 binding = "AUDIT_QUEUE"

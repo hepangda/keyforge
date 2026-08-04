@@ -1,6 +1,7 @@
 import type { Context } from "hono"
 import { createMiddleware } from "hono/factory"
 import { getUserGroupNames } from "../db/queries/users"
+import { isYoloEnabled } from "../operations/yolo"
 import type { AppBindings } from "../types/app"
 import { nowSeconds } from "../utils/time"
 import { renderForbidden } from "../views/console/layout"
@@ -63,14 +64,16 @@ export const requireConsoleAdmin = createMiddleware<AppBindings>(async (c, next)
     return c.redirect(`/login?return_to=${encodeURIComponent(url.pathname + url.search)}`)
   }
   const groups = await getUserGroupNames(c.env, user.id)
-  if (!groups.includes(ADMIN_GROUP)) {
+  const yolo = isYoloEnabled(c.env)
+  // YOLO mode grants console administrator authority to any signed-in user.
+  if (!groups.includes(ADMIN_GROUP) && !yolo) {
     return c.html(renderForbidden(c.get("i18n")), 403)
   }
   const method = c.req.method.toUpperCase()
   const url = new URL(c.req.url)
   const isManagementFormEntry =
     method === "GET" && MANAGEMENT_FORM_PATHS.some((pattern) => pattern.test(url.pathname))
-  if (!SAFE_METHODS.has(method) || isManagementFormEntry) {
+  if ((!SAFE_METHODS.has(method) || isManagementFormEntry) && !yolo) {
     const session = c.get("session")
     if (session === undefined || nowSeconds() - session.authTime > RECENT_AUTH_SECONDS) {
       const params = new URLSearchParams({

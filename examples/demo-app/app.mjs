@@ -7,7 +7,7 @@ import { createServer } from "node:http"
 import { createRemoteJWKSet, jwtVerify } from "jose"
 
 const CONFIG = {
-  authBase: process.env.AUTH_BASE ?? "http://localhost:8787",
+  authBase: process.env.AUTH_BASE ?? "http://localhost:17001",
   port: Number(process.env.PORT ?? 8788),
   clientId: process.env.CLIENT_ID ?? "demo_local",
   scope: process.env.SCOPE ?? "openid profile email offline_access api.read",

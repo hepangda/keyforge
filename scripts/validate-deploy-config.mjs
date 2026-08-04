@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
-const REMOTE_ENVIRONMENTS = new Set(["staging", "production"])
+const REMOTE_ENVIRONMENTS = new Set(["dev", "production"])
 const REQUIRED_DURABLE_OBJECTS = new Map([
   ["AUTHORIZATION_CODE", "AuthorizationCodeDO"],
   ["ONE_TIME_TOKEN", "OneTimeTokenDO"],
@@ -19,15 +19,18 @@ const REQUIRED_REMOTE_SECRETS = new Set([
   "READINESS_PROBE_TOKEN",
 ])
 const EXPECTED_ENVIRONMENT = {
-  staging: {
-    workerName: "keyforge-staging",
-    issuer: "https://auth-staging.pangda.app",
-    databaseName: "keyforge_staging",
-    queueName: "keyforge-audit-staging",
-    deadLetterQueueName: "keyforge-audit-staging-dlq",
-    emailQueueName: "keyforge-email-staging",
-    emailDeadLetterQueueName: "keyforge-email-staging-dlq",
+  dev: {
+    workerName: "keyforge-dev",
+    issuer: "https://auth-dev.pangda.app",
+    databaseName: "keyforge_dev",
+    queueName: "keyforge-audit-dev",
+    deadLetterQueueName: "keyforge-audit-dev-dlq",
+    emailQueueName: "keyforge-email-dev",
+    emailDeadLetterQueueName: "keyforge-email-dev-dlq",
+    avatarBucketName: "keyforge-avatars-dev",
     auditRetentionDays: 90,
+    // Only the dev profile may carry the YOLO escape hatch at all.
+    yoloAllowed: true,
   },
   production: {
     workerName: "keyforge",
@@ -37,7 +40,9 @@ const EXPECTED_ENVIRONMENT = {
     deadLetterQueueName: "keyforge-audit-dlq",
     emailQueueName: "keyforge-email",
     emailDeadLetterQueueName: "keyforge-email-dlq",
+    avatarBucketName: "keyforge-avatars",
     auditRetentionDays: 365,
+    yoloAllowed: false,
   },
 }
 const NUMERIC_BOUNDS = new Map([
@@ -122,6 +127,8 @@ function remoteResources(tables, environment) {
   const prefix = `env.${environment}`
   const d1 = arrayEntry(tables, `${prefix}.d1_databases`, "DB")
   const kv = arrayEntry(tables, `${prefix}.kv_namespaces`, "KV")
+  const avatars = arrayEntry(tables, `${prefix}.r2_buckets`, "AVATARS")
+
   const auditQueueProducer = arrayEntry(tables, `${prefix}.queues.producers`, "AUDIT_QUEUE")
   const emailQueueProducer = arrayEntry(tables, `${prefix}.queues.producers`, "EMAIL_QUEUE")
   const queueConsumers = tables.get(`${prefix}.queues.consumers`) ?? []
@@ -144,6 +151,8 @@ function remoteResources(tables, environment) {
     databaseId: stringValue(d1, "database_id"),
     databaseName: stringValue(d1, "database_name"),
     kvId: stringValue(kv, "id"),
+    avatarBucketName: stringValue(avatars, "bucket_name"),
+
     queueName: auditQueueName,
     consumerQueueName: stringValue(auditConsumers[0], "queue"),
     deadLetterQueueName: stringValue(auditConsumers[0], "dead_letter_queue"),
@@ -155,22 +164,29 @@ function remoteResources(tables, environment) {
 }
 
 function assertDistinct(left, right, label) {
-  if (left === right) throw new Error(`staging and production must not share ${label}`)
+  if (left === right) throw new Error(`dev and production must not share ${label}`)
 }
 
 export function validateDeployConfig(source, environment) {
   if (!REMOTE_ENVIRONMENTS.has(environment)) {
-    throw new Error("target must be staging or production")
+    throw new Error("target must be dev or production")
   }
 
   const tables = parseTables(source)
   if (/^\s*AUDIT_ARCHIVE_RETENTION_DAYS\s*=/m.test(source)) {
     throw new Error("AUDIT_ARCHIVE_RETENTION_DAYS is forbidden; audit rows must not be archived")
   }
-  const r2Sections = [...tables.keys()].filter((name) => name.endsWith("r2_buckets"))
-  if (r2Sections.length > 0) {
-    throw new Error(`R2 bindings are forbidden: ${r2Sections.join(", ")}`)
+  // R2 is permitted for exactly one purpose: the avatar bucket. Any other
+  // bucket (notably a reintroduced audit archive) stays forbidden.
+  for (const section of [...tables.keys()].filter((name) => name.endsWith("r2_buckets"))) {
+    const foreign = (tables.get(section) ?? []).filter(
+      (body) => stringValue(body, "binding") !== "AVATARS",
+    )
+    if (foreign.length > 0) {
+      throw new Error(`[${section}] may only declare the AVATARS binding`)
+    }
   }
+
   const prefix = `env.${environment}`
   const root = onlyTable(tables, prefix)
   const vars = onlyTable(tables, `${prefix}.vars`)
@@ -178,7 +194,7 @@ export function validateDeployConfig(source, environment) {
   const trigger = onlyTable(tables, `${prefix}.triggers`)
   const resources = remoteResources(tables, environment)
   const expected = EXPECTED_ENVIRONMENT[environment]
-  const otherEnvironment = environment === "staging" ? "production" : "staging"
+  const otherEnvironment = environment === "dev" ? "production" : "dev"
   const otherResources = remoteResources(tables, otherEnvironment)
 
   if (booleanValue(root, "workers_dev")) {
@@ -212,6 +228,19 @@ export function validateDeployConfig(source, environment) {
       `${environment} AUDIT_D1_RETENTION_DAYS must be ${expected.auditRetentionDays}`,
     )
   }
+  // YOLO_MODE disables every substantive validation, so production must not
+  // declare it at all and dev must declare it as an explicit boolean string.
+  const yoloDeclared = /^\s*YOLO_MODE\s*=/m.test(vars)
+  if (!expected.yoloAllowed && yoloDeclared) {
+    throw new Error(`${environment} must not declare YOLO_MODE`)
+  }
+  if (expected.yoloAllowed && yoloDeclared) {
+    const yolo = stringValue(vars, "YOLO_MODE")
+    if (yolo !== "true" && yolo !== "false") {
+      throw new Error("YOLO_MODE must be the string \"true\" or \"false\"")
+    }
+  }
+
   const requiredSecrets = stringArrayValue(secrets, "required")
   if (
     requiredSecrets.length !== REQUIRED_REMOTE_SECRETS.size ||
@@ -268,6 +297,7 @@ export function validateDeployConfig(source, environment) {
     ["audit DLQ", resources.deadLetterQueueName, expected.deadLetterQueueName],
     ["email Queue", resources.emailQueueName, expected.emailQueueName],
     ["email DLQ", resources.emailDeadLetterQueueName, expected.emailDeadLetterQueueName],
+    ["avatar R2 bucket", resources.avatarBucketName, expected.avatarBucketName],
   ]) {
     if (actual !== wanted) throw new Error(`${environment} ${label} must be ${wanted}`)
   }
@@ -281,6 +311,7 @@ export function validateDeployConfig(source, environment) {
     ["audit DLQ", resources.deadLetterQueueName],
     ["email Queue", resources.emailQueueName],
     ["email DLQ", resources.emailDeadLetterQueueName],
+    ["avatar R2 bucket", resources.avatarBucketName],
   ]) {
     rejectPlaceholder(value, `${environment} ${label}`)
   }
@@ -316,6 +347,11 @@ export function validateDeployConfig(source, environment) {
     resources.emailDeadLetterQueueName,
     otherResources.emailDeadLetterQueueName,
     "an email DLQ",
+  )
+  assertDistinct(
+    resources.avatarBucketName,
+    otherResources.avatarBucketName,
+    "an avatar R2 bucket",
   )
   const durableObjects = new Map(
     (tables.get(`${prefix}.durable_objects.bindings`) ?? []).map((body) => [

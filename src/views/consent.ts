@@ -1,6 +1,6 @@
 import type { I18n } from "../i18n"
 import type { User } from "../types/domain"
-import { brandHeader, escapeHtml, htmlLayout, icons, permissionList } from "./layout"
+import { avatarMarkup, brandHeader, escapeHtml, htmlLayout, icons, permissionList } from "./layout"
 
 export type ConsentPageParams = {
   readonly i18n: I18n
@@ -13,24 +13,10 @@ export type ConsentPageParams = {
   readonly hiddenFields: Readonly<Record<string, string>>
 }
 
-function initialsOf(value: string): string {
-  const base = value.includes("@") ? (value.split("@")[0] ?? value) : value
-  const parts = base
-    .trim()
-    .split(/[\s._-]+/)
-    .filter(Boolean)
-  const first = parts[0] ?? ""
-  const second = parts[1] ?? ""
-  return (second ? (first[0] ?? "") + (second[0] ?? "") : first.slice(0, 2) || "?").toUpperCase()
-}
-
 export function renderConsentPage(params: ConsentPageParams): string {
   const { i18n } = params
   const displayName = params.user.name ?? params.user.alias
-  const avatar =
-    params.user.picture === null
-      ? `<div class="avatar avatar--fallback" aria-hidden="true">${escapeHtml(initialsOf(displayName))}</div>`
-      : `<img class="avatar" src="${escapeHtml(params.user.picture)}" alt="" referrerpolicy="no-referrer">`
+  const avatar = avatarMarkup(params.user)
   const hidden = Object.entries(params.hiddenFields)
     .map(
       ([key, value]) =>

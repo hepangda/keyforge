@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import { getRuntimeConfig } from "../operations/runtime-config"
+import { isYoloEnabled } from "../operations/yolo"
 import { timingSafeEqualString } from "../security/crypto"
 import {
   assertLegacySigningKeyCleanupComplete,
@@ -163,7 +164,10 @@ function checkBindings(env: Env): void {
 function checkRuntimeConfiguration(env: Env): void {
   const config = getRuntimeConfig(env)
   const values = env as unknown as Record<string, unknown>
-  const remote = config.environment === "staging" || config.environment === "production"
+  // YOLO mode drops the remote configuration requirements along with every
+  // other validation, so a half-configured dev Worker still reports ready.
+  const remote =
+    (config.environment === "dev" || config.environment === "production") && !isYoloEnabled(env)
 
   if (!["resend", "console", "test"].includes(env.EMAIL_DELIVERY_MODE)) {
     throw new Error("EMAIL_DELIVERY_MODE is invalid")
@@ -188,11 +192,13 @@ function checkRuntimeConfiguration(env: Env): void {
 
 /** Readiness probe: validates every dependency needed for safe token service. */
 health.get("/health/ready", async (c) => {
-  const access = readinessAccessStatus(
-    c.env.ENVIRONMENT,
-    c.env.READINESS_PROBE_TOKEN,
-    c.req.header("authorization"),
-  )
+  const access = isYoloEnabled(c.env)
+    ? "allowed"
+    : readinessAccessStatus(
+        c.env.ENVIRONMENT,
+        c.env.READINESS_PROBE_TOKEN,
+        c.req.header("authorization"),
+      )
   if (access === "misconfigured") {
     console.error("health.readiness_probe_token_missing", c.get("requestId"))
     return c.json({ status: "unavailable" }, 503)

@@ -9,7 +9,7 @@ describe("readiness probe access", () => {
   })
 
   it("fails closed when a remote environment has no configured credential", () => {
-    expect(readinessAccessStatus("staging", undefined, undefined)).toBe("misconfigured")
+    expect(readinessAccessStatus("dev", undefined, undefined)).toBe("misconfigured")
     expect(readinessAccessStatus("unexpected", undefined, undefined)).toBe("misconfigured")
     expect(readinessAccessStatus("production", "too-short", `Bearer ${TOKEN}`)).toBe(
       "misconfigured",

@@ -1,4 +1,5 @@
 import { computeS256Challenge, isValidCodeVerifier } from "../oauth/pkce"
+import { isYoloEnabled } from "../operations/yolo"
 import { timingSafeEqualString } from "../security/crypto"
 import type { AuthorizationCodePayload } from "../types/tokens"
 import { OneTimeConsumeDO } from "./base"
@@ -17,6 +18,10 @@ export class AuthorizationCodeDO extends OneTimeConsumeDO<AuthorizationCodePaylo
     | { readonly found: true; readonly value: AuthorizationCodePayload }
     | { readonly found: false; readonly reason: "not_found" | "binding" | "pkce" }
   > {
+    // YOLO mode skips the client/redirect binding and the PKCE proof, but the
+    // code must still exist, be unexpired, and be consumed exactly once — those
+    // are correctness invariants, not validations.
+    const yolo = isYoloEnabled(this.env)
     const computedChallenge = isValidCodeVerifier(input.codeVerifier)
       ? await computeS256Challenge(input.codeVerifier)
       : null
@@ -34,12 +39,13 @@ export class AuthorizationCodeDO extends OneTimeConsumeDO<AuthorizationCodePaylo
       ) {
         return { found: false as const, reason: "not_found" as const }
       }
-      if (value.clientId !== input.clientId || value.redirectUri !== input.redirectUri) {
+      if (!yolo && (value.clientId !== input.clientId || value.redirectUri !== input.redirectUri)) {
         return { found: false as const, reason: "binding" as const }
       }
       if (
-        computedChallenge === null ||
-        !timingSafeEqualString(computedChallenge, value.codeChallenge)
+        !yolo &&
+        (computedChallenge === null ||
+          !timingSafeEqualString(computedChallenge, value.codeChallenge))
       ) {
         return { found: false as const, reason: "pkce" as const }
       }

@@ -16,7 +16,7 @@ pnpm exec wrangler whoami
 pnpm exec wrangler login
 ```
 
-Have the `auth-staging.pangda.app` and `auth.pangda.app` DNS zones in the same
+Have the `auth-dev.pangda.app` and `auth.pangda.app` DNS zones in the same
 account, a verified Resend sender, a monitoring secret manager, and two
 operators for destructive production restore or legacy-bucket deletion.
 
@@ -26,12 +26,13 @@ operators for destructive production restore or legacy-bucket deletion.
 
 | Configuration | Remote target | Issuer |
 | --- | --- | --- |
-| top-level | local development and tests only | `http://localhost:8787` |
-| `staging` | `keyforge-staging` | `https://auth-staging.pangda.app` |
+| top-level | local development and tests only | `http://localhost:17001` |
+| `dev` | `keyforge-dev` | `https://auth-dev.pangda.app` |
 | `production` | `keyforge` | `https://auth.pangda.app` |
 
-D1, KV, and both Queue/DLQ pairs are separate in staging and production.
-KeyForge has no R2 binding and creates no audit archive outside D1.
+D1, KV, the avatar R2 bucket, and both Queue/DLQ pairs are separate in dev and
+production. The only R2 binding is `AVATARS`, which stores user-uploaded
+profile photos; KeyForge still creates no audit archive outside D1.
 Any all-zero D1/KV IDs are deliberate placeholders; the current production
 profile still has both. Resource identifiers are not secrets and should replace
 the matching placeholders in `wrangler.toml` after provisioning so every
@@ -40,21 +41,73 @@ operator and CI validates and deploys the same bindings.
 Remote migration and deploy package scripts run a fail-closed preflight. It
 rejects placeholder or shared D1/KV IDs, missing bindings, mismatched Queue
 producer/consumer names, missing required-secret declarations, non-hourly
-maintenance, any R2 binding or archive retention variable, an audit retention
-other than 90 days in staging or 365 days in production, and any disagreement
+maintenance, any R2 binding other than `AVATARS`, an archive retention
+variable, an audit retention
+other than 90 days in dev or 365 days in production, a YOLO_MODE declaration
+outside dev or with a non-boolean value, and any disagreement
 between the selected environment, issuer, Worker, and custom-domain route. A
 Wrangler dry run remains available separately because it validates the build
 and TOML shape without proving that provisioned resources exist.
 
+### YOLO mode (dev only)
+
+`dev` is the only environment that may set `YOLO_MODE = "true"`. It is an
+explicit development escape hatch: when it is on, KeyForge performs no
+substantive validation and approves whatever the caller asked for. It is
+implemented as one predicate in `src/operations/yolo.ts`, and every bypass in
+the codebase routes through it.
+
+With YOLO mode on, the server skips:
+
+| Area | Normal behaviour | With YOLO mode |
+| --- | --- | --- |
+| Rate limits | Fixed-window per IP/account/client | Never counted, always allowed |
+| CSRF | Double-submit `__Host-` cookie | Always accepted |
+| PKCE | S256 `code_verifier` proof required | `code_challenge` optional, proof skipped |
+| `redirect_uri` | Must be registered on the client | Any absolute URI accepted |
+| Client authentication | Confidential clients must present a valid secret | Any credential shape accepted |
+| Consent | Stored grant must cover requested scopes | Treated as already consented |
+| Scope/resource policy | Client *and* resource must allow each scope | Every requested scope granted |
+| Administrator access | `admins` group plus recent authentication | Any signed-in user, no reauth |
+| Password policy | 6/12-character minimum by role | Length floor dropped |
+| Password login | Verified against stored scrypt hash | Accepted when the password repeats the login name |
+| Runtime config bounds | Remote values fail closed | Out-of-range values fall back |
+
+Invariants that are *not* bypassed, because they are correctness rather than
+policy: an authorization code must still exist, be unexpired, and be consumed
+exactly once; an unknown account still cannot sign in; and the password length
+ceiling still applies so hashing cost stays bounded.
+
+The password shortcut is deliberately narrow: signing in as `demo-admin`
+requires the password `demo-admin` (email or alias, compared case-insensitively
+after trimming). Any other password still falls through to the normal scrypt
+verification, so seeded accounts keep working with their real passwords.
+
+The switch fails closed by construction. It is honoured only when `ENVIRONMENT`
+is exactly `dev` *and* `YOLO_MODE` is exactly the string `"true"` — a typo, a
+`"1"`, or a stray space reads as disabled. `local`, `test`, and `production`
+ignore it entirely, and `pnpm validate:deploy:production` refuses a
+configuration that declares `YOLO_MODE` at all. Every bypass emits a
+`yolo.bypass` warning log so a skipped check is never silent.
+
+Never point a YOLO-mode deployment at production data, and never route real
+users to it. Turn it off by setting `YOLO_MODE = "false"` and redeploying.
+
+Setting `YOLO_MODE = "true"` in `[env.dev.vars]` does **not** affect `pnpm dev`.
+Plain `wrangler dev` takes no `--env`, so it loads the top-level `[vars]`, where
+`ENVIRONMENT` is `local` — and the predicate demands exactly `dev`. Use
+`pnpm dev:yolo`, which overrides `ENVIRONMENT` and `YOLO_MODE` for that process
+only. The `[env.dev.vars]` value governs the deployed `auth-dev.pangda.app`.
+
 Create one complete resource set per environment:
 
 ```bash
-pnpm exec wrangler d1 create keyforge_staging
-pnpm exec wrangler kv namespace create KV --env staging
-pnpm exec wrangler queues create keyforge-audit-staging
-pnpm exec wrangler queues create keyforge-audit-staging-dlq
-pnpm exec wrangler queues create keyforge-email-staging
-pnpm exec wrangler queues create keyforge-email-staging-dlq
+pnpm exec wrangler d1 create keyforge_dev
+pnpm exec wrangler kv namespace create KV --env dev
+pnpm exec wrangler queues create keyforge-audit-dev
+pnpm exec wrangler queues create keyforge-audit-dev-dlq
+pnpm exec wrangler queues create keyforge-email-dev
+pnpm exec wrangler queues create keyforge-email-dev-dlq
 
 pnpm exec wrangler d1 create keyforge
 pnpm exec wrangler kv namespace create KV --env production
@@ -64,12 +117,21 @@ pnpm exec wrangler queues create keyforge-email
 pnpm exec wrangler queues create keyforge-email-dlq
 ```
 
-Copy the returned D1 and KV identifiers into only the matching environment in
-`wrangler.toml`. Queue names are already explicit. Do not create an R2 bucket
-or an R2 API credential for KeyForge.
+Create the avatar buckets as well:
 
 ```bash
-pnpm validate:deploy:staging
+pnpm exec wrangler r2 bucket create keyforge-avatars-dev
+pnpm exec wrangler r2 bucket create keyforge-avatars
+```
+
+Copy the returned D1 and KV identifiers into only the matching environment in
+`wrangler.toml`. Queue and bucket names are already explicit. Do not create an
+R2 API credential for KeyForge: the Worker reaches the bucket through its
+binding, and no bucket may be exposed through a public R2 domain — avatars are
+served only through the Worker's `/avatars/:key` endpoint.
+
+```bash
+pnpm validate:deploy:dev
 pnpm validate:deploy:production
 ```
 
@@ -79,7 +141,7 @@ Both commands must pass before any remote migration or deployment.
 
 Set secrets independently in each environment. Remote readiness requires a
 random `REQUEST_HASH_SECRET` and a dedicated `READINESS_PROBE_TOKEN`, each at
-least 32 characters. Generate a different readiness token for staging and
+least 32 characters. Generate a different readiness token for dev and
 production, store the matching copy in the monitoring system's secret manager,
 and do not reuse an OAuth client secret. Because remote email uses Resend, it
 also requires both `RESEND_API_KEY` and `EMAIL_FROM`. Social providers are
@@ -102,7 +164,7 @@ first administrator. A JSON bundle has this shape:
 }
 ```
 
-Before the first deploy, replace `ENVIRONMENT` with `staging` or `production`,
+Before the first deploy, replace `ENVIRONMENT` with `dev` or `production`,
 point the variable at that absolute path, and verify permissions:
 
 ```bash
@@ -112,15 +174,15 @@ chmod 600 "$KEYFORGE_SECRETS_FILE"
 
 The individual commands below are for an already deployed Worker whose D1
 migrations are current. `wrangler secret put` creates and immediately deploys
-a new Worker version; never use it as a harmless pre-deploy staging command.
+a new Worker version; never use it as a harmless pre-deploy staging step.
 
 ```bash
-pnpm exec wrangler secret put RESEND_API_KEY --env staging
-pnpm exec wrangler secret put EMAIL_FROM --env staging
-pnpm exec wrangler secret put REQUEST_HASH_SECRET --env staging
+pnpm exec wrangler secret put RESEND_API_KEY --env dev
+pnpm exec wrangler secret put EMAIL_FROM --env dev
+pnpm exec wrangler secret put REQUEST_HASH_SECRET --env dev
 READINESS_PROBE_TOKEN="$(openssl rand -hex 32)"
-printf '%s' "$READINESS_PROBE_TOKEN" | pnpm exec wrangler secret put READINESS_PROBE_TOKEN --env staging
-# Store this value in the staging monitor's secret manager, then unset it.
+printf '%s' "$READINESS_PROBE_TOKEN" | pnpm exec wrangler secret put READINESS_PROBE_TOKEN --env dev
+# Store this value in the dev monitor's secret manager, then unset it.
 unset READINESS_PROBE_TOKEN
 ```
 
@@ -139,32 +201,32 @@ unset READINESS_PROBE_TOKEN
 Secret values never belong in `wrangler.toml`, `.dev.vars.example`, logs,
 support tickets, or D1 exports shared with developers.
 
-Removing R2 does not remove or add an application secret: there was no R2
-access key in the Worker. Required remote secrets remain `RESEND_API_KEY`,
+The avatar bucket does not introduce an application secret: the Worker reaches
+R2 through its binding and holds no R2 access key. Required remote secrets remain `RESEND_API_KEY`,
 `EMAIL_FROM`, `REQUEST_HASH_SECRET`, and `READINESS_PROBE_TOKEN`.
 `BOOTSTRAP_TOKEN` is temporary and must be deleted after the first administrator
 is verified.
 
-Migrations contain no password or administrator. Bootstrap staging and
+Migrations contain no password or administrator. Bootstrap dev and
 production separately, with a new random token for each environment. Include
 the token in the first-deploy secrets bundle, or set it only after migrations
 and the initial Worker deployment have completed. Then call the endpoint.
 
-For staging:
+For dev:
 
 ```bash
 # If BOOTSTRAP_TOKEN was in the first-deploy bundle, load that same value from
 # the secret manager and skip the following two lines.
 BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
-printf '%s' "$BOOTSTRAP_TOKEN" | pnpm exec wrangler secret put BOOTSTRAP_TOKEN --env staging
+printf '%s' "$BOOTSTRAP_TOKEN" | pnpm exec wrangler secret put BOOTSTRAP_TOKEN --env dev
 
-# Run pnpm db:migrate:staging and pnpm deploy:staging before this request.
-curl -fsS https://auth-staging.pangda.app/setup/bootstrap \
+# Run pnpm db:migrate:dev and pnpm deploy:dev before this request.
+curl -fsS https://auth-dev.pangda.app/setup/bootstrap \
   -H 'content-type: application/json' \
   -H "x-bootstrap-token: $BOOTSTRAP_TOKEN" \
-  --data '{"email":"stage-owner@pangda.app","name":"Staging Owner","password":"replace-with-a-unique-16+-character-password"}'
+  --data '{"email":"dev-owner@pangda.app","name":"Dev Owner","password":"replace-with-a-unique-16+-character-password"}'
 
-pnpm exec wrangler secret delete BOOTSTRAP_TOKEN --env staging
+pnpm exec wrangler secret delete BOOTSTRAP_TOKEN --env dev
 unset BOOTSTRAP_TOKEN
 ```
 
@@ -197,9 +259,9 @@ For an existing deployment with all four required secrets, load the matching
 readiness credential from the monitoring secret manager and run one command:
 
 ```bash
-export KEYFORGE_STAGING_READINESS_TOKEN='load-from-secret-manager'
-pnpm release:staging
-unset KEYFORGE_STAGING_READINESS_TOKEN
+export KEYFORGE_DEV_READINESS_TOKEN='load-from-secret-manager'
+pnpm release:dev
+unset KEYFORGE_DEV_READINESS_TOKEN
 
 export KEYFORGE_PRODUCTION_READINESS_TOKEN='load-from-secret-manager'
 pnpm release:production
@@ -208,7 +270,7 @@ unset KEYFORGE_PRODUCTION_READINESS_TOKEN
 
 `release:production` requires a clean `main` worktree and asks the operator to
 type `production` immediately before continuing. In non-interactive CI, use
-`pnpm release:production -- --yes`. Use `pnpm release:staging -- --plan` or
+`pnpm release:production -- --yes`. Use `pnpm release:dev -- --plan` or
 `pnpm release:production -- --plan` to inspect the sequence without running
 commands or making network requests.
 
@@ -237,7 +299,7 @@ administrator, then use the release scripts for subsequent releases.
    pnpm demo:selftest
    pnpm audit --audit-level moderate
    pnpm secrets:scan
-   pnpm deploy:dry-run:staging
+   pnpm deploy:dry-run:dev
    pnpm deploy:dry-run:production
    ```
 
@@ -256,9 +318,9 @@ administrator, then use the release scripts for subsequent releases.
 
    ```bash
    install -d -m 700 backups
-   pnpm exec wrangler d1 time-travel info keyforge_staging --env staging
-   pnpm exec wrangler d1 export keyforge_staging --env staging --remote \
-     --no-data --output backups/keyforge_staging-schema.sql
+   pnpm exec wrangler d1 time-travel info keyforge_dev --env dev
+   pnpm exec wrangler d1 export keyforge_dev --env dev --remote \
+     --no-data --output backups/keyforge_dev-schema.sql
    ```
 
    Store the schema export encrypted outside the repository and delete the
@@ -266,30 +328,30 @@ administrator, then use the release scripts for subsequent releases.
    restricted and every copy must be destroyed before any contained audit row
    exceeds the environment's 90/365-day limit.
 
-3. Apply and validate staging:
+3. Apply and validate dev:
 
    ```bash
-   pnpm db:migrate:staging
+   pnpm db:migrate:dev
    # Existing Worker with all four required secrets:
-   pnpm deploy:staging
-   # Load the staging readiness token from the monitoring secret manager.
-   curl -fsS https://auth-staging.pangda.app/health/ready \
+   pnpm deploy:dev
+   # Load the dev readiness token from the monitoring secret manager.
+   curl -fsS https://auth-dev.pangda.app/health/ready \
      -H "Authorization: Bearer $READINESS_PROBE_TOKEN"
    ```
 
-   For a first deployment, replace `pnpm deploy:staging` with the following
+   For a first deployment, replace `pnpm deploy:dev` with the following
    atomic code-and-secret upload; do not run both deploy commands:
 
    ```bash
-   pnpm validate:deploy:staging
-   pnpm exec wrangler deploy --env staging \
+   pnpm validate:deploy:dev
+   pnpm exec wrangler deploy --env dev \
      --secrets-file "$KEYFORGE_SECRETS_FILE"
    rm -f "$KEYFORGE_SECRETS_FILE"
    unset KEYFORGE_SECRETS_FILE
    ```
 
 4. Exercise discovery, JWKS, login, authorization code + PKCE, refresh, email,
-   and an administrator mutation in staging.
+   and an administrator mutation in dev.
 
 5. Record the production bookmark, export schema only, apply migrations, then
    deploy. First inspect the current database size and peak recent daily audit
@@ -327,32 +389,32 @@ Do not deploy if readiness is not `200` with every check marked `ok`.
 `pnpm db:migrate:*` and `pnpm deploy:*` (except `deploy:dry-run:*`) refuse to
 continue until real, isolated remote resource IDs are present. This is expected
 on an unprovisioned checkout; never bypass it by copying production IDs into
-staging or by invoking raw Wrangler commands as a release shortcut.
+dev or by invoking raw Wrangler commands as a release shortcut.
 
 ### One-time R2 removal rollout
 
 Use this section only for an installation that previously used
-`keyforge-archive-staging` or `keyforge-archive`. Removing a binding does not
+`keyforge-archive-dev` or `keyforge-archive`. Removing a binding does not
 delete existing objects. The default compliance migration does not copy archive
 objects back into D1; this means historical coverage grows from the old D1
 windows to the new 90/365-day windows over time. Do not create a temporary
 backfill unless the business explicitly requires it and the import filters out
 every row already beyond the new limit.
 
-1. Deploy and verify staging with the release procedure above. Confirm the
+1. Deploy and verify dev with the release procedure above. Confirm the
    readiness response contains no `audit_archive` check and, after the next
    minute-15 cron, confirm a successful `maintenance.completed` log.
 2. Verify no expired online audit row remains:
 
    ```bash
-   pnpm exec wrangler d1 execute keyforge_staging --env staging --remote \
+   pnpm exec wrangler d1 execute keyforge_dev --env dev --remote \
      --command "SELECT COUNT(*) AS expired_rows, MIN(created_at) AS oldest_expired_at FROM audit_logs WHERE created_at < unixepoch() - 90 * 86400"
    ```
 
    Require `expired_rows = 0`. A non-zero value means the cleanup backlog must
    drain before the rollout continues.
 3. In Cloudflare Dashboard, open **R2 object storage** >
-   `keyforge-archive-staging` > **Settings** > **Empty Bucket** > **Empty**.
+   `keyforge-archive-dev` > **Settings** > **Empty Bucket** > **Empty**.
    Remove any bucket lock first. After the background operation completes,
    permanently delete the empty bucket and verify its name is absent from:
 
@@ -364,7 +426,7 @@ every row already beyond the new limit.
    `keyforge-archive`. The empty bucket can alternatively be deleted with:
 
    ```bash
-   pnpm exec wrangler r2 bucket delete keyforge-archive-staging
+   pnpm exec wrangler r2 bucket delete keyforge-archive-dev
    pnpm exec wrangler r2 bucket delete keyforge-archive
    ```
 
@@ -388,10 +450,10 @@ successive invocations:
 - rotates the active RS256 signing key when it is seven days old;
 - retains retired public keys through the token verification grace window;
 - directly deletes audit rows from D1 when they are older than 90 days in
-  staging or 365 days in production, without creating an archive copy;
+  dev or 365 days in production, without creating an archive copy;
 - removes expired/revoked sessions, refresh tokens, device sessions, grant
   history, and one-time token rows after the configured terminal retention
-  window (14 days in staging and 30 days in production).
+  window (14 days in dev and 30 days in production).
 
 The deployment validator and remote runtime both enforce the environment's
 exact audit limit. Each delete statement selects the oldest indexed candidates
@@ -437,7 +499,7 @@ not runtime tuning controls.
 ## Readiness and alerting
 
 `GET /health` is liveness only. Local development leaves `GET /health/ready`
-open, while staging and production require
+open, while dev and production require
 `Authorization: Bearer <READINESS_PROBE_TOKEN>` before any dependency is
 probed. A missing remote token fails closed with `503`; a missing or incorrect
 request credential returns `401`. The authenticated readiness endpoint verifies all required
@@ -464,7 +526,7 @@ failure details. Alert on:
 Route operational Worker logs to a separate security destination so an
 identity-service outage does not remove its own evidence. Do not forward full
 audit payloads unless that destination enforces the same maximum: 90 days for
-staging and 365 days for production. Queue/DLQ samples, tickets, and incident
+dev and 365 days for production. Queue/DLQ samples, tickets, and incident
 attachments are subject to the same limit.
 
 Configure Cloudflare WAF and edge rate-limiting rules as the first traffic
@@ -626,7 +688,7 @@ Treat reconciliation as a release gate, not a post-restore observation:
    client-secret rotation/disable, session or grant revocation, and signing-key
    transition. A restore can also revive audit rows that have crossed the
    retention limit. Before any traffic resumes, repeat this bounded production
-   cleanup until the following count is zero (use 90 days for staging):
+   cleanup until the following count is zero (use 90 days for dev):
 
    ```bash
    pnpm exec wrangler d1 execute keyforge --env production --remote \

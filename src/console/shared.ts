@@ -28,7 +28,7 @@ const FLASH: Readonly<Record<string, ConsoleFlash>> = {
   duplicate_alias: { kind: "warn", message: "An account already uses that username." },
   invalid_alias: {
     kind: "warn",
-    message: "Usernames may contain only English letters and numbers.",
+    message: "Usernames may contain only English letters, numbers, hyphens, and underscores.",
   },
   invalid_password: { kind: "warn", message: "That password does not meet this user's policy." },
   last_login_method: {

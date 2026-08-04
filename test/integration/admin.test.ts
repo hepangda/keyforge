@@ -133,7 +133,7 @@ describe("admin users", () => {
     expect(employees).not.toBeNull()
     const created = await req("POST", "/admin/users", {
       email: "new.user@pangda.app",
-      alias: "newuser",
+      alias: "new-user_1",
       name: "New User",
       email_verified: true,
       password: "a long initial password",
@@ -148,6 +148,7 @@ describe("admin users", () => {
     expect(body.credential_setup).toBe("password_set")
     expect(body.groups).toEqual(["employees"])
     expect(await verifyUserPassword(env, body.id, "a long initial password")).toBe(true)
+    expect((await getUserByEmail(env, "new.user@pangda.app"))?.alias).toBe("new-user_1")
   })
 
   it("sends a single-use invitation when no initial password is supplied", async () => {
@@ -197,13 +198,13 @@ describe("admin users", () => {
 
   it("lets an administrator change a username without changing the stable user id", async () => {
     const response = await req("PATCH", `/admin/users/${regularUserId}`, {
-      alias: "renameduser",
+      alias: "renamed-user_2",
     })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(
-      expect.objectContaining({ id: regularUserId, alias: "renameduser" }),
+      expect.objectContaining({ id: regularUserId, alias: "renamed-user_2" }),
     )
-    expect((await getUserById(env, regularUserId))?.alias).toBe("renameduser")
+    expect((await getUserById(env, regularUserId))?.alias).toBe("renamed-user_2")
 
     const admin = await getUserById(env, adminUserId)
     const duplicate = await req("PATCH", `/admin/users/${regularUserId}`, {
@@ -211,10 +212,10 @@ describe("admin users", () => {
     })
     expect(duplicate.status).toBe(409)
     expect(await duplicate.json()).toEqual({ error: "duplicate_alias" })
-    expect((await getUserById(env, regularUserId))?.alias).toBe("renameduser")
+    expect((await getUserById(env, regularUserId))?.alias).toBe("renamed-user_2")
 
     const invalid = await req("PATCH", `/admin/users/${regularUserId}`, {
-      alias: "not-valid",
+      alias: "not.valid",
     })
     expect(invalid.status).toBe(400)
   })

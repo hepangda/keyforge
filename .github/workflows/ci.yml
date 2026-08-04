@@ -26,9 +26,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - name: Validate deployment configuration
+        run: pnpm validate:deploy:dev && pnpm validate:deploy:production
       - run: pnpm test:coverage
-      - name: Validate staging bundle
-        run: pnpm exec wrangler deploy --dry-run --env staging
+      - name: Validate dev bundle
+        run: pnpm exec wrangler deploy --dry-run --env dev
       - name: Validate production bundle
         run: pnpm exec wrangler deploy --dry-run --env production
       - name: Upload coverage report

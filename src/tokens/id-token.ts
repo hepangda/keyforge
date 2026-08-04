@@ -19,7 +19,7 @@ export async function issueIdToken(env: Env, params: IdTokenParams): Promise<str
     sub: params.user.id,
     aud: params.clientId,
     auth_time: params.authTime,
-    ...buildUserClaims(params.user, params.groups, params.scopes),
+    ...buildUserClaims(env, params.user, params.groups, params.scopes),
   }
   if (params.nonce !== null) {
     claims["nonce"] = params.nonce

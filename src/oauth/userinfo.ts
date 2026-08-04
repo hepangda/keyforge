@@ -48,7 +48,7 @@ export async function handleUserInfo(c: Context<AppBindings>): Promise<Response>
     return invalidToken(c, "The subject is no longer permitted to use this token")
   }
   const groups = await getUserGroupNames(c.env, user.id)
-  return c.json({ sub: user.id, ...buildUserClaims(user, groups, scopes) }, 200, {
+  return c.json({ sub: user.id, ...buildUserClaims(c.env, user, groups, scopes) }, 200, {
     "cache-control": "no-store",
   })
 }

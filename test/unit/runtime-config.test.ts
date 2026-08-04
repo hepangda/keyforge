@@ -36,7 +36,7 @@ describe("runtime maintenance configuration", () => {
 
   it("accepts only the prescribed remote audit windows", () => {
     expect(
-      getRuntimeConfig(configEnv({ ENVIRONMENT: "staging", AUDIT_D1_RETENTION_DAYS: "90" }))
+      getRuntimeConfig(configEnv({ ENVIRONMENT: "dev", AUDIT_D1_RETENTION_DAYS: "90" }))
         .auditD1RetentionDays,
     ).toBe(90)
     expect(
@@ -88,11 +88,41 @@ describe("runtime maintenance configuration", () => {
     expect(() =>
       getRuntimeConfig(
         configEnv({
-          ENVIRONMENT: "staging",
+          ENVIRONMENT: "dev",
           AUDIT_D1_RETENTION_DAYS: "91",
         }),
       ),
     ).toThrow(/AUDIT_D1_RETENTION_DAYS/)
+  })
+
+  it("rejects the removed staging environment", () => {
+    expect(() => getRuntimeConfig(configEnv({ ENVIRONMENT: "staging" }))).toThrow(/ENVIRONMENT/)
+  })
+
+  it("relaxes fail-closed bounds only for dev with YOLO_MODE on", () => {
+    const yoloDev = configEnv({
+      ENVIRONMENT: "dev",
+      YOLO_MODE: "true",
+      MAINTENANCE_BATCH_SIZE: "101",
+      AUDIT_D1_RETENTION_DAYS: "91",
+    })
+    expect(getRuntimeConfig(yoloDev)).toMatchObject({
+      environment: "dev",
+      maintenanceBatchSize: 100,
+      auditD1RetentionDays: 90,
+    })
+
+    // Production ignores YOLO_MODE entirely and still fails closed.
+    expect(() =>
+      getRuntimeConfig(
+        configEnv({
+          ENVIRONMENT: "production",
+          YOLO_MODE: "true",
+          AUDIT_D1_RETENTION_DAYS: "365",
+          MAINTENANCE_BATCH_SIZE: "101",
+        }),
+      ),
+    ).toThrow(/MAINTENANCE_BATCH_SIZE/)
   })
 
   it("rejects unknown environment names", () => {

@@ -12,6 +12,9 @@ const userRowSchema = z.object({
   email_verified: z.number(),
   name: z.string().nullable(),
   picture: z.string().nullable(),
+  avatar_key: z.string().nullable(),
+  avatar_content_type: z.string().nullable(),
+  avatar_updated_at: z.number().nullable(),
   disabled: z.number(),
   created_at: z.number(),
 })
@@ -20,12 +23,13 @@ const userSecurityRowSchema = userRowSchema.extend({
   security_version: z.number(),
 })
 
-const USER_COLUMNS = "id, email, alias, email_verified, name, picture, disabled, created_at"
+const USER_COLUMNS =
+  "id, email, alias, email_verified, name, picture, avatar_key, avatar_content_type, avatar_updated_at, disabled, created_at"
 
 /** Keep administrative payloads bounded without coupling them to D1 placeholder limits. */
 export const MAX_USER_GROUPS = 100
 export const MAX_ALIAS_LENGTH = 64
-export const ALIAS_PATTERN = /^[A-Za-z0-9]+$/
+export const ALIAS_PATTERN = /^[A-Za-z0-9_-]+$/
 
 function mapUser(row: unknown): User {
   const parsed = userRowSchema.parse(row)
@@ -36,6 +40,9 @@ function mapUser(row: unknown): User {
     emailVerified: parsed.email_verified === 1,
     name: parsed.name,
     picture: parsed.picture,
+    avatarKey: parsed.avatar_key,
+    avatarContentType: parsed.avatar_content_type,
+    avatarUpdatedAt: parsed.avatar_updated_at,
     disabled: parsed.disabled === 1,
     createdAt: parsed.created_at,
   }
@@ -107,7 +114,9 @@ export async function createUser(env: Env, input: CreateUserInput): Promise<User
   const email = input.email.toLowerCase()
   const alias = input.alias?.trim() || generatedAlias(email, id)
   if (!ALIAS_PATTERN.test(alias) || alias.length > MAX_ALIAS_LENGTH) {
-    throw new RangeError("alias must contain only English letters and numbers")
+    throw new RangeError(
+      "alias must contain only English letters, numbers, hyphens, and underscores",
+    )
   }
   const now = nowSeconds()
   const user: User = {
@@ -117,6 +126,9 @@ export async function createUser(env: Env, input: CreateUserInput): Promise<User
     emailVerified: input.emailVerified ?? false,
     name: input.name ?? null,
     picture: input.picture ?? null,
+    avatarKey: null,
+    avatarContentType: null,
+    avatarUpdatedAt: null,
     disabled: false,
     createdAt: now,
   }
@@ -278,6 +290,62 @@ export async function updateUser(env: Env, id: string, patch: UserPatch): Promis
 }
 
 export type UpdateUserAliasResult = "updated" | "not_found" | "conflict"
+
+/**
+ * Point a user at a newly stored avatar object and report the object it
+ * replaced, so the caller can delete the superseded bytes from R2.
+ * Returns `undefined` when the user no longer exists.
+ */
+export async function setUserAvatar(
+  env: Env,
+  id: string,
+  avatar: { readonly key: string; readonly contentType: string },
+): Promise<string | null | undefined> {
+  const now = nowSeconds()
+  return await swapAvatar(
+    env,
+    id,
+    `UPDATE users
+     SET avatar_key = ?, avatar_content_type = ?, avatar_updated_at = ?, updated_at = ?
+     WHERE id = ?`,
+    [avatar.key, avatar.contentType, now, now, id],
+  )
+}
+
+/** Remove a user's uploaded avatar, returning the object key that must be deleted. */
+export async function clearUserAvatar(env: Env, id: string): Promise<string | null | undefined> {
+  return await swapAvatar(
+    env,
+    id,
+    `UPDATE users
+     SET avatar_key = NULL, avatar_content_type = NULL, avatar_updated_at = NULL, updated_at = ?
+     WHERE id = ?`,
+    [nowSeconds(), id],
+  )
+}
+
+/**
+ * Apply an avatar mutation and report the previously referenced object key.
+ * The prior key is read in the same batch as the update so a concurrent change
+ * cannot make this caller delete an object the winning writer still points at:
+ * the reader sees the value the update itself replaced.
+ */
+async function swapAvatar(
+  env: Env,
+  id: string,
+  statement: string,
+  bindings: readonly (string | number)[],
+): Promise<string | null | undefined> {
+  const results = await env.DB.batch([
+    env.DB.prepare("SELECT avatar_key FROM users WHERE id = ?").bind(id),
+    env.DB.prepare(statement).bind(...bindings),
+  ])
+  const previous = z
+    .array(z.object({ avatar_key: z.string().nullable() }))
+    .safeParse(results[0]?.results ?? [])
+  if (!previous.success || previous.data.length === 0) return undefined
+  return previous.data[0]?.avatar_key ?? null
+}
 
 /** Atomically change the administrator-managed sign-in name when it remains unique. */
 export async function updateUserAlias(

@@ -16,6 +16,7 @@ import { requestCorrelationHash } from "../../src/security/request-meta"
 
 const ISSUER = "https://auth.pangda.app"
 const EMAIL = "alice@pangda.app"
+const ALIAS = "alice-dev_1"
 const PASSWORD = "correct horse battery staple"
 const REGISTERED_REDIRECT = "https://app.pangda.app/auth/callback"
 
@@ -26,7 +27,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM users"),
   ])
   const accountHash = await requestCorrelationHash(env, "login-account", EMAIL)
-  const aliasHash = await requestCorrelationHash(env, "login-account", "alice")
+  const aliasHash = await requestCorrelationHash(env, "login-account", ALIAS)
   await Promise.all([
     env.RATE_LIMIT.getByName(`login:ip-account:unknown:${accountHash}`).reset(),
     env.RATE_LIMIT.getByName(`login:account:${accountHash}`).reset(),
@@ -36,7 +37,7 @@ beforeEach(async () => {
   ])
   const user = await createUser(env, {
     email: EMAIL,
-    alias: "alice",
+    alias: ALIAS,
     name: "Alice",
     emailVerified: true,
   })
@@ -143,10 +144,10 @@ describe("password login + session", () => {
     expect(await home.text()).toContain(EMAIL)
   })
 
-  it("accepts the alphanumeric username as the login identifier", async () => {
+  it("accepts hyphens and underscores in the username login identifier", async () => {
     const { token, cookieHeader } = await getCsrf()
     const res = await postLogin(
-      { email: "ALICE", password: PASSWORD, csrf_token: token, return_to: "/" },
+      { email: "ALICE-DEV_1", password: PASSWORD, csrf_token: token, return_to: "/" },
       cookieHeader,
     )
     expect(res.status).toBe(302)

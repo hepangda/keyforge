@@ -4,6 +4,8 @@ import { cors } from "hono/cors"
 import { HTTPException } from "hono/http-exception"
 import { secureHeaders } from "hono/secure-headers"
 import { deliverQueuedEmail, isQueuedEmailMessage } from "./email/sender"
+import { AVATAR_UPLOAD_MAX_BODY_BYTES } from "./media/avatar"
+import { avatarTooLargeResponse, isAvatarUploadPath } from "./media/avatar-http"
 import { i18nMiddleware } from "./middleware/i18n"
 import { sessionMiddleware } from "./middleware/session"
 import { runScheduledMaintenance } from "./operations/maintenance"
@@ -12,6 +14,7 @@ import { accountSecurity } from "./routes/account-security"
 import { admin } from "./routes/admin"
 import { assets } from "./routes/assets"
 import { authorize } from "./routes/authorize"
+import { avatars } from "./routes/avatars"
 import { bootstrap } from "./routes/bootstrap"
 import { adminConsole } from "./routes/console"
 import { device } from "./routes/device"
@@ -31,13 +34,24 @@ import { renderErrorPage } from "./views/consent"
 
 const app = new Hono<AppBindings>()
 
-app.use(
-  "*",
-  bodyLimit({
-    maxSize: 256 * 1024,
-    onError: (c) => c.json({ error: "payload_too_large" }, 413),
-  }),
-)
+// Most endpoints handle small form or JSON bodies. Avatar uploads carry image
+// bytes and need a much larger ceiling, so the limit is chosen per request:
+// registering two `bodyLimit` middlewares would not work, because both match
+// and the stricter one still applies.
+const DEFAULT_MAX_BODY_BYTES = 256 * 1024
+const strictBodyLimit = bodyLimit({
+  maxSize: DEFAULT_MAX_BODY_BYTES,
+  onError: (c) => c.json({ error: "payload_too_large" }, 413),
+})
+const avatarBodyLimit = bodyLimit({
+  maxSize: AVATAR_UPLOAD_MAX_BODY_BYTES,
+  onError: (c) => avatarTooLargeResponse(c),
+})
+
+app.use("*", async (c, next) => {
+  const limit = isAvatarUploadPath(new URL(c.req.url).pathname) ? avatarBodyLimit : strictBodyLimit
+  return await limit(c, next)
+})
 
 // Correlate every request; echo the id back for tracing.
 app.use("*", async (c, next) => {
@@ -48,6 +62,17 @@ app.use("*", async (c, next) => {
 })
 
 app.use("*", i18nMiddleware)
+
+// Relying parties embed the `picture` claim URL straight into an `<img>`, and
+// an image is a no-CORS subresource: the browser enforces
+// Cross-Origin-Resource-Policy on it, not CORS. The global `same-origin`
+// policy set by `secureHeaders` below therefore blocks every relying party
+// from rendering the avatar it was just handed. Registered ahead of
+// `secureHeaders` so this override runs after it on the way out.
+app.use("/avatars/*", async (c, next) => {
+  await next()
+  c.header("cross-origin-resource-policy", "cross-origin")
+})
 
 // OAuth login and consent forms post to this origin before redirecting to a
 // client's registered callback. Browsers apply form-action to that full
@@ -76,7 +101,9 @@ app.use(
       fontSrc: ["'self'"],
       formAction: ["'self'"],
       frameAncestors: ["'none'"],
-      imgSrc: ["'self'", "https:", "data:"],
+      // `blob:` lets the avatar uploader preview the resized image it produced
+      // locally, before any bytes leave the browser.
+      imgSrc: ["'self'", "https:", "data:", "blob:"],
       objectSrc: ["'none'"],
       // Cloudflare automatically injects a versioned Web Analytics beacon
       // below /beacon.min.js/. Keep the documented unversioned URL too so the
@@ -105,7 +132,13 @@ app.use(
 app.use("*", async (c, next) => {
   await next()
   const path = new URL(c.req.url).pathname
-  if (!path.startsWith("/assets/") && !path.startsWith("/.well-known/")) {
+  // Avatars are keyed by an unguessable, content-specific object key, so they
+  // carry no session data and are safe to cache publicly.
+  if (
+    !path.startsWith("/assets/") &&
+    !path.startsWith("/.well-known/") &&
+    !path.startsWith("/avatars/")
+  ) {
     c.header("cache-control", "no-store")
     c.header("pragma", "no-cache")
   }
@@ -113,6 +146,10 @@ app.use("*", async (c, next) => {
 
 // Public OIDC metadata is safe to read cross-origin.
 app.use("/.well-known/*", cors({ origin: "*", allowMethods: ["GET"] }))
+
+// Relying parties embed the `picture` claim URL directly, so avatars must be
+// readable from any origin.
+app.use("/avatars/*", cors({ origin: "*", allowMethods: ["GET"] }))
 
 // OAuth API endpoints are cookie-free and authenticate with PKCE, client
 // credentials, or bearer tokens. Wildcard CORS enables browser public clients
@@ -139,6 +176,7 @@ app.use("*", sessionMiddleware)
 
 app.route("/", health)
 app.route("/", assets)
+app.route("/", avatars)
 app.route("/", language)
 app.route("/", wellKnown)
 app.route("/", bootstrap)

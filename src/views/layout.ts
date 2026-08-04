@@ -1,4 +1,6 @@
 import type { I18n } from "../i18n"
+import { avatarPath } from "../media/avatar"
+import type { User } from "../types/domain"
 
 export function escapeHtml(value: string): string {
   return value
@@ -247,7 +249,7 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 .shell-heading{display:grid;gap:.3rem}
 .shell-heading h1{margin:0;text-align:left;font-size:1.55rem;line-height:1.25;font-weight:640;letter-spacing:-.018em;color:var(--ink)}
 .shell-heading p{max-width:720px;margin:0;color:var(--ink-2);font-size:.9rem}
-.shell-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem 1.4rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow);animation:rise .4s cubic-bezier(.2,.7,.2,1) both}
+.shell-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem 1.4rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow)}
 .shell-bar__brand{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .shell-bar .brand{flex-direction:row;margin:0;gap:.7rem}
 .shell-bar .seal{width:34px;height:34px}
@@ -330,6 +332,34 @@ const SEAL = `<span class="seal" aria-hidden="true"><svg viewBox="0 0 48 48" fil
 <circle cx="24" cy="20.4" r="3.7" stroke="currentColor" stroke-width="2"/>
 <path d="M23.1 23.2 L21.7 31 H26.3 L24.9 23.2 Z" fill="currentColor"/>
 </svg></span>`
+
+/**
+ * Avatar image, or monogram initials when the account has no picture.
+ * Uploaded avatars are referenced by their same-origin path so server-rendered
+ * pages need no absolute issuer URL.
+ */
+export function avatarMarkup(user: User, extraClass = "", attributes = ""): string {
+  const className = `avatar${extraClass === "" ? "" : ` ${extraClass}`}`
+  const extra = attributes === "" ? "" : ` ${attributes}`
+  const source = user.avatarKey === null ? user.picture : avatarPath(user.avatarKey)
+  if (source === null) {
+    const label = user.name ?? user.alias
+    return `<div class="${className} avatar--fallback"${extra} aria-hidden="true">${escapeHtml(initialsOf(label))}</div>`
+  }
+  return `<img class="${className}"${extra} src="${escapeHtml(source)}" alt="" referrerpolicy="no-referrer">`
+}
+
+/** Two-letter monogram derived from a display name or email local part. */
+export function initialsOf(value: string): string {
+  const base = value.includes("@") ? (value.split("@")[0] ?? value) : value
+  const parts = base
+    .trim()
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+  const first = parts[0] ?? ""
+  const second = parts[1] ?? ""
+  return (second ? (first[0] ?? "") + (second[0] ?? "") : first.slice(0, 2) || "?").toUpperCase()
+}
 
 /** Brand lockup used at the head of every page. */
 export function brandHeader(): string {

@@ -1,5 +1,6 @@
 import { z } from "zod"
-import { isUserAdmin } from "../db/queries/users"
+import { getUserById, isUserAdmin } from "../db/queries/users"
+import { isYoloEnabled, noteYoloBypass } from "../operations/yolo"
 import { hashPassword, verifyPassword } from "../security/crypto"
 import { revokeRefreshFamilyDurableObjects } from "../tokens/refresh-token-revocation"
 import { generateId, ID_PREFIX } from "../utils/id"
@@ -26,6 +27,16 @@ export function passwordMeetsPolicy(password: string, administrator: boolean): b
     password.length >= minimumPasswordLength(administrator) &&
     password.length <= PASSWORD_POLICY.maximum
   )
+}
+
+/**
+ * Policy check for the storage paths. YOLO mode drops the length floor but
+ * keeps the ceiling, because an unbounded password is a hashing-cost problem
+ * rather than a policy opinion.
+ */
+function passwordAcceptable(env: Env, password: string, administrator: boolean): boolean {
+  if (isYoloEnabled(env)) return password.length <= PASSWORD_POLICY.maximum
+  return passwordMeetsPolicy(password, administrator)
 }
 
 function adminEligible(password: string): boolean {
@@ -105,7 +116,7 @@ export async function setUserPassword(
   name = "Password",
 ): Promise<void> {
   const administrator = await isUserAdmin(env, userId)
-  if (!passwordMeetsPolicy(password, administrator)) {
+  if (!passwordAcceptable(env, password, administrator)) {
     throw new RangeError(
       `password must contain ${minimumPasswordLength(administrator)}–${PASSWORD_POLICY.maximum} characters`,
     )
@@ -136,7 +147,7 @@ export async function addUserPassword(
   name: string | null,
 ): Promise<AddPasswordResult> {
   const administrator = await isUserAdmin(env, userId)
-  if (!passwordMeetsPolicy(password, administrator)) return null
+  if (!passwordAcceptable(env, password, administrator)) return null
   const passwordHash = await hashPassword(password)
   const id = generateId(ID_PREFIX.password)
   const now = nowSeconds()
@@ -177,7 +188,7 @@ export async function setUserPasswordAtSecurityVersion(
   options: { readonly verifyEmail?: boolean } = {},
 ): Promise<boolean> {
   const administrator = await isUserAdmin(env, userId)
-  if (!passwordMeetsPolicy(password, administrator)) return false
+  if (!passwordAcceptable(env, password, administrator)) return false
   const passwordHash = await hashPassword(password)
   const credentialId = generateId(ID_PREFIX.password)
   const now = nowSeconds()
@@ -267,6 +278,10 @@ export async function verifyUserPassword(
   userId: string,
   password: string,
 ): Promise<boolean> {
+  if (isYoloEnabled(env) && (await yoloLoginNameMatches(env, userId, password))) {
+    noteYoloBypass("user-password")
+    return true
+  }
   const administrator = await isUserAdmin(env, userId)
   const rows = (await passwordRows(env, userId)).filter(
     (row) => !administrator || row.admin_eligible === 1,
@@ -274,12 +289,43 @@ export async function verifyUserPassword(
   return (await verifyRows(password, rows)) !== null
 }
 
+/** Compare a login identifier and password for the YOLO shortcut. */
+function yoloIdentifierMatchesPassword(identifier: string | undefined, password: string): boolean {
+  if (identifier === undefined) return false
+  return identifier.trim().toLowerCase() === password.trim().toLowerCase()
+}
+
+/**
+ * True when the password repeats one of the account's own login names. Used
+ * when the caller has a user id but no submitted identifier to compare against.
+ */
+async function yoloLoginNameMatches(env: Env, userId: string, password: string): Promise<boolean> {
+  const user = await getUserById(env, userId)
+  if (user === null) return false
+  return (
+    yoloIdentifierMatchesPassword(user.email, password) ||
+    yoloIdentifierMatchesPassword(user.alias, password)
+  )
+}
+
 /** Verify any eligible login password and update only the matched method. */
 export async function verifyLoginPassword(
   env: Env,
   userId: string | null,
   password: string,
+  identifier?: string,
 ): Promise<boolean> {
+  // YOLO mode accepts a password that simply repeats the login identifier, for
+  // an account that already exists. An unknown account still fails, so the
+  // caller cannot conjure a subject out of nothing.
+  if (
+    isYoloEnabled(env) &&
+    userId !== null &&
+    yoloIdentifierMatchesPassword(identifier, password)
+  ) {
+    noteYoloBypass("login-password")
+    return true
+  }
   if (userId === null) {
     await verifyPassword(
       password.length <= PASSWORD_POLICY.maximum ? password : "test-invalid-overlong-password",

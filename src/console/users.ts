@@ -140,7 +140,7 @@ export function registerConsoleUsers(app: Hono<AppBindings>): void {
         field === "email"
           ? "Enter a valid email address of at most 254 characters."
           : field === "alias"
-            ? "Usernames may contain only English letters and numbers."
+            ? "Usernames may contain only English letters, numbers, hyphens, and underscores."
             : field === "name"
               ? "Display names must contain at most 120 characters."
               : field === "password"

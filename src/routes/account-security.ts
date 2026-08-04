@@ -20,6 +20,9 @@ import {
 import { deleteCredentialPreservingLoginMethod, renameCredential } from "../db/queries/webauthn"
 import { enqueueEmail } from "../email/sender"
 import { emailChangeEmail, emailVerificationEmail } from "../email/templates"
+import { avatarPath } from "../media/avatar"
+import { type AvatarOutcome, avatarResponse } from "../media/avatar-http"
+import { readAvatarUpload, removeUserAvatar, storeUserAvatar } from "../media/avatar-service"
 import { requireAuth } from "../middleware/session"
 import { recordAudit } from "../security/audit"
 import { clearSessionCookie } from "../security/cookies"
@@ -90,6 +93,11 @@ async function authorizeSensitivePasswordAction(
   return verified ? "authorized" : "denied"
 }
 
+function avatarOutcome(reason: "too_large" | "unsupported" | "empty"): AvatarOutcome {
+  if (reason === "too_large") return "avatar_too_large"
+  return reason === "unsupported" ? "avatar_unsupported" : "avatar_missing"
+}
+
 function reauthenticationRedirect(returnTo: string): string {
   return `/login?reauth=1&return_to=${encodeURIComponent(returnTo)}`
 }
@@ -125,6 +133,86 @@ accountSecurity.post("/account/profile", async (c) => {
     success: true,
   })
   return c.redirect(accountFlow("profile", "edit-profile", { notice: "profile_updated" }))
+})
+
+accountSecurity.post("/account/avatar", async (c) => {
+  const user = currentUser(c)
+  const form = await verifiedForm(c)
+  const target = accountFlow("profile", "edit-profile")
+  const answer = (outcome: AvatarOutcome, extra: Record<string, unknown> = {}): Response =>
+    avatarResponse(c, outcome, accountFlow("profile", "edit-profile", { notice: outcome }), extra)
+  if (user === null || form === null) {
+    return answer("invalid")
+  }
+  const ipHash = await clientIpHash(c)
+  const rate = await checkRateLimit(
+    c.env,
+    `account-avatar:${user.id}:${ipHash ?? "unknown"}`,
+    10,
+    60 * 60,
+  )
+  if (!rate.allowed) {
+    c.header("retry-after", String(rate.retryAfterSeconds))
+    if (shouldAuditRateLimit(rate)) {
+      await recordAudit(c.env, {
+        type: "security.rate_limited",
+        userId: user.id,
+        requestId: c.get("requestId"),
+        ipHash,
+        success: false,
+        detail: "avatar upload rate limited",
+      })
+    }
+    return answer("avatar_rate_limited", { retry_after: rate.retryAfterSeconds })
+  }
+  const upload = await readAvatarUpload(form.get("avatar"))
+  if (typeof upload === "string") {
+    return answer(avatarOutcome(upload))
+  }
+  const result = await storeUserAvatar(c.env, user.id, upload)
+  if (result.status === "rejected") {
+    return answer(avatarOutcome(result.reason))
+  }
+  if (result.status === "not_found") {
+    return answer("not_found")
+  }
+  await recordAudit(c.env, {
+    type: "user.profile.updated",
+    userId: user.id,
+    requestId: c.get("requestId"),
+    success: true,
+    detail: "avatar updated",
+  })
+  return avatarResponse(
+    c,
+    "avatar_updated",
+    accountFlow("profile", "edit-profile", { notice: "avatar_updated" }),
+    { picture_url: avatarPath(result.key), return_to: target },
+  )
+})
+
+accountSecurity.post("/account/avatar/delete", async (c) => {
+  const user = currentUser(c)
+  const form = await verifiedForm(c)
+  if (user === null || form === null) {
+    return avatarResponse(
+      c,
+      "invalid",
+      accountFlow("profile", "edit-profile", { notice: "invalid" }),
+    )
+  }
+  const removed = await removeUserAvatar(c.env, user.id)
+  if (removed) {
+    await recordAudit(c.env, {
+      type: "user.profile.updated",
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "avatar removed",
+    })
+  }
+  const outcome: AvatarOutcome = removed ? "avatar_removed" : "not_found"
+  return avatarResponse(c, outcome, accountFlow("profile", "edit-profile", { notice: outcome }))
 })
 
 accountSecurity.post("/account/passwords", async (c) => {

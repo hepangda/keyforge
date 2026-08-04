@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20260701.1 2026-06-01 nodejs_compat
 interface __BaseEnv_Env {
 	KV: KVNamespace;
+	AVATARS: R2Bucket;
 	DB: D1Database;
 	AUDIT_QUEUE: Queue;
 	EMAIL_QUEUE: Queue;
@@ -31,6 +32,7 @@ declare namespace Cloudflare {
 	}
 	interface StagingEnv {
 		KV: KVNamespace;
+		AVATARS: R2Bucket;
 		DB: D1Database;
 		AUDIT_QUEUE: Queue;
 		EMAIL_QUEUE: Queue;
@@ -54,6 +56,7 @@ declare namespace Cloudflare {
 	}
 	interface ProductionEnv {
 		KV: KVNamespace;
+		AVATARS: R2Bucket;
 		DB: D1Database;
 		AUDIT_QUEUE: Queue;
 		EMAIL_QUEUE: Queue;

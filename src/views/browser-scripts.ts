@@ -52,6 +52,360 @@ export const ACCOUNT_BROWSER_SCRIPT = `
   });
 })();`
 
+/**
+ * In-page avatar uploader with a selection-rectangle cropper.
+ *
+ * The whole photo stays visible and the user drags a square selection over the
+ * part they want, the way every familiar cropping tool works. The alternative —
+ * a fixed viewport the image is panned behind — hides most of the picture and
+ * inverts the direction of every gesture.
+ *
+ * Rendering the selection through a canvas is also what makes the size limit a
+ * non-issue (a multi-megabyte camera photo leaves as a few hundred KB) and what
+ * strips EXIF and any bytes appended after the image data, since the server
+ * cannot re-encode.
+ *
+ * Everything degrades: without JavaScript the form posts normally and the
+ * server answers with a redirect and a notice; if canvas rendering is
+ * unavailable the original file is uploaded and the server's limits still
+ * apply.
+ */
+export const AVATAR_BROWSER_SCRIPT = `
+(function(){
+  var form=document.querySelector("[data-avatar-form]");
+  if(!form||!window.FormData||!window.fetch)return;
+  var input=form.querySelector('input[type="file"][name="avatar"]');
+  var preview=form.querySelector("[data-avatar-preview]");
+  var status=form.querySelector("[data-avatar-status]");
+  var submit=form.querySelector("[data-avatar-submit]");
+  var cropper=form.querySelector("[data-avatar-cropper]");
+  var canvas=form.querySelector("[data-avatar-canvas]");
+  var cancel=form.querySelector("[data-avatar-cancel]");
+  var reset=form.querySelector("[data-avatar-reset]");
+  var removeForm=document.querySelector("[data-avatar-remove]");
+  if(!input||!submit)return;
+  var maxBytes=parseInt(form.dataset.maxBytes||"0",10)||0;
+  var dimension=parseInt(form.dataset.dimension||"512",10)||512;
+  var text=function(key){return form.dataset[key]||""};
+  var objectUrl=null;
+  var busy=false;
+  // These only make sense while a selection is open. They ship visible so a
+  // no-JavaScript form is unaffected, and are hidden here on enhancement.
+  if(cancel)cancel.hidden=true;
+  if(reset)reset.hidden=true;
+
+  var message=function(value,kind){
+    if(!status)return;
+    status.textContent=value;
+    status.hidden=value==="";
+    status.className="inline-status"+(kind?" inline-status--"+kind:"");
+  };
+  var setBusy=function(value){
+    busy=value;
+    submit.disabled=value;
+    submit.classList.toggle("is-loading",value);
+    if(value)submit.setAttribute("aria-busy","true");else submit.removeAttribute("aria-busy");
+  };
+  var showPreview=function(source){
+    if(!preview)return;
+    if(preview.tagName!=="IMG"){
+      var image=document.createElement("img");
+      image.className=preview.className.replace("avatar--fallback","").trim();
+      image.alt="";
+      if(preview.parentNode)preview.parentNode.replaceChild(image,preview);
+      preview=image;
+    }
+    if(typeof source==="string"){
+      if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null}
+      preview.src=source;
+      return;
+    }
+    if(objectUrl)URL.revokeObjectURL(objectUrl);
+    objectUrl=URL.createObjectURL(source);
+    preview.src=objectUrl;
+  };
+
+  var crop=null;
+  var canvasReady=!!(canvas&&typeof canvas.getContext==="function"&&canvas.getContext("2d")&&typeof canvas.toBlob==="function");
+  var HANDLE=9;
+  var MIN_SIDE=40;
+  var MAX_CANVAS=340;
+  var MIN_VIEW_SIDE=120;
+
+  // A panorama or a tiny image can have a viewport shorter than MIN_SIDE, so
+  // the floor must never exceed what the image can actually contain.
+  var minSide=function(){
+    return Math.min(MIN_SIDE,Math.min(crop.viewW,crop.viewH));
+  };
+  var clampSelection=function(){
+    if(!crop)return;
+    var limit=Math.min(crop.viewW,crop.viewH);
+    crop.size=Math.min(limit,Math.max(minSide(),crop.size));
+    crop.x=Math.max(0,Math.min(crop.viewW-crop.size,crop.x));
+    crop.y=Math.max(0,Math.min(crop.viewH-crop.size,crop.y));
+  };
+  var draw=function(){
+    if(!crop||!canvas)return;
+    var context=canvas.getContext("2d");
+    if(!context)return;
+    context.clearRect(0,0,crop.viewW,crop.viewH);
+    context.drawImage(crop.image,0,0,crop.viewW,crop.viewH);
+    // Dim everything outside the selection so the chosen square reads clearly.
+    context.save();
+    context.fillStyle="rgba(8,9,13,.58)";
+    context.beginPath();
+    context.rect(0,0,crop.viewW,crop.viewH);
+    context.rect(crop.x,crop.y,crop.size,crop.size);
+    context.fill("evenodd");
+    context.restore();
+    // The avatar is rendered as a circle everywhere else, so show that framing.
+    context.save();
+    context.strokeStyle="rgba(255,255,255,.85)";
+    context.lineWidth=2;
+    context.strokeRect(crop.x+1,crop.y+1,crop.size-2,crop.size-2);
+    context.globalAlpha=.55;
+    context.beginPath();
+    context.arc(crop.x+crop.size/2,crop.y+crop.size/2,crop.size/2-1,0,Math.PI*2);
+    context.stroke();
+    context.restore();
+    context.fillStyle="#ffffff";
+    corners().forEach(function(corner){
+      context.fillRect(corner[0]-HANDLE/2,corner[1]-HANDLE/2,HANDLE,HANDLE);
+    });
+  };
+  var corners=function(){
+    return [
+      [crop.x,crop.y],
+      [crop.x+crop.size,crop.y],
+      [crop.x,crop.y+crop.size],
+      [crop.x+crop.size,crop.y+crop.size],
+    ];
+  };
+  var resetSelection=function(){
+    if(!crop)return;
+    crop.size=Math.min(crop.viewW,crop.viewH);
+    crop.x=(crop.viewW-crop.size)/2;
+    crop.y=(crop.viewH-crop.size)/2;
+    clampSelection();draw();
+  };
+  var openCropper=function(image){
+    // Size the canvas to the photo's aspect ratio so the whole picture is
+    // visible with no letterboxing, and selection coordinates map 1:1 to it.
+    var longest=Math.max(image.naturalWidth,image.naturalHeight)||1;
+    var shortest=Math.max(1,Math.min(image.naturalWidth,image.naturalHeight));
+    // Fit the long edge, but keep an extreme panorama from collapsing into an
+    // unusable sliver — the long edge may grow rather than leave the short one
+    // a few pixels tall.
+    var viewScale=Math.max(MAX_CANVAS/longest,Math.min(MIN_VIEW_SIDE/shortest,MAX_CANVAS*3/longest));
+    var viewW=Math.max(1,Math.round(image.naturalWidth*viewScale));
+    var viewH=Math.max(1,Math.round(image.naturalHeight*viewScale));
+    canvas.width=viewW;canvas.height=viewH;
+    canvas.style.width=viewW+"px";canvas.style.height=viewH+"px";
+    // One scale for both axes. Deriving it per axis would let rounding pull the
+    // two apart on extreme aspect ratios and map the selection outside the
+    // source image.
+    var sourceScale=Math.max(image.naturalWidth/viewW,image.naturalHeight/viewH);
+    crop={image:image,viewW:viewW,viewH:viewH,sourceScale:sourceScale,size:0,x:0,y:0};
+    resetSelection();
+    if(cropper)cropper.hidden=false;
+    if(cancel)cancel.hidden=false;
+    if(reset)reset.hidden=false;
+    message(text("messageCropHint"),"");
+  };
+  var closeCropper=function(){
+    crop=null;
+    if(cropper)cropper.hidden=true;
+    if(cancel)cancel.hidden=true;
+    if(reset)reset.hidden=true;
+  };
+
+  // Render the selected square at up to the target dimension, never upscaling
+  // beyond the pixels the source actually has.
+  var renderCrop=function(){
+    return new Promise(function(resolve){
+      if(!crop||!canvas)return resolve(null);
+      // Map the selection back to source pixels and keep it inside the image:
+      // a half-pixel of rounding must never become an out-of-bounds read.
+      var sourceSide=Math.min(
+        crop.size*crop.sourceScale,
+        crop.image.naturalWidth,
+        crop.image.naturalHeight
+      );
+      var sx=Math.max(0,Math.min(crop.image.naturalWidth-sourceSide,crop.x*crop.sourceScale));
+      var sy=Math.max(0,Math.min(crop.image.naturalHeight-sourceSide,crop.y*crop.sourceScale));
+      var side=Math.max(1,Math.round(Math.min(dimension,sourceSide)));
+      var output=document.createElement("canvas");
+      output.width=side;output.height=side;
+      var context=output.getContext("2d");
+      if(!context)return resolve(null);
+      context.drawImage(crop.image,sx,sy,sourceSide,sourceSide,0,0,side,side);
+      var encode=function(type,quality){
+        return new Promise(function(resolveBlob){output.toBlob(resolveBlob,type,quality)});
+      };
+      encode("image/webp",0.9).then(function(blob){
+        if(blob&&blob.type==="image/webp")return blob;
+        return encode("image/jpeg",0.9);
+      }).then(function(blob){
+        if(!blob)return resolve(null);
+        resolve(new File([blob],blob.type==="image/webp"?"avatar.webp":"avatar.jpg",{type:blob.type}));
+      }).catch(function(){resolve(null)});
+    });
+  };
+
+  if(canvas&&canvasReady){
+    var mode=null;var pointer=null;var grabX=0;var grabY=0;var anchorX=0;var anchorY=0;
+    var toCanvas=function(event){
+      var rect=canvas.getBoundingClientRect();
+      var scaleX=canvas.width/(rect.width||canvas.width);
+      var scaleY=canvas.height/(rect.height||canvas.height);
+      return [(event.clientX-rect.left)*scaleX,(event.clientY-rect.top)*scaleY];
+    };
+    var hitHandle=function(px,py){
+      var found=-1;
+      corners().forEach(function(corner,index){
+        if(Math.abs(px-corner[0])<=HANDLE&&Math.abs(py-corner[1])<=HANDLE)found=index;
+      });
+      return found;
+    };
+    var cursorFor=function(px,py){
+      var handle=hitHandle(px,py);
+      if(handle===0||handle===3)return "nwse-resize";
+      if(handle===1||handle===2)return "nesw-resize";
+      if(px>=crop.x&&px<=crop.x+crop.size&&py>=crop.y&&py<=crop.y+crop.size)return "move";
+      return "crosshair";
+    };
+    // Resize from a fixed opposite corner, keeping the selection square by
+    // taking the larger of the two axis deltas.
+    var resizeFrom=function(px,py){
+      var side=Math.max(Math.abs(px-anchorX),Math.abs(py-anchorY));
+      var limitX=px<anchorX?anchorX:crop.viewW-anchorX;
+      var limitY=py<anchorY?anchorY:crop.viewH-anchorY;
+      side=Math.min(Math.max(minSide(),Math.min(side,limitX,limitY)),Math.min(crop.viewW,crop.viewH));
+      crop.x=px<anchorX?anchorX-side:anchorX;
+      crop.y=py<anchorY?anchorY-side:anchorY;
+      crop.size=side;
+      clampSelection();draw();
+    };
+    canvas.addEventListener("pointerdown",function(event){
+      if(!crop)return;
+      var point=toCanvas(event);
+      var handle=hitHandle(point[0],point[1]);
+      pointer=event.pointerId;
+      if(handle>=0){
+        mode="resize";
+        var opposite=corners()[3-handle];
+        anchorX=opposite[0];anchorY=opposite[1];
+      }else if(point[0]>=crop.x&&point[0]<=crop.x+crop.size&&point[1]>=crop.y&&point[1]<=crop.y+crop.size){
+        mode="move";grabX=point[0]-crop.x;grabY=point[1]-crop.y;
+      }else{
+        // Starting outside draws a fresh selection from that corner.
+        mode="resize";anchorX=point[0];anchorY=point[1];
+        crop.x=point[0];crop.y=point[1];crop.size=minSide();
+      }
+      if(canvas.setPointerCapture)canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    canvas.addEventListener("pointermove",function(event){
+      if(!crop)return;
+      var point=toCanvas(event);
+      if(!mode||event.pointerId!==pointer){canvas.style.cursor=cursorFor(point[0],point[1]);return}
+      if(mode==="move"){
+        crop.x=point[0]-grabX;crop.y=point[1]-grabY;clampSelection();draw();
+      }else{
+        resizeFrom(point[0],point[1]);
+      }
+    });
+    var endDrag=function(event){
+      if(event.pointerId!==pointer)return;
+      mode=null;pointer=null;
+      if(canvas.releasePointerCapture&&canvas.hasPointerCapture&&canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+    };
+    canvas.addEventListener("pointerup",endDrag);
+    canvas.addEventListener("pointercancel",endDrag);
+    canvas.addEventListener("keydown",function(event){
+      if(!crop)return;
+      var step=event.shiftKey?20:4;
+      var moves={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]};
+      var move=moves[event.key];
+      if(move){crop.x+=move[0];crop.y+=move[1];clampSelection();draw();event.preventDefault();return}
+      if(event.key==="+"||event.key==="="){crop.size+=step;clampSelection();draw();event.preventDefault()}
+      else if(event.key==="-"||event.key==="_"){crop.size-=step;clampSelection();draw();event.preventDefault()}
+    });
+  }
+  if(reset)reset.addEventListener("click",function(){resetSelection()});
+  if(cancel){
+    cancel.addEventListener("click",function(){
+      closeCropper();input.value="";message("");
+    });
+  }
+
+  input.addEventListener("change",function(){
+    message("");
+    closeCropper();
+    var file=input.files&&input.files[0];
+    if(!file)return;
+    if(file.type&&file.type.indexOf("image/")!==0){
+      message(text("messageUnsupported"),"error");
+      input.value="";
+      return;
+    }
+    if(maxBytes&&file.size>maxBytes*8){
+      // Far beyond anything a crop could rescue; say so before decoding it.
+      message(text("messageTooLarge"),"error");
+      input.value="";
+      return;
+    }
+    if(!canvasReady){showPreview(file);return}
+    var image=new Image();
+    var url=URL.createObjectURL(file);
+    image.onload=function(){URL.revokeObjectURL(url);openCropper(image)};
+    image.onerror=function(){URL.revokeObjectURL(url);message(text("messageUnsupported"),"error");input.value=""};
+    image.src=url;
+  });
+
+  form.addEventListener("submit",function(event){
+    event.preventDefault();
+    if(busy)return;
+    var file=input.files&&input.files[0];
+    if(!file){message(text("messageMissing"),"error");return}
+    setBusy(true);
+    message(text("messagePreparing"),"");
+    var prepare=crop?renderCrop():Promise.resolve(null);
+    prepare.then(function(rendered){
+      var prepared=rendered||file;
+      if(maxBytes&&prepared.size>maxBytes){
+        setBusy(false);
+        message(text("messageTooLarge"),"error");
+        return;
+      }
+      showPreview(prepared);
+      message(text("messageUploading"),"");
+      var body=new FormData();
+      var csrf=form.querySelector('[name="csrf_token"]');
+      body.set("csrf_token",csrf?csrf.value:"");
+      body.set("avatar",prepared,prepared.name||"avatar");
+      return fetch(form.action,{method:"POST",headers:{accept:"application/json"},body:body,credentials:"same-origin"}).then(function(response){
+        return response.json().catch(function(){return {}}).then(function(payload){
+          setBusy(false);
+          if(response.ok&&payload.ok){
+            message(text("messageSaved"),"ok");
+            if(payload.picture_url)showPreview(payload.picture_url);
+            input.value="";
+            closeCropper();
+            if(removeForm)removeForm.hidden=false;
+            return;
+          }
+          var key={avatar_too_large:"messageTooLarge",avatar_unsupported:"messageUnsupported",avatar_missing:"messageMissing",avatar_rate_limited:"messageRateLimited",invalid:"messageInvalid"}[payload.error];
+          message(text(key||"messageFailed"),"error");
+        });
+      });
+    }).catch(function(){
+      setBusy(false);
+      message(text("messageFailed"),"error");
+    });
+  });
+})();`
+
 export const FORMS_BROWSER_SCRIPT = `
 (function(){
   var setLanguageReturnTo=function(form){

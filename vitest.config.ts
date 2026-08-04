@@ -9,6 +9,7 @@ export default defineConfig(async () => {
       cloudflareTest({
         main: "./src/index.ts",
         miniflare: {
+          r2Buckets: ["AVATARS"],
           bindings: {
             TEST_MIGRATIONS: migrations,
             ISSUER: "https://auth.pangda.app",

@@ -11,14 +11,15 @@
   "description": "KeyForge - single-tenant OIDC/OAuth 2.1 authorization server on Cloudflare Workers",
   "scripts": {
     "dev": "wrangler dev",
-    "validate:deploy:staging": "node scripts/validate-deploy-config.mjs staging",
+    "dev:yolo": "wrangler dev --var ENVIRONMENT:dev --var YOLO_MODE:true",
+    "validate:deploy:dev": "node scripts/validate-deploy-config.mjs dev",
     "validate:deploy:production": "node scripts/validate-deploy-config.mjs production",
     "deploy": "pnpm validate:deploy:production && wrangler deploy --env production",
-    "deploy:staging": "pnpm validate:deploy:staging && wrangler deploy --env staging",
+    "deploy:dev": "pnpm validate:deploy:dev && wrangler deploy --env dev",
     "deploy:production": "pnpm validate:deploy:production && wrangler deploy --env production",
-    "deploy:dry-run:staging": "wrangler deploy --dry-run --env staging",
+    "deploy:dry-run:dev": "wrangler deploy --dry-run --env dev",
     "deploy:dry-run:production": "wrangler deploy --dry-run --env production",
-    "release:staging": "node scripts/release.mjs staging",
+    "release:dev": "node scripts/release.mjs dev",
     "release:production": "node scripts/release.mjs production",
     "release:prod": "node scripts/release.mjs production",
     "typecheck": "tsc --noEmit",
@@ -26,15 +27,15 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --testTimeout=10000 --maxWorkers=50%",
     "test:watch": "vitest",
-    "check": "biome check . && tsc --noEmit && vitest run",
+    "check": "biome check . && node --check scripts/release.mjs && tsc --noEmit && vitest run",
     "secrets:scan": "node scripts/scan-secrets.mjs",
     "demo:selftest": "pnpm --dir examples/demo-app install --frozen-lockfile && pnpm --dir examples/demo-app selftest",
     "cf-typegen": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply keyforge --local",
     "db:migrate": "pnpm validate:deploy:production && wrangler d1 migrations apply keyforge --env production --remote",
-    "db:migrate:staging": "pnpm validate:deploy:staging && wrangler d1 migrations apply keyforge_staging --env staging --remote",
+    "db:migrate:dev": "pnpm validate:deploy:dev && wrangler d1 migrations apply keyforge_dev --env dev --remote",
     "db:migrate:production": "pnpm validate:deploy:production && wrangler d1 migrations apply keyforge --env production --remote"
   },
   "dependencies": {
@@ -47,11 +48,11 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
-    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
     "@vitest/coverage-istanbul": "^4.1.10",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
-    "wrangler": "^4.107.0"
+    "wrangler": "^4.114.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

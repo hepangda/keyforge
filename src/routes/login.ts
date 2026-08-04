@@ -191,7 +191,7 @@ login.post("/login", async (c) => {
 
   const user =
     identifier.length <= EMAIL_INPUT_MAX_LENGTH ? await getUserByLogin(c.env, identifier) : null
-  const passwordValid = await verifyLoginPassword(c.env, user?.id ?? null, password)
+  const passwordValid = await verifyLoginPassword(c.env, user?.id ?? null, password, identifier)
   if (user === null || user.disabled || !passwordValid) {
     await recordAudit(c.env, {
       type: "user.login.password.failure",

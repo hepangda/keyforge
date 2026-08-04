@@ -13,6 +13,6 @@ pnpm check
 pnpm test:coverage
 pnpm audit --audit-level moderate
 pnpm secrets:scan
-pnpm deploy:dry-run:staging
+pnpm deploy:dry-run:dev
 pnpm deploy:dry-run:production
 ```

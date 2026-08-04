@@ -16,5 +16,11 @@ EMAIL_FROM="KeyForge <auth@pangda.app>"
 REQUEST_HASH_SECRET=""
 
 # Dedicated readiness bearer credential. Local readiness does not require it;
-# set a different random 32+ character secret in staging and production.
+# set a different random 32+ character secret in dev and production.
 READINESS_PROBE_TOKEN=""
+
+# Development-only escape hatch. Honoured ONLY when ENVIRONMENT is exactly
+# "dev" and the value is exactly "true"; local, test, and production ignore it.
+# When on, KeyForge skips every substantive validation and approves any request.
+# Never enable it against production data or for real users.
+YOLO_MODE="false"

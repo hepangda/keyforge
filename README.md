@@ -10,7 +10,7 @@ and Japanese. A saved language choice takes precedence; without one, KeyForge
 uses the browser's `Accept-Language` preference and falls back to English. The
 language picker can also be reset to follow the browser again.
 
-The checked-in staging and production profiles currently target the Pangda
+The checked-in dev and production profiles currently target the Pangda
 tenant. Its `pangda.app` issuer/resource URIs and seeded Pangda client catalog
 are deployment data; KeyForge is the project and runtime brand.
 
@@ -25,7 +25,7 @@ are deployment data; KeyForge is the project and runtime brand.
   private-key copy is confirmed deleted
 - Separate Queues for asynchronous audit ingestion and transactional email
   delivery with provider-idempotent retries and dead-letter isolation
-- D1-only audit retention: 90 days in staging and 365 days in production,
+- D1-only audit retention: 90 days in dev and 365 days in production,
   followed by bounded direct deletion with no archive copy
 
 The Worker publishes standard discovery metadata at
@@ -53,9 +53,17 @@ pnpm exec wrangler d1 execute keyforge --local --file=examples/demo-app/seed-tes
 pnpm dev
 ```
 
-Open <http://localhost:8787/login> and sign in as `demo-admin` / `demo-admin-2026`. This
+Open <http://localhost:17001/login> and sign in as `demo-admin` / `demo-admin-2026`. This
 weak credential exists only in the explicit local demo seed and must never be
 used outside a disposable development database.
+
+To run locally with YOLO mode on, use `pnpm dev:yolo`. Plain `pnpm dev` loads
+the top-level `[vars]`, where `ENVIRONMENT` is `local`, and YOLO mode is only
+ever honoured for `dev` — so the switch stays off. `dev:yolo` overrides both
+`ENVIRONMENT` and `YOLO_MODE` for that one process. It also relaxes the strict
+remote-config checks that `ENVIRONMENT=dev` would otherwise impose, so local
+`console` email and absent secrets still work. With it on, any existing account
+signs in when the password repeats the login name (`demo-admin` / `demo-admin`).
 
 To exercise the production-style bootstrap instead, do not apply the demo
 administrator seed. Generate a token with `openssl rand -hex 32`, paste it into
@@ -64,7 +72,7 @@ second terminal:
 
 ```bash
 export BOOTSTRAP_TOKEN='paste-the-same-64-character-token-here'
-curl -fsS http://localhost:8787/setup/bootstrap \
+curl -fsS http://localhost:17001/setup/bootstrap \
   -H 'content-type: application/json' \
   -H "x-bootstrap-token: $BOOTSTRAP_TOKEN" \
   --data '{"email":"owner@example.test","alias":"localowner","name":"Local Owner","password":"replace-with-a-unique-16+-character-password"}'
@@ -73,17 +81,25 @@ curl -fsS http://localhost:8787/setup/bootstrap \
 Then sign in with that email and password. Clear `BOOTSTRAP_TOKEN` from
 `.dev.vars` and restart the Worker after bootstrap succeeds.
 
-The local issuer is `http://localhost:8787`. Set `REQUEST_HASH_SECRET` to a random value when stable,
+The local issuer is `http://localhost:17001`. Set `REQUEST_HASH_SECRET` to a random value when stable,
 privacy-preserving request metadata hashes are useful during local testing.
 
 The base Wrangler configuration is local/test-only. Remote commands must select
-the `staging` or `production` environment explicitly.
+the `dev` or `production` environment explicitly.
+
+The `dev` environment additionally supports a `YOLO_MODE` switch. When it is
+`"true"`, KeyForge performs no substantive validation and approves every
+request — no rate limits, CSRF, PKCE, redirect-URI registration, client-secret,
+consent, scope, administrator, or password checks. It is honoured only when
+`ENVIRONMENT` is exactly `dev`, so `local`, `test`, and `production` ignore it,
+and the deployment validator refuses a production profile that declares it at
+all. See [the operations runbook](docs/operations.md#yolo-mode-dev-only).
 
 ```bash
 pnpm check
 pnpm test:coverage
 pnpm demo:selftest
-pnpm deploy:dry-run:staging
+pnpm deploy:dry-run:dev
 pnpm deploy:dry-run:production
 ```
 
@@ -92,9 +108,9 @@ post-deploy verification flow is available as one command after loading the
 target readiness credential from the monitoring secret manager:
 
 ```bash
-export KEYFORGE_STAGING_READINESS_TOKEN='load-from-secret-manager'
-pnpm release:staging
-unset KEYFORGE_STAGING_READINESS_TOKEN
+export KEYFORGE_DEV_READINESS_TOKEN='load-from-secret-manager'
+pnpm release:dev
+unset KEYFORGE_DEV_READINESS_TOKEN
 
 export KEYFORGE_PRODUCTION_READINESS_TOKEN='load-from-secret-manager'
 pnpm release:production
@@ -108,7 +124,7 @@ release gates, backups, and failure handling.
 Dry runs are build/configuration syntax checks and intentionally work while the
 checked-in D1/KV IDs are placeholders. The remote migration and deploy scripts
 run `validate-deploy-config.mjs` first and refuse placeholder IDs, shared
-staging/production resources, or environment/issuer/route mismatches.
+dev/production resources, or environment/issuer/route mismatches.
 
 Tests create an isolated administrator fixture. Production migrations never
 create credentials; provision the first production administrator with the
@@ -121,6 +137,7 @@ one-time `/setup/bootstrap` flow described in the operations runbook.
 | `src/oauth`, `src/oidc`, `src/tokens` | OAuth/OIDC protocol and token handling |
 | `src/auth`, `src/routes` | Authentication and HTTP routes |
 | `src/i18n` | Locale negotiation and English/Chinese/Japanese message catalog |
+| `src/media` | Avatar validation and R2-backed storage |
 | `src/operations` | Scheduled key rotation, cleanup, and audit retention deletion |
 | `src/do` | Durable Object consistency boundaries |
 | `migrations` | Ordered D1 schema and seed catalog |
@@ -131,6 +148,7 @@ one-time `/setup/bootstrap` flow described in the operations runbook.
 
 - [Operations, release, backup, and recovery](docs/operations.md)
 - [Administrator API](docs/admin-api.md)
+- [Avatars](docs/avatars.md)
 - [Local demo relying party](examples/demo-app/README.md)
 
 Never commit `.dev.vars`, provider credentials, bootstrap tokens, client

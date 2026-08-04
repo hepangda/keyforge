@@ -1,5 +1,6 @@
 import type { Context } from "hono"
 import { getClientById } from "../db/queries/clients"
+import { isYoloEnabled } from "../operations/yolo"
 import { verifyClientSecret } from "../security/client-secret"
 import { OAuthError } from "../security/errors"
 import type { AppBindings } from "../types/app"
@@ -135,6 +136,11 @@ export async function authenticateClient(
       description: "Client authentication failed",
       detail: `client ${credentials.clientId} not found or disabled`,
     })
+  }
+  // YOLO mode accepts whatever credential shape the caller presented, as long
+  // as the client itself exists and is enabled.
+  if (isYoloEnabled(c.env)) {
+    return { client, method: credentials.method }
   }
   if (client.type === "confidential") {
     const verified =

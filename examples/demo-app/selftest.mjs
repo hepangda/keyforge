@@ -19,7 +19,7 @@ const WRANGLER = path.join(ROOT, "node_modules", ".bin", "wrangler")
 const SEED = path.join(DEMO_DIR, "seed-demo-client.sql")
 const TEST_ADMIN_SEED = path.join(DEMO_DIR, "seed-test-admin.sql")
 
-const AUTH_PORT = 8787
+const AUTH_PORT = 17001
 const DEMO_PORT = 8788
 const AUTH_BASE = `http://localhost:${AUTH_PORT}`
 const DEMO_BASE = `http://localhost:${DEMO_PORT}`

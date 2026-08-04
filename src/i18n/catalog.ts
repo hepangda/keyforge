@@ -557,9 +557,9 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "请查看影响，并仅在确定永久移除此账户时确认。",
     ja: "影響を確認し、このアカウントを完全に削除する場合のみ確定してください。",
   },
-  "Your username may contain only English letters and numbers.": {
-    "zh-CN": "用户名只能包含英文字母和数字。",
-    ja: "ユーザー名には英字と数字のみ使用できます。",
+  "Your username may contain only English letters, numbers, hyphens, and underscores.": {
+    "zh-CN": "用户名只能包含英文字母、数字、连字符和下划线。",
+    ja: "ユーザー名には英字、数字、ハイフン、アンダースコアのみ使用できます。",
   },
   "Display name": { "zh-CN": "显示名称", ja: "表示名" },
   "Save profile": { "zh-CN": "保存资料", ja: "プロフィールを保存" },
@@ -760,10 +760,55 @@ export const MESSAGE_CATALOG = {
     ja: "アプリ、ユーザー、リソース、デバイス、監査アクティビティを設定します。",
   },
   "Open admin console": { "zh-CN": "打开管理控制台", ja: "管理コンソールを開く" },
+  "Profile photo": { "zh-CN": "头像", ja: "プロフィール写真" },
+  "No photo uploaded.": { "zh-CN": "尚未上传头像。", ja: "写真は未アップロードです。" },
+  "A photo is shown to applications you authorize.": {
+    "zh-CN": "您授权的应用会看到该头像。",
+    ja: "許可したアプリケーションにこの写真が表示されます。",
+  },
+  "Remove photo": { "zh-CN": "移除头像", ja: "写真を削除" },
+  "PNG, JPEG, WebP, or GIF. Choose the part of the photo to use after selecting it.": {
+    "zh-CN": "支持 PNG、JPEG、WebP 或 GIF。选择图片后可以裁剪要使用的部分。",
+    ja: "PNG・JPEG・WebP・GIF に対応。選択後に使用する範囲を切り抜けます。",
+  },
+  "Drag the square to choose the part of the photo to use.": {
+    "zh-CN": "拖动选框以选择要使用的图片区域。",
+    ja: "枠をドラッグして使用する範囲を選びます。",
+  },
+  "Drag inside the square to move it, or drag a corner to resize.": {
+    "zh-CN": "在选框内拖动可移动，拖动四角可调整大小。",
+    ja: "枠の内側をドラッグで移動、角をドラッグでサイズ変更できます。",
+  },
+  "Reset selection": { "zh-CN": "重置选框", ja: "選択範囲をリセット" },
+  "Save photo": { "zh-CN": "保存头像", ja: "写真を保存" },
+  "Preparing your photo…": { "zh-CN": "正在准备图片…", ja: "写真を準備しています…" },
+  "Uploading…": { "zh-CN": "正在上传…", ja: "アップロード中…" },
+  "The photo could not be uploaded. Try again.": {
+    "zh-CN": "图片上传失败，请重试。",
+    ja: "写真をアップロードできませんでした。もう一度お試しください。",
+  },
+  "Profile photo updated.": { "zh-CN": "头像已更新。", ja: "プロフィール写真を更新しました。" },
+  "Profile photo removed.": { "zh-CN": "头像已移除。", ja: "プロフィール写真を削除しました。" },
+  "That photo is too large even after resizing. Choose a smaller image.": {
+    "zh-CN": "该图片在缩放后仍然过大，请选择更小的图片。",
+    ja: "縮小後もこの写真は大きすぎます。より小さい画像を選択してください。",
+  },
+  "Choose a PNG, JPEG, WebP, or GIF image.": {
+    "zh-CN": "请选择 PNG、JPEG、WebP 或 GIF 格式的图片。",
+    ja: "PNG・JPEG・WebP・GIF 形式の画像を選択してください。",
+  },
+  "Choose an image file to upload.": {
+    "zh-CN": "请选择要上传的图片文件。",
+    ja: "アップロードする画像ファイルを選択してください。",
+  },
+  "Too many photo uploads. Try again later.": {
+    "zh-CN": "头像上传过于频繁，请稍后再试。",
+    ja: "写真のアップロードが多すぎます。しばらくしてからお試しください。",
+  },
   "Profile saved.": { "zh-CN": "个人资料已保存。", ja: "プロフィールを保存しました。" },
-  "Choose an available username using only English letters and numbers.": {
-    "zh-CN": "请选择一个仅含英文字母和数字的可用用户名。",
-    ja: "英字と数字のみを使った、利用可能なユーザー名を選んでください。",
+  "Choose an available username using only English letters, numbers, hyphens, and underscores.": {
+    "zh-CN": "请选择一个仅含英文字母、数字、连字符和下划线的可用用户名。",
+    ja: "英字、数字、ハイフン、アンダースコアのみを使った、利用可能なユーザー名を選んでください。",
   },
   "Password added.": { "zh-CN": "密码已添加。", ja: "パスワードを追加しました。" },
   "Password renamed.": { "zh-CN": "密码已重命名。", ja: "パスワード名を変更しました。" },
@@ -1050,10 +1095,11 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "密码留空时，会发送有效期一小时的安全邀请链接。",
     ja: "パスワードを空欄にすると、有効期限1時間の安全な招待リンクを送信します。",
   },
-  "English letters and numbers only; usernames are unique and can be used at sign-in.": {
-    "zh-CN": "仅限英文字母和数字；用户名唯一，并可用于登录。",
-    ja: "英字と数字のみ使用できます。ユーザー名は一意で、ログインにも使用できます。",
-  },
+  "English letters, numbers, hyphens, and underscores only; usernames are unique and can be used at sign-in.":
+    {
+      "zh-CN": "仅限英文字母、数字、连字符和下划线；用户名唯一，并可用于登录。",
+      ja: "英字、数字、ハイフン、アンダースコアのみ使用できます。ユーザー名は一意で、ログインにも使用できます。",
+    },
   Optional: { "zh-CN": "可选", ja: "任意" },
   "Initial password": { "zh-CN": "初始密码", ja: "初期パスワード" },
   "Leave blank to send an invitation": { "zh-CN": "留空以发送邀请", ja: "空欄にすると招待を送信" },
@@ -1071,10 +1117,11 @@ export const MESSAGE_CATALOG = {
   },
   Never: { "zh-CN": "从未", ja: "未使用" },
   "Groups:": { "zh-CN": "群组：", ja: "グループ：" },
-  "English letters and numbers only. Users can sign in with this username.": {
-    "zh-CN": "仅限英文字母和数字。用户可以使用此用户名登录。",
-    ja: "英字と数字のみ使用できます。ユーザーはこのユーザー名でログインできます。",
-  },
+  "English letters, numbers, hyphens, and underscores only. Users can sign in with this username.":
+    {
+      "zh-CN": "仅限英文字母、数字、连字符和下划线。用户可以使用此用户名登录。",
+      ja: "英字、数字、ハイフン、アンダースコアのみ使用できます。ユーザーはこのユーザー名でログインできます。",
+    },
   "This stable ID is exposed as sub in ID tokens and does not change when the username changes.": {
     "zh-CN": "这个稳定 ID 会在 ID Token 中以 sub 公开，并且不会随用户名更改。",
     ja: "この安定したIDはIDトークンでsubとして公開され、ユーザー名を変更しても変わりません。",
@@ -1089,10 +1136,11 @@ export const MESSAGE_CATALOG = {
         "用户之后必须使用新用户名登录。保存的登录信息、外部映射，或使用 preferred_username 的自动化可能需要更新。",
       ja: "以後は新しいユーザー名でログインする必要があります。保存済みのログイン情報、外部マッピング、preferred_usernameを使う自動化は更新が必要になる場合があります。",
     },
-  "English letters and numbers only. Only administrators can change this value.": {
-    "zh-CN": "仅限英文字母和数字。只有管理员可以更改此值。",
-    ja: "英字と数字のみ使用できます。この値を変更できるのは管理者だけです。",
-  },
+  "English letters, numbers, hyphens, and underscores only. Only administrators can change this value.":
+    {
+      "zh-CN": "仅限英文字母、数字、连字符和下划线。只有管理员可以更改此值。",
+      ja: "英字、数字、ハイフン、アンダースコアのみ使用できます。この値を変更できるのは管理者だけです。",
+    },
   "No name set": { "zh-CN": "未设置名称", ja: "名前未設定" },
   "Account disabled (blocks sign-in)": {
     "zh-CN": "账户已禁用（阻止登录）",
@@ -1376,9 +1424,9 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "已有账户使用该用户名。",
     ja: "そのユーザー名は別のアカウントで使用されています。",
   },
-  "Usernames may contain only English letters and numbers.": {
-    "zh-CN": "用户名只能包含英文字母和数字。",
-    ja: "ユーザー名には英字と数字のみ使用できます。",
+  "Usernames may contain only English letters, numbers, hyphens, and underscores.": {
+    "zh-CN": "用户名只能包含英文字母、数字、连字符和下划线。",
+    ja: "ユーザー名には英字、数字、ハイフン、アンダースコアのみ使用できます。",
   },
   "That password does not meet this user's policy.": {
     "zh-CN": "该密码不符合此用户的策略。",

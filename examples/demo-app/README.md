@@ -35,8 +35,8 @@ pnpm selftest
 This single command:
 
 1. applies the local D1 migrations and registers the `demo_local` client;
-2. starts the auth server (`wrangler dev` on `:8787`, with `ISSUER` overridden to
-   `http://localhost:8787` so discovery/JWKS/tokens all point at localhost);
+2. starts the auth server (`wrangler dev` on `:17001`, with `ISSUER` overridden to
+   `http://localhost:17001` so discovery/JWKS/tokens all point at localhost);
 3. starts this demo app on `:8788`;
 4. drives the **entire** flow over HTTP — `/login` → authorize → sign in as the
    local demo-only **`demo-admin` / `demo-admin-2026`** account → approve consent → callback with the code →
@@ -44,7 +44,7 @@ This single command:
    is authenticated;
 5. tears both servers down.
 
-Expect `✅ SELF-TEST PASSED`. Ports `8787` and `8788` must be free.
+Expect `✅ SELF-TEST PASSED`. Ports `17001` and `8788` must be free.
 
 ## Try it in a browser
 
@@ -55,7 +55,7 @@ Two terminals, from the repo root:
 pnpm exec wrangler d1 migrations apply keyforge --local
 pnpm exec wrangler d1 execute keyforge --local --file=examples/demo-app/seed-test-admin.sql
 pnpm exec wrangler d1 execute keyforge --local --file=examples/demo-app/seed-demo-client.sql
-pnpm exec wrangler dev --var ISSUER:http://localhost:8787 --port 8787
+pnpm exec wrangler dev --var ISSUER:http://localhost:17001 --port 17001
 ```
 
 ```bash
@@ -73,7 +73,7 @@ verified `id_token` claims.
 
 | Variable       | Default                          | Purpose                             |
 | -------------- | -------------------------------- | ----------------------------------- |
-| `AUTH_BASE`    | `http://localhost:8787`          | Auth server base URL (for discovery)|
+| `AUTH_BASE`    | `http://localhost:17001`          | Auth server base URL (for discovery)|
 | `PORT`         | `8788`                           | Port this demo listens on           |
 | `CLIENT_ID`    | `demo_local`                     | Registered OAuth client id          |
 | `REDIRECT_URI` | `http://localhost:8788/callback` | Must match the registered client    |

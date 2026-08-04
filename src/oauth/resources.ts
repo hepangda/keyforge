@@ -1,6 +1,7 @@
 import { getResourceByUri } from "../db/queries/resources"
+import { isYoloEnabled } from "../operations/yolo"
 import { OAuthError } from "../security/errors"
-import type { OAuthClient, OAuthResource } from "../types/domain"
+import { asResourceUri, type OAuthClient, type OAuthResource } from "../types/domain"
 import { validateRequestedScopes } from "./scopes"
 
 /**
@@ -22,6 +23,7 @@ async function resolveResourceRecord(
   client: OAuthClient,
   requestedResource: string | null,
 ): Promise<OAuthResource> {
+  const yolo = isYoloEnabled(env)
   const resource = requestedResource ?? client.defaultResource
   if (resource === null || resource === "") {
     throw new OAuthError("invalid_target", {
@@ -29,7 +31,7 @@ async function resolveResourceRecord(
       detail: "request has no resource and client has no default_resource",
     })
   }
-  if (!client.allowedResources.includes(resource)) {
+  if (!yolo && !client.allowedResources.includes(resource)) {
     throw new OAuthError("invalid_target", {
       description: "The requested resource is not permitted",
       detail: `resource ${resource} not in client allowed_resources`,
@@ -37,6 +39,16 @@ async function resolveResourceRecord(
   }
   const registered = await getResourceByUri(env, resource)
   if (registered === null || !registered.enabled) {
+    // YOLO mode synthesizes an unregistered resource rather than failing, so a
+    // dev client can point at any audience it likes.
+    if (yolo) {
+      return {
+        resourceUri: asResourceUri(resource),
+        name: registered?.name ?? resource,
+        allowedScopes: registered?.allowedScopes ?? client.allowedScopes,
+        enabled: true,
+      }
+    }
     throw new OAuthError("invalid_target", {
       description: "Unknown or disabled resource",
       detail: `resource ${resource} not registered or disabled`,
@@ -57,6 +69,8 @@ export async function resolveResourceForScopes(
 ): Promise<string> {
   const registered = await resolveResourceRecord(env, client, requestedResource)
   const resource = registered.resourceUri
+  // YOLO mode grants every requested scope regardless of client or resource policy.
+  if (isYoloEnabled(env)) return resource
   validateRequestedScopes(requestedScopes, client.allowedScopes)
   try {
     validateRequestedScopes(requestedScopes, registered.allowedScopes)

@@ -1,5 +1,6 @@
 import { createMiddleware } from "hono/factory"
 import { getUserGroupNames } from "../db/queries/users"
+import { isYoloEnabled } from "../operations/yolo"
 import { verifyCsrfToken } from "../security/csrf"
 import type { AppBindings } from "../types/app"
 import { nowSeconds } from "../utils/time"
@@ -13,7 +14,9 @@ export const requireAdmin = createMiddleware<AppBindings>(async (c, next) => {
     return c.json({ error: "unauthorized" }, 401)
   }
   const groups = await getUserGroupNames(c.env, user.id)
-  if (!groups.includes(ADMIN_GROUP)) {
+  // YOLO mode grants administrator authority to any authenticated user. A
+  // session is still required so `c.get("user")` stays defined downstream.
+  if (!groups.includes(ADMIN_GROUP) && !isYoloEnabled(c.env)) {
     return c.json({ error: "forbidden" }, 403)
   }
   await next()
@@ -48,7 +51,10 @@ export const requireAdminMutationIntegrity = createMiddleware<AppBindings>(async
   }
 
   const session = c.get("session")
-  if (session === undefined || nowSeconds() - session.authTime > ADMIN_RECENT_AUTH_SECONDS) {
+  if (
+    !isYoloEnabled(c.env) &&
+    (session === undefined || nowSeconds() - session.authTime > ADMIN_RECENT_AUTH_SECONDS)
+  ) {
     return c.json({ error: "reauthentication_required" }, 403)
   }
   await next()

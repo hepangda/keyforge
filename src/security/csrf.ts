@@ -1,5 +1,6 @@
 import type { Context } from "hono"
 import { getCookie, setCookie } from "hono/cookie"
+import { yoloAllow } from "../operations/yolo"
 import type { AppBindings } from "../types/app"
 import { randomToken } from "../utils/random"
 import { timingSafeEqualString } from "./crypto"
@@ -29,6 +30,7 @@ export function issueCsrfToken(c: Context<AppBindings>): string {
 }
 
 export function verifyCsrfToken(c: Context<AppBindings>, submitted: string | undefined): boolean {
+  if (yoloAllow(c.env, "csrf", c.get("requestId"))) return true
   const cookie = getCookie(c, CSRF_COOKIE_NAME)
   if (cookie === undefined || submitted === undefined || submitted === "") {
     return false

@@ -1,4 +1,4 @@
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { z } from "zod"
 import { createMagicLink } from "../auth/magic-link"
 import {
@@ -27,6 +27,9 @@ import {
   deleteCredentialPreservingLoginMethod,
   listCredentialSummaries,
 } from "../db/queries/webauthn"
+import { MAX_AVATAR_BYTES } from "../media/avatar"
+import { readAvatarUpload, removeUserAvatar, storeUserAvatar } from "../media/avatar-service"
+import { effectivePictureUrl } from "../oidc/claims"
 import { recordAudit } from "../security/audit"
 import type { AppBindings } from "../types/app"
 import type { User } from "../types/domain"
@@ -73,14 +76,32 @@ const patchGroupSchema = createGroupSchema
   .partial()
   .refine((value) => Object.keys(value).length > 0)
 
-function serializeUser(user: User, groups?: readonly string[]): Record<string, unknown> {
+/** Read an admin avatar upload from either a multipart field or a raw body. */
+async function readAdminAvatarBody(
+  c: Context<AppBindings>,
+): Promise<Uint8Array | "too_large" | "unsupported" | "empty"> {
+  const contentType = c.req.header("content-type") ?? ""
+  if (contentType.startsWith("multipart/form-data")) {
+    const form = await c.req.raw.formData()
+    const value = form.get("avatar")
+    return await readAvatarUpload(typeof value === "string" ? value : (value as File | null))
+  }
+  const bytes = new Uint8Array(await c.req.raw.arrayBuffer())
+  if (bytes.byteLength === 0) return "empty"
+  if (bytes.byteLength > MAX_AVATAR_BYTES) return "too_large"
+  return bytes
+}
+
+function serializeUser(env: Env, user: User, groups?: readonly string[]): Record<string, unknown> {
   const base: Record<string, unknown> = {
     id: user.id,
     email: user.email,
     alias: user.alias,
     email_verified: user.emailVerified,
     name: user.name,
-    picture: user.picture,
+    picture: effectivePictureUrl(env, user),
+    has_avatar: user.avatarKey !== null,
+    avatar_updated_at: user.avatarUpdatedAt,
     disabled: user.disabled,
     created_at: user.createdAt,
   }
@@ -99,7 +120,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
   app.get("/admin/users", async (c) => {
     const { limit, offset } = parsePagination(c)
     const users = await listUsers(c.env, limit, offset)
-    return c.json({ users: users.map((user) => serializeUser(user)) })
+    return c.json({ users: users.map((user) => serializeUser(c.env, user)) })
   })
 
   app.post("/admin/users", async (c) => {
@@ -134,7 +155,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     })
     return c.json(
       {
-        ...serializeUser(result.user, result.groups),
+        ...serializeUser(c.env, result.user, result.groups),
         credential_setup: result.invitationSent ? "invitation_sent" : "password_set",
       },
       201,
@@ -217,7 +238,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     if (user === null) {
       return c.json({ error: "not_found" }, 404)
     }
-    return c.json(serializeUser(user, await getUserGroupNames(c.env, user.id)))
+    return c.json(serializeUser(c.env, user, await getUserGroupNames(c.env, user.id)))
   })
 
   app.patch("/admin/users/:id", async (c) => {
@@ -261,7 +282,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       success: true,
       detail: `admin updated user ${updated.id}`,
     })
-    return c.json(serializeUser(updated))
+    return c.json(serializeUser(c.env, updated))
   })
 
   app.put("/admin/users/:id/groups", async (c) => {
@@ -378,6 +399,56 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       detail: "admin deleted passkey login method",
     })
     return c.json({ deleted: true })
+  })
+
+  // Accepts the raw image bytes with the real content type sniffed from the
+  // body, so an operator can pipe a file in without multipart framing.
+  app.put("/admin/users/:id/avatar", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    const declaredLength = Number(c.req.header("content-length") ?? "0")
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_AVATAR_BYTES) {
+      return c.json({ error: "avatar_too_large" }, 413)
+    }
+    const body = await readAdminAvatarBody(c)
+    if (typeof body === "string") {
+      return c.json({ error: `avatar_${body}` }, body === "too_large" ? 413 : 400)
+    }
+    const result = await storeUserAvatar(c.env, user.id, body)
+    if (result.status === "rejected") {
+      return c.json({ error: `avatar_${result.reason}` }, result.reason === "too_large" ? 413 : 400)
+    }
+    if (result.status === "not_found") return c.json({ error: "not_found" }, 404)
+    await recordAudit(c.env, {
+      type: "admin.user.updated",
+      actorUserId: c.get("user")?.id ?? null,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "admin updated avatar",
+    })
+    const updated = await getUserById(c.env, user.id)
+    return c.json({
+      picture: updated === null ? null : effectivePictureUrl(c.env, updated),
+      content_type: result.contentType,
+    })
+  })
+
+  app.delete("/admin/users/:id/avatar", async (c) => {
+    const user = await getUserById(c.env, c.req.param("id"))
+    if (user === null) return c.json({ error: "not_found" }, 404)
+    const removed = await removeUserAvatar(c.env, user.id)
+    if (removed) {
+      await recordAudit(c.env, {
+        type: "admin.user.updated",
+        actorUserId: c.get("user")?.id ?? null,
+        userId: user.id,
+        requestId: c.get("requestId"),
+        success: true,
+        detail: "admin removed avatar",
+      })
+    }
+    return c.json({ deleted: removed })
   })
 
   app.post("/admin/users/:id/magic-link", async (c) => {

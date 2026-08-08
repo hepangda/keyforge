@@ -43,6 +43,7 @@ const REQUIRED_TABLES = [
   "oauth_resources",
   "oauth_client_permission_groups",
   "oauth_resource_permission_groups",
+  "group_membership_requests",
   "sessions",
   "refresh_tokens",
   "device_authorization_sessions",
@@ -75,6 +76,8 @@ const REQUIRED_INDEXES = [
   "idx_password_credentials_user",
   "idx_oauth_client_permission_groups_group",
   "idx_oauth_resource_permission_groups_group",
+  "idx_group_membership_requests_group",
+  "idx_group_membership_requests_user",
 ] as const
 
 function requireNonEmpty(value: unknown, name: string, minimumLength = 1): void {

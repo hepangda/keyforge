@@ -1,8 +1,10 @@
 import type { PasswordCredentialSummary } from "../auth/password"
+import type { PermissionGroupMembershipSummary } from "../db/queries/group-memberships"
 import type { I18n } from "../i18n"
 import { AVATAR_TARGET_DIMENSION, MAX_AVATAR_BYTES } from "../media/avatar"
 import type { AuthMethod, User } from "../types/domain"
 import { appShell, avatarMarkup, escapeHtml, icons } from "./layout"
+import { searchPicker } from "./search-picker"
 
 export type DashboardSessionRow = {
   readonly id: string
@@ -43,6 +45,7 @@ export type DashboardData = {
   readonly csrfToken: string
   readonly user: User
   readonly groups: readonly string[]
+  readonly permissionGroups: readonly PermissionGroupMembershipSummary[]
   readonly isAdmin: boolean
   readonly sessions: readonly DashboardSessionRow[]
   readonly passwords: readonly PasswordCredentialSummary[]
@@ -53,7 +56,14 @@ export type DashboardData = {
   readonly notice?: string
 }
 
-export const DASHBOARD_SECTIONS = ["profile", "login-methods", "sessions", "apps", "admin"] as const
+export const DASHBOARD_SECTIONS = [
+  "profile",
+  "login-methods",
+  "groups",
+  "sessions",
+  "apps",
+  "admin",
+] as const
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number]
 
 export const DASHBOARD_FLOWS = [
@@ -80,6 +90,7 @@ export type DashboardView = {
 const NAV_ITEMS: readonly { readonly section: DashboardSection; readonly label: string }[] = [
   { section: "profile", label: "Profile" },
   { section: "login-methods", label: "Login methods" },
+  { section: "groups", label: "Permission groups" },
   { section: "sessions", label: "Active sessions" },
   { section: "apps", label: "Authorized apps" },
   { section: "admin", label: "Administration" },
@@ -432,6 +443,50 @@ function renderSessions(data: DashboardData, view: DashboardView): string {
   return `<section class="dash-panel" id="sessions"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Active sessions"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Devices and browsers currently signed in to your account."))}</p></div></div><ul class="dash-list">${rows}</ul>${others === 0 ? "" : `<div class="dash-panel__foot dash-panel__foot--end"><a href="${escapeHtml(dashboardHref("sessions", { flow: "revoke-other-sessions" }))}" class="btn btn--ghost btn--sm">${escapeHtml(i18n.t("Sign out all other sessions"))}</a></div>`}</section>`
 }
 
+function renderPermissionGroups(data: DashboardData): string {
+  const { i18n } = data
+  const memberships = data.permissionGroups.filter((group) => group.state === "member")
+  const pending = data.permissionGroups.filter((group) => group.state === "pending")
+  const available = data.permissionGroups.filter((group) => group.state === "available")
+  const memberRows = memberships.map(
+    (group) =>
+      `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(group.name)} <span class="badge badge--ok">${escapeHtml(i18n.t("Member"))}</span></div><div class="dash-item__meta">${escapeHtml(group.description ?? i18n.t("No description"))} · ${escapeHtml(i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", { count: group.memberCount }))}</div></div></li>`,
+  )
+  const pendingRows = pending.map(
+    (group) =>
+      `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(group.name)} <span class="badge badge--warn">${escapeHtml(i18n.t("Pending review"))}</span></div><div class="dash-item__meta">${escapeHtml(group.description ?? i18n.t("No description"))}</div></div><div class="dash-item__actions"><form method="post" action="/account/groups/requests/${encodeURIComponent(group.id)}/cancel">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm btn--auto" type="submit">${escapeHtml(i18n.t("Cancel request"))}</button></form></div></li>`,
+  )
+  const requestForm =
+    available.length === 0
+      ? `<div class="empty">${escapeHtml(i18n.t("No other permission groups are available to request."))}</div>`
+      : `<form method="post" action="/account/groups/request" class="group-request-form">${csrfField(data.csrfToken)}${searchPicker(
+          i18n,
+          {
+            id: "account-group-request",
+            name: "group_id",
+            label: "Find a permission group",
+            placeholder: "Search groups by name or description",
+            selectedLabel: "Group to request",
+            emptySelection: "Choose a group from the recommendations or search results.",
+            maxSelections: 1,
+            required: true,
+          },
+          available.map((group, index) => ({
+            value: group.id,
+            title: group.name,
+            detail: group.description ?? i18n.t("No description"),
+            meta: i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", {
+              count: group.memberCount,
+            }),
+            recommended: index < 6,
+          })),
+        )}<div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Request to join"))}</button></div></form>`
+
+  return `<section class="dash-panel" id="groups"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Your permission groups"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Membership controls which applications and APIs can issue tokens for your account."))}</p></div></div><ul class="dash-list">${memberRows.length === 0 ? `<li class="dash-list__item--empty">${escapeHtml(i18n.t("You are not a member of any permission group."))}</li>` : memberRows.join("\n")}</ul></section>
+  ${pendingRows.length === 0 ? "" : `<section class="dash-panel"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Pending requests"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("An administrator must approve these requests before access changes."))}</p></div></div><ul class="dash-list">${pendingRows.join("\n")}</ul></section>`}
+  <section class="dash-panel"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Request another group"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Search the directory, choose one group, and send it for review."))}</p></div></div><div class="dash-panel__body group-request-panel">${requestForm}</div></section>`
+}
+
 function renderAppsOverview(data: DashboardData): string {
   const { i18n } = data
   const rows = data.apps.map(
@@ -491,6 +546,8 @@ function renderSection(
       return renderProfile(data, view)
     case "login-methods":
       return renderLoginMethods(data, view)
+    case "groups":
+      return renderPermissionGroups(data)
     case "sessions":
       return renderSessions(data, view)
     case "apps":
@@ -522,6 +579,11 @@ const NOTICES: Readonly<Record<string, string>> = {
   sessions_revoked: "Other sessions signed out.",
   app_revoked: "Application access revoked.",
   device_revoked: "Device access revoked.",
+  group_request_submitted: "Permission-group request submitted.",
+  group_request_pending: "That permission-group request is already pending.",
+  group_request_cancelled: "Permission-group request cancelled.",
+  group_already_joined: "You already belong to that permission group.",
+  group_request_unavailable: "That permission group is not available to request.",
   login_method_removed: "Login method removed.",
   last_login_method: "Add another password or passkey before removing this one.",
   delete_invalid: "Account deletion confirmation did not match.",
@@ -546,6 +608,8 @@ const SUCCESS_NOTICES = new Set([
   "sessions_revoked",
   "app_revoked",
   "device_revoked",
+  "group_request_submitted",
+  "group_request_cancelled",
 ])
 
 const DASHBOARD_STYLES = `
@@ -624,6 +688,8 @@ const DASHBOARD_STYLES = `
 .avatar-crop__hint{margin:0;color:var(--ink-2);font-size:.75rem;text-align:center}
 .dash-notice{padding:.75rem .9rem;color:var(--ok);background:var(--ok-soft);border:1px solid rgba(121,211,165,.25);border-radius:var(--r-field)}
 .dash-notice--error{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-line)}
+.group-request-panel{padding-top:.2rem}
+.group-request-form{display:grid;gap:1rem}
 @media(max-width:720px){
   .flow-panel__head{padding:1rem 1.05rem .9rem}
   .flow-panel__body{padding:1rem 1.05rem 1.1rem}

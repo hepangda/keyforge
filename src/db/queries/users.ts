@@ -4,6 +4,10 @@ import type { User } from "../../types/domain"
 import { asUserId } from "../../types/domain"
 import { generateId, ID_PREFIX } from "../../utils/id"
 import { nowSeconds } from "../../utils/time"
+import {
+  adminPromotionRevocationStatements,
+  mirrorAdminPromotionRefreshRevocations,
+} from "./admin-promotion"
 
 const userRowSchema = z.object({
   id: z.string(),
@@ -602,7 +606,8 @@ export async function setUserGroups(
     throw new RangeError(`a user may belong to at most ${MAX_USER_GROUPS} groups`)
   }
   const desired = JSON.stringify(unique)
-  await env.DB.batch([
+  const promotionRevocations = adminPromotionRevocationStatements(env, userId, now)
+  const results = await env.DB.batch([
     env.DB.prepare(
       `WITH desired(group_id) AS (
          SELECT CAST(value AS TEXT) FROM json_each(?)
@@ -618,7 +623,9 @@ export async function setUserGroups(
        INSERT OR IGNORE INTO user_groups (user_id, group_id, created_at)
        SELECT ?, desired.group_id, ? FROM desired`,
     ).bind(desired, userId, now),
+    ...promotionRevocations,
   ])
+  await mirrorAdminPromotionRefreshRevocations(env, results[4]?.results)
 }
 
 /** Replace memberships while atomically preserving one active administrator. */
@@ -662,7 +669,8 @@ export async function setUserGroupsPreservingActiveAdmin(
         )
     )
   )`
-  await env.DB.batch([
+  const promotionRevocations = adminPromotionRevocationStatements(env, userId, now)
+  const results = await env.DB.batch([
     env.DB.prepare(
       `WITH desired(group_id) AS (
          SELECT CAST(value AS TEXT) FROM json_each(?)
@@ -681,7 +689,9 @@ export async function setUserGroupsPreservingActiveAdmin(
          AND NOT EXISTS (SELECT 1 FROM desired WHERE desired.group_id = user_groups.group_id)
          AND ${replacementIsSafe}`,
     ).bind(desired, userId, userId),
+    ...promotionRevocations,
   ])
+  await mirrorAdminPromotionRefreshRevocations(env, results[4]?.results)
   const actual = await getUserGroupIds(env, userId)
   return actual.length === unique.length && actual.every((id) => unique.includes(id))
 }

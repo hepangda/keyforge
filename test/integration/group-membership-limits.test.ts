@@ -80,7 +80,7 @@ describe("bounded user-group replacement", () => {
 
     await setUserGroups(wrapped, userId, groupIds.slice(0, 50))
 
-    expect(await getUserGroupIds(env, userId)).toHaveLength(50)
+    expect(await getUserGroupIds(env, userId)).toHaveLength(51)
     expect(metrics.prepareCount).toBe(5)
     expect(metrics.maxBindings).toBe(4)
   })
@@ -90,8 +90,8 @@ describe("bounded user-group replacement", () => {
 
     expect(await setUserGroupsPreservingActiveAdmin(wrapped, userId, groupIds)).toBe(true)
 
-    expect(await getUserGroupIds(env, userId)).toEqual(groupIds)
-    expect(metrics.prepareCount).toBe(6)
+    expect(await getUserGroupIds(env, userId)).toEqual(["grp_seed_all", ...groupIds])
+    expect(metrics.prepareCount).toBe(7)
     expect(metrics.maxBindings).toBe(4)
   })
 

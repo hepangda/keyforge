@@ -2,12 +2,17 @@ import { env, SELF } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
 import { setUserPassword } from "../../src/auth/password"
 import { getSessionByToken } from "../../src/auth/session"
+import { removeUserFromPermissionGroup } from "../../src/db/queries/group-memberships"
+import { getPermissionGroupAccess } from "../../src/db/queries/permission-group-access"
 import {
   createGroup,
   createUser,
+  deleteGroup,
   getGroupByName,
   getUserByEmail,
   getUserGroupNames,
+  setUserGroups,
+  updateGroup,
 } from "../../src/db/queries/users"
 
 const ISSUER = "https://auth.pangda.app"
@@ -77,6 +82,44 @@ async function requestCount(userId: string, groupId: string): Promise<number> {
 }
 
 describe("permission-group membership workflow", () => {
+  it("keeps every account in the protected all group", async () => {
+    const universalGroup = await getGroupByName(env, "all")
+    const admins = await getGroupByName(env, "admins")
+    expect(universalGroup).not.toBeNull()
+    expect(admins).not.toBeNull()
+
+    const user = await createUser(env, {
+      email: "universal.membership@example.test",
+      alias: "universalmembership",
+    })
+    expect(await getUserGroupNames(env, user.id)).toContain("all")
+
+    await setUserGroups(env, user.id, [])
+    expect(await getUserGroupNames(env, user.id)).toEqual(["all"])
+    expect(await removeUserFromPermissionGroup(env, universalGroup?.id ?? "missing", user.id)).toBe(
+      "protected",
+    )
+    expect(
+      await updateGroup(
+        env,
+        universalGroup?.id ?? "missing",
+        "renamed-all",
+        universalGroup?.description ?? null,
+      ),
+    ).toBe("protected")
+    expect(await deleteGroup(env, universalGroup?.id ?? "missing")).toBe("protected")
+
+    expect(await getPermissionGroupAccess(env, universalGroup?.id ?? "missing")).toEqual(
+      expect.objectContaining({ clientIds: expect.arrayContaining(["pangda_admin"]) }),
+    )
+    expect(await getPermissionGroupAccess(env, admins?.id ?? "missing")).toEqual(
+      expect.objectContaining({
+        clientIds: expect.not.arrayContaining(["pangda_admin"]),
+        resourceUris: expect.arrayContaining(["https://admin.pangda.app"]),
+      }),
+    )
+  })
+
   it("lets users request groups and administrators review or directly manage membership", async () => {
     const group = await createGroup(env, "membership-reviewers", "Reviews controlled releases")
     const applicant = await createUser(env, {

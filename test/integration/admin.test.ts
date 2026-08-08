@@ -2,6 +2,7 @@ import { env, SELF } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
 import { verifyUserPassword } from "../../src/auth/password"
 import { createSession } from "../../src/auth/session"
+import { ADMIN_API } from "../../src/config"
 import {
   createUser,
   getGroupByName,
@@ -13,11 +14,18 @@ import {
   updateUser,
 } from "../../src/db/queries/users"
 import { evaluateUserTokenAccess } from "../../src/oauth/user-token-policy"
+import { issueUserAccessToken } from "../../src/tokens/access-token"
 import { issueRefreshToken } from "../../src/tokens/refresh-token"
+import { nowSeconds } from "../../src/utils/time"
 
 const ISSUER = "https://auth.pangda.app"
 
+function authorization(token: string): string {
+  return ["Bearer", token].join(" ")
+}
+
 let adminCookie = ""
+let adminAccessToken = ""
 let adminUserId = ""
 let userCookie = ""
 let regularUserId = ""
@@ -45,6 +53,15 @@ beforeEach(async () => {
     .bind(adminUser.id)
     .run()
   adminCookie = `__Host-keyforge_session=${(await createSession(env, { userId: adminUser.id, authMethod: "password", ttlSeconds: 3600 })).token}`
+  adminAccessToken = (
+    await issueUserAccessToken(env, {
+      userId: adminUser.id,
+      clientId: "pangda_admin",
+      resource: ADMIN_API.audience,
+      scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+      authTime: nowSeconds(),
+    })
+  ).token
 
   const regularUser = await createUser(env, {
     email: "user@pangda.app",
@@ -61,11 +78,7 @@ beforeEach(async () => {
 })
 
 function req(method: string, path: string, body?: unknown): Promise<Response> {
-  const headers: Record<string, string> = { cookie: adminCookie }
-  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
-    headers["origin"] = ISSUER
-    headers["sec-fetch-site"] = "same-origin"
-  }
+  const headers: Record<string, string> = { authorization: authorization(adminAccessToken) }
   if (body !== undefined) {
     headers["content-type"] = "application/json"
     return SELF.fetch(`${ISSUER}${path}`, {
@@ -79,14 +92,150 @@ function req(method: string, path: string, body?: unknown): Promise<Response> {
 }
 
 describe("admin API access control", () => {
-  it("requires an authenticated session", async () => {
+  it("requires a bearer token and does not accept an administrator session cookie", async () => {
     expect((await SELF.fetch(`${ISSUER}/admin/users`)).status).toBe(401)
+    expect(
+      (
+        await SELF.fetch(`${ISSUER}/admin/users`, {
+          headers: { cookie: adminCookie },
+        })
+      ).status,
+    ).toBe(401)
   })
 
-  it("forbids non-admins", async () => {
+  it("invalidates an issued token when the user loses admins membership", async () => {
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",
+    )
+      .bind(regularUserId)
+      .run()
+    const token = (
+      await issueUserAccessToken(env, {
+        userId: regularUserId,
+        clientId: "pangda_admin",
+        resource: ADMIN_API.audience,
+        scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+        authTime: nowSeconds(),
+      })
+    ).token
     expect(
-      (await SELF.fetch(`${ISSUER}/admin/users`, { headers: { cookie: userCookie } })).status,
+      (
+        await SELF.fetch(`${ISSUER}/admin/users`, {
+          headers: { authorization: authorization(token) },
+        })
+      ).status,
+    ).toBe(200)
+    await env.DB.prepare(
+      "DELETE FROM user_groups WHERE user_id = ? AND group_id = 'grp_seed_admins'",
+    )
+      .bind(regularUserId)
+      .run()
+    expect(
+      (
+        await SELF.fetch(`${ISSUER}/admin/users`, {
+          headers: { authorization: authorization(token) },
+        })
+      ).status,
+    ).toBe(401)
+  })
+
+  it("enforces the admin audience and method-specific scopes", async () => {
+    const readOnly = (
+      await issueUserAccessToken(env, {
+        userId: adminUserId,
+        clientId: "pangda_admin",
+        resource: ADMIN_API.audience,
+        scope: ADMIN_API.readScope,
+        authTime: nowSeconds(),
+      })
+    ).token
+    const writeOnly = (
+      await issueUserAccessToken(env, {
+        userId: adminUserId,
+        clientId: "pangda_admin",
+        resource: ADMIN_API.audience,
+        scope: ADMIN_API.writeScope,
+        authTime: nowSeconds(),
+      })
+    ).token
+    const wrongAudience = (
+      await issueUserAccessToken(env, {
+        userId: adminUserId,
+        clientId: "pangda_app",
+        resource: "https://api.pangda.app",
+        scope: "api.read",
+        authTime: nowSeconds(),
+      })
+    ).token
+
+    expect(
+      (
+        await SELF.fetch(`${ISSUER}/admin/users`, {
+          headers: { authorization: authorization(readOnly) },
+        })
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await SELF.fetch(`${ISSUER}/admin/groups`, {
+          method: "POST",
+          headers: {
+            authorization: authorization(readOnly),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ name: "test-read-only-denied" }),
+        })
+      ).status,
     ).toBe(403)
+    expect(
+      (
+        await SELF.fetch(`${ISSUER}/admin/users`, {
+          headers: { authorization: authorization(writeOnly) },
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (
+        await SELF.fetch(`${ISSUER}/admin/users`, {
+          headers: { authorization: authorization(wrongAudience) },
+        })
+      ).status,
+    ).toBe(401)
+  })
+
+  it("requires recent authentication for mutations but not reads", async () => {
+    const staleToken = (
+      await issueUserAccessToken(env, {
+        userId: adminUserId,
+        clientId: "pangda_admin",
+        resource: ADMIN_API.audience,
+        scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+        authTime: nowSeconds() - 601,
+      })
+    ).token
+    const headers = { authorization: authorization(staleToken) }
+
+    expect((await SELF.fetch(`${ISSUER}/admin/groups`, { headers })).status).toBe(200)
+    const mutation = await SELF.fetch(`${ISSUER}/admin/groups`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ name: "test-stale-auth-denied" }),
+    })
+    expect(mutation.status).toBe(403)
+    expect(await mutation.json()).toEqual({ error: "reauthentication_required" })
+  })
+
+  it("answers browser preflight before bearer authentication", async () => {
+    const response = await SELF.fetch(`${ISSUER}/admin/users`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://admin.pangda.app",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "authorization",
+      },
+    })
+    expect(response.status).toBe(204)
+    expect(response.headers.get("access-control-allow-origin")).toBe("*")
   })
 })
 
@@ -147,7 +296,7 @@ describe("admin users", () => {
       credential_setup: string
     }>()
     expect(body.credential_setup).toBe("password_set")
-    expect(body.groups).toEqual(["employees"])
+    expect(body.groups).toEqual(["all", "employees"])
     expect(await verifyUserPassword(env, body.id, "a long initial password")).toBe(true)
     expect((await getUserByEmail(env, "new.user@pangda.app"))?.alias).toBe("new-user_1")
   })
@@ -234,7 +383,7 @@ describe("admin users", () => {
       group_ids: [group.id],
     })
     expect(assigned.status).toBe(200)
-    expect(await getUserGroupNames(env, regularUserId)).toEqual(["test-support"])
+    expect(await getUserGroupNames(env, regularUserId)).toEqual(["all", "test-support"])
 
     expect(
       (await req("PUT", `/admin/users/${regularUserId}/groups`, { group_ids: ["missing"] })).status,

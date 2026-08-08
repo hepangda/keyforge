@@ -115,12 +115,13 @@ function resourceChoices(
 export function renderGroupsList(chrome: ConsoleChrome, groups: readonly GroupSummary[]): string {
   const { i18n } = chrome
   const rows = groups.map((group) => {
-    const href = `/console/groups/${encodeURIComponent(group.id)}${group.name === "admins" ? "?view=access" : ""}`
+    const protectedGroup = group.name === "admins" || group.name === "all"
+    const href = `/console/groups/${encodeURIComponent(group.id)}${protectedGroup ? "?view=access" : ""}`
     return [
       `<span class="tag">${escapeHtml(group.name)}</span>`,
       escapeHtml(group.description ?? i18n.t("No description")),
       String(group.memberCount),
-      `<div class="actions">${group.name === "admins" ? `<span class="form-hint">${escapeHtml(i18n.t("Protected"))}</span>` : ""}<a class="btn btn--ghost btn--tiny" href="${href}">${escapeHtml(i18n.t("Manage"))}</a></div>`,
+      `<div class="actions">${protectedGroup ? `<span class="form-hint">${escapeHtml(i18n.t("Protected"))}</span>` : ""}<a class="btn btn--ghost btn--tiny" href="${href}">${escapeHtml(i18n.t("Manage"))}</a></div>`,
     ]
   })
   const emptyAction =
@@ -164,6 +165,7 @@ export function renderGroupDetail(chrome: ConsoleChrome, data: GroupDetailData):
     const selectedResourceUris = data.selectedResourceUris ?? new Set<string>()
     panel = `<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Access"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Members can receive user tokens only for applications and APIs assigned to this permission group."))}</p></div></div><div class="panel__body">${errorSummary(i18n, data.accessError)}<form method="post" action="/console/groups/${id}/access" class="form-grid">${csrfField(csrfToken)}<fieldset class="field-cluster field--wide"><legend>${escapeHtml(i18n.t("Applications and devices"))}</legend>${clientChoices(i18n, data.clients ?? [], selectedClientIds)}</fieldset><fieldset class="field-cluster field--wide"><legend>${escapeHtml(i18n.t("APIs"))}</legend>${resourceChoices(i18n, data.resources ?? [], selectedResourceUris)}</fieldset><p class="form-hint field--wide">${escapeHtml(i18n.t("No access is granted until at least one application and one API are selected."))}</p><div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Save changes"))}</button></div></form></div></section>`
   } else {
+    const universalMembership = group.name === "all"
     const members = data.members ?? []
     const requests = data.membershipRequests ?? []
     const candidates = data.memberCandidates ?? []
@@ -173,7 +175,9 @@ export function renderGroupDetail(chrome: ConsoleChrome, data: GroupDetailData):
       escapeHtml(member.email),
       statusBadge(i18n, !member.disabled, "Active", "Disabled"),
       `<span class="mono">${escapeHtml(fmtDateTime(i18n, member.joinedAt))}</span>`,
-      `<form method="post" action="/console/groups/${id}/members/${encodeURIComponent(member.userId)}/remove">${csrfField(csrfToken)}<button class="btn btn--danger btn--tiny" type="submit">${escapeHtml(i18n.t("Remove"))}</button></form>`,
+      universalMembership
+        ? `<span class="form-hint">${escapeHtml(i18n.t("Protected"))}</span>`
+        : `<form method="post" action="/console/groups/${id}/members/${encodeURIComponent(member.userId)}/remove">${csrfField(csrfToken)}<button class="btn btn--danger btn--tiny" type="submit">${escapeHtml(i18n.t("Remove"))}</button></form>`,
     ])
     const requestRows = requests.map((request) => [
       `<a href="/console/users/${encodeURIComponent(request.userId)}?view=access"><b>${escapeHtml(request.name ?? request.alias)}</b><small class="form-hint">@${escapeHtml(request.alias)}</small></a>`,
@@ -199,7 +203,10 @@ export function renderGroupDetail(chrome: ConsoleChrome, data: GroupDetailData):
       requests.length === 0
         ? ""
         : `<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Pending requests"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Approve a request to add the user immediately, or reject it without changing membership."))}</p></div><span class="badge badge--warn">${escapeHtml(String(requests.length))}</span></div>${dataTable(i18n, ["User", "Email", "Requested", ""], requestRows, "No pending requests.")}</section>`
-    panel = `${requestPanel}<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Members"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("People who currently receive this group's application and API access."))}</p></div><span class="badge">${escapeHtml(i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", { count: group.memberCount }))}</span></div>${dataTable(i18n, ["User", "Email", "Status", "Joined", ""], memberRows, "This group has no members.")}<div class="panel__body">${pager(i18n, memberBase, memberLimit, memberOffset, members.length, data.memberHasNext === true)}</div></section><section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Add people"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Search for an account, or choose from recently created recommendations."))}</p></div></div><div class="panel__body">${search}</div>${dataTable(i18n, ["User", "Email", "Status", ""], candidateRows, query === "" ? "No more people are available to add." : "No users match this search.")}</section>`
+    const addPeoplePanel = universalMembership
+      ? ""
+      : `<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Add people"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Search for an account, or choose from recently created recommendations."))}</p></div></div><div class="panel__body">${search}</div>${dataTable(i18n, ["User", "Email", "Status", ""], candidateRows, query === "" ? "No more people are available to add." : "No users match this search.")}</section>`
+    panel = `${requestPanel}<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Members"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("People who currently receive this group's application and API access."))}</p></div><span class="badge">${escapeHtml(i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", { count: group.memberCount }))}</span></div>${dataTable(i18n, ["User", "Email", "Status", "Joined", ""], memberRows, "This group has no members.")}<div class="panel__body">${pager(i18n, memberBase, memberLimit, memberOffset, members.length, data.memberHasNext === true)}</div></section>${addPeoplePanel}`
   }
   return consoleShell(group.name, chrome, `${summary}${panel}`)
 }

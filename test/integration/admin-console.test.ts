@@ -319,7 +319,7 @@ describe("console users", () => {
     const user = await getUserByEmail(env, "console.user@pangda.app")
     expect(user?.emailVerified).toBe(true)
     expect(await verifyUserPassword(env, user?.id ?? "", "console password 123")).toBe(true)
-    expect(await getUserGroupNames(env, user?.id ?? "")).toEqual(["console-operators"])
+    expect(await getUserGroupNames(env, user?.id ?? "")).toEqual(["all", "console-operators"])
   })
 
   it("requires the exact current group name before deletion", async () => {
@@ -365,7 +365,7 @@ describe("console users", () => {
     expect(await getGroupByName(env, "temporary-reviewers")).toBeNull()
   })
 
-  it("allows admins access management while keeping settings and deletion protected", async () => {
+  it("keeps admins resource access management while protecting built-in settings", async () => {
     const admins = await getGroupByName(env, "admins")
     expect(admins).not.toBeNull()
     const session = await loginAs("admin", "test-admin-password-2026")
@@ -377,12 +377,13 @@ describe("console users", () => {
     expect(access.status).toBe(200)
     const accessHtml = await access.text()
     expect(accessHtml).toContain(`action="${detailPath}/access"`)
-    expectSelectedOption(accessHtml, "pangda_admin")
+    expectUnselectedOption(accessHtml, "pangda_admin")
+    expectSelectedOption(accessHtml, "https://admin.pangda.app")
     expect(accessHtml).not.toContain(`href="${detailPath}/delete"`)
     expect(accessHtml).not.toContain('name="name"')
 
     const saved = await postForm(`${detailPath}/access`, session, csrf, {
-      client_ids: ["pangda_admin"],
+      client_ids: [],
       resource_uris: ["https://admin.pangda.app"],
     })
     expect(saved.status).toBe(302)

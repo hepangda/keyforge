@@ -61,7 +61,9 @@ Service clients using `client_credentials` do not carry a user grant and are not
 subject to permission-group assignments.
 
 Signed-in users can review their current memberships under **Permission groups**
-and request any non-administrator group. Requests do not grant access until an
+and request any non-built-in group. The protected `all` membership is assigned
+to every existing and future account and cannot be removed; it does not consume
+one of the 100 assignable memberships. Requests do not grant access until an
 administrator approves them. Administrators review the queue, search for users,
 and add or remove members directly from the group's **Members** tab. Approval or
 any other membership assignment clears the matching pending request. The
@@ -73,6 +75,14 @@ revokes the user's existing sessions and refresh-token families and advances the
 account security version. The user must sign in again with a passkey or an
 administrator-eligible password before using administrative surfaces.
 
+The `pangda_admin` application is assigned to `all`, while
+`https://admin.pangda.app` remains assigned to `admins`. Membership therefore
+authorizes requesting a user token for that API; it does not act as an Admin API
+credential itself. `/admin/*` accepts only a current, user-backed token for that
+audience, with `admin.read` for reads and `admin.write` for mutations. Cookie
+sessions continue to authenticate the separate built-in HTML console but are
+not accepted by the JSON API.
+
 Application, device, API, and group selectors use a bounded recommendation list
 plus local search instead of rendering the full catalog as visible checkbox
 grids. Only selected targets remain in the persistent selection tray; the
@@ -80,12 +90,17 @@ original form field names and server-side validation remain unchanged.
 
 Migration `0018_permission_group_access.sql` seeds `employees` for `pangda_app`,
 `cloudflare_one`, `pangda_cli`, and `hermes_dashboard`, together with their four
-user-facing resources. It seeds `admins` only for `pangda_admin` and
-`https://admin.pangda.app`. The local demo seed separately assigns `demo_local`
-to `employees`. Operators that removed an optional seeded target before the
-migration do not have it recreated. Deleting a group, client, or resource
-cascades its assignments and therefore leaves the affected authorization path
-denied rather than widening access.
+user-facing resources. It initially seeds `admins` for `pangda_admin` and
+`https://admin.pangda.app`; migration `0020_all_permission_group.sql` adds and
+backfills `all`, automatically joins future users, and moves `pangda_admin` to
+that universal group while leaving the API resource on `admins`. If an operator
+previously created a custom group named `all`, the migration preserves it and
+its assignments under a deterministic `legacy-all-*` name before creating the
+built-in group, preventing an accidental universal grant. The local demo seed
+separately assigns `demo_local` to `employees`. Operators that removed an
+optional seeded target before the migration do not have it recreated. Deleting
+a group, client, or resource cascades its assignments and therefore leaves the
+affected authorization path denied rather than widening access.
 
 ### YOLO mode (dev only)
 

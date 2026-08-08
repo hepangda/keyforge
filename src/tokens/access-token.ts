@@ -48,6 +48,7 @@ export type UserAccessTokenParams = {
   readonly clientId: string
   readonly resource: string
   readonly scope: string
+  readonly authTime: number
 }
 
 export async function issueUserAccessToken(
@@ -62,6 +63,7 @@ export async function issueUserAccessToken(
     azp: params.clientId,
     client_id: params.clientId,
     scope: params.scope,
+    auth_time: params.authTime,
     token_use: "access_token",
     jti,
   }

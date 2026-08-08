@@ -208,20 +208,25 @@ describe("refresh token current-policy enforcement", () => {
   })
 })
 
-describe("refresh ID token authentication time", () => {
+describe("refresh token authentication time", () => {
   it("preserves the original auth_time instead of treating refresh as a new login", async () => {
     const { refresh } = await seedRefreshFamily()
     const response = await refreshRequest(refresh.token)
     expect(response.status).toBe(200)
-    const body = await response.json<{ id_token: string }>()
+    const body = await response.json<{ access_token: string; id_token: string }>()
 
     const jwks = createLocalJWKSet({ keys: [...(await getPublicJwks(env)).keys] })
-    const { payload } = await jwtVerify(body.id_token, jwks, {
+    const { payload: accessPayload } = await jwtVerify(body.access_token, jwks, {
+      issuer: ISSUER,
+      audience: RESOURCE,
+    })
+    const { payload: idPayload } = await jwtVerify(body.id_token, jwks, {
       issuer: ISSUER,
       audience: CLIENT,
     })
-    expect(payload["auth_time"]).toBe(AUTH_TIME)
-    expect(payload).not.toHaveProperty("groups")
+    expect(accessPayload["auth_time"]).toBe(AUTH_TIME)
+    expect(idPayload["auth_time"]).toBe(AUTH_TIME)
+    expect(idPayload).not.toHaveProperty("groups")
   })
 })
 

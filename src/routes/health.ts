@@ -127,6 +127,10 @@ async function checkDatabaseSchema(db: D1Database): Promise<void> {
                 WHERE name = 'idx_users_alias_canonical' AND [unique] = 1) AS canonical_alias_index,
          EXISTS(SELECT 1 FROM pragma_index_list('groups')
                 WHERE name = 'idx_groups_name_canonical' AND [unique] = 1) AS canonical_group_index,
+         EXISTS(SELECT 1 FROM groups WHERE name = 'all') AS all_group,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'add_all_group_membership_after_user_insert') AS all_group_trigger,
          EXISTS(SELECT 1 FROM groups WHERE name = 'admins') AS admin_group,
          EXISTS(SELECT 1 FROM oauth_resources
                 WHERE resource_uri = 'https://admin.pangda.app') AS admin_resource,

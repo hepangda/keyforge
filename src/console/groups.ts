@@ -22,6 +22,7 @@ import {
   deleteGroup,
   type GroupSummary,
   getGroupByName,
+  isProtectedGroupName,
   listGroups,
   updateGroup,
 } from "../db/queries/users"
@@ -162,13 +163,13 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     const group = await groupById(c.env, c.req.param("id"))
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
     const requestedView = c.req.query("view")
-    if (group.name === "admins" && requestedView === "settings") {
+    if (isProtectedGroupName(group.name) && requestedView === "settings") {
       return c.redirect(`/console/groups/${group.id}?view=access&flash=protected_group`)
     }
     const view =
       requestedView === "members"
         ? "members"
-        : group.name === "admins" || requestedView === "access"
+        : isProtectedGroupName(group.name) || requestedView === "access"
           ? "access"
           : "settings"
     if (view === "settings") {
@@ -226,7 +227,7 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     const id = c.req.param("id")
     const group = await groupById(c.env, id)
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
-    if (group.name === "admins") {
+    if (isProtectedGroupName(group.name)) {
       return c.redirect(`/console/groups/${id}?view=access&flash=protected_group`)
     }
     const form = await readVerifiedForm(c)
@@ -391,7 +392,9 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
         ? "group_member_removed"
         : result === "last_admin"
           ? "last_admin"
-          : "not_found"
+          : result === "protected"
+            ? "protected_group"
+            : "not_found"
     return c.redirect(`/console/groups/${id}?view=members&flash=${flash}`)
   })
 
@@ -447,7 +450,7 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
   app.get("/console/groups/:id/delete", async (c) => {
     const group = await groupById(c.env, c.req.param("id"))
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
-    if (group.name === "admins") {
+    if (isProtectedGroupName(group.name)) {
       return c.redirect(`/console/groups/${group.id}?view=access&flash=protected_group`)
     }
     return c.html(renderGroupDeleteConfirmation(chrome(c, "groups"), group, issueCsrfToken(c)))
@@ -459,7 +462,7 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     if (form === null) return c.redirect(`/console/groups/${id}/delete?flash=invalid`)
     const group = await groupById(c.env, id)
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
-    if (group.name === "admins") {
+    if (isProtectedGroupName(group.name)) {
       return c.redirect(`/console/groups/${id}?view=access&flash=protected_group`)
     }
     if (readFormField(form, "confirmation") !== group.name) {

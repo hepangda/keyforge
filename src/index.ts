@@ -172,6 +172,18 @@ for (const path of [
   )
 }
 
+// The administrator API is also bearer-only. Its dedicated audience and scopes
+// prevent account cookies from becoming ambient cross-origin authority.
+app.use(
+  "/admin/*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Authorization", "Content-Type"],
+    maxAge: 600,
+  }),
+)
+
 app.use("*", sessionMiddleware)
 
 app.route("/", health)

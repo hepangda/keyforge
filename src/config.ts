@@ -73,6 +73,13 @@ export const SUPPORTED_SCOPES = [
   "app.read",
 ] as const
 
+/** Audience and scopes accepted by the built-in JSON administrator API. */
+export const ADMIN_API = {
+  audience: "https://admin.pangda.app",
+  readScope: "admin.read",
+  writeScope: "admin.write",
+} as const
+
 /** Scopes that identify a user context and are therefore forbidden for client_credentials. */
 export const USER_ONLY_SCOPES = ["openid", "profile", "email", "offline_access"] as const
 

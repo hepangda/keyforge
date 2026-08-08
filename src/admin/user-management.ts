@@ -88,7 +88,7 @@ export async function createManagedUser(
   }
 
   const selectedNames = groups
-    .filter((group) => requestedIds.includes(group.id))
+    .filter((group) => group.name === "all" || requestedIds.includes(group.id))
     .map((group) => group.name)
   return {
     ok: true,

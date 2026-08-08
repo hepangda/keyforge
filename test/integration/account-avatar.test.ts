@@ -1,13 +1,15 @@
 import { env, SELF } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
 import { createSession } from "../../src/auth/session"
+import { ADMIN_API } from "../../src/config"
 import { createUser, getUserById } from "../../src/db/queries/users"
 import { MAX_AVATAR_BYTES } from "../../src/media/avatar"
 import { buildUserClaims } from "../../src/oidc/claims"
+import { issueUserAccessToken } from "../../src/tokens/access-token"
 
 const ISSUER = "https://auth.pangda.app"
 
-let adminCookie = ""
+let adminAccessToken = ""
 let userCookie = ""
 let userId = ""
 
@@ -16,6 +18,10 @@ function pngBytes(size = 128): Uint8Array {
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   bytes[20] = 0x42
   return bytes
+}
+
+function authorization(token: string): string {
+  return ["Bearer", token].join(" ")
 }
 
 beforeEach(async () => {
@@ -30,7 +36,14 @@ beforeEach(async () => {
   )
     .bind(admin.id)
     .run()
-  adminCookie = `__Host-keyforge_session=${(await createSession(env, { userId: admin.id, authMethod: "password", ttlSeconds: 3600 })).token}`
+  adminAccessToken = (
+    await issueUserAccessToken(env, {
+      userId: admin.id,
+      clientId: "pangda_admin",
+      resource: ADMIN_API.audience,
+      scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+    })
+  ).token
 
   const user = await createUser(env, { email: "avatar-user@pangda.app", name: "Avatar User" })
   userId = user.id
@@ -76,9 +89,7 @@ function adminRequest(method: string, path: string, body?: BodyInit): Promise<Re
   return SELF.fetch(`${ISSUER}${path}`, {
     method,
     headers: {
-      cookie: adminCookie,
-      origin: ISSUER,
-      "sec-fetch-site": "same-origin",
+      authorization: authorization(adminAccessToken),
       ...(body === undefined ? {} : { "content-type": "image/png" }),
     },
     ...(body === undefined ? {} : { body }),
@@ -323,12 +334,20 @@ describe("admin avatar management", () => {
     expect(await env.AVATARS.head(key)).toBeNull()
   })
 
-  it("refuses avatar management from a non-admin session", async () => {
+  it("refuses avatar management from a non-admin token", async () => {
+    const token = (
+      await issueUserAccessToken(env, {
+        userId,
+        clientId: "pangda_admin",
+        resource: ADMIN_API.audience,
+        scope: ADMIN_API.writeScope,
+      })
+    ).token
     const res = await SELF.fetch(`${ISSUER}/admin/users/${userId}/avatar`, {
       method: "DELETE",
-      headers: { cookie: userCookie, origin: ISSUER, "sec-fetch-site": "same-origin" },
+      headers: { authorization: authorization(token) },
     })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(401)
   })
 
   it("returns 404 for an unknown user", async () => {

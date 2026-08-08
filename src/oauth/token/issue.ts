@@ -16,6 +16,7 @@ export type IssueUserTokensInput = {
   readonly authTime: number
   readonly sessionId: string | null
   readonly rememberMe?: boolean
+  readonly accessValidated?: true
 }
 
 /**
@@ -28,17 +29,19 @@ export async function issueUserTokens(
   input: IssueUserTokensInput,
 ): Promise<TokenResponse> {
   const scopes = parseScopeString(input.scope)
-  const access = await evaluateUserTokenAccess(env, {
-    userId: input.user.id,
-    clientId: input.client.clientId,
-    resourceUri: input.resource,
-    scopes,
-  })
-  if (!access.allowed) {
-    throw new OAuthError("invalid_grant", {
-      description: "This account is not permitted to access this application or resource.",
-      detail: `user token policy denied ${access.reason}`,
+  if (input.accessValidated !== true) {
+    const access = await evaluateUserTokenAccess(env, {
+      userId: input.user.id,
+      clientId: input.client.clientId,
+      resourceUri: input.resource,
+      scopes,
     })
+    if (!access.allowed) {
+      throw new OAuthError("invalid_grant", {
+        description: "This account is not permitted to access this application or resource.",
+        detail: `user token policy denied ${access.reason}`,
+      })
+    }
   }
   const accessToken = await issueUserAccessToken(env, {
     userId: input.user.id,

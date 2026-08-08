@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { nowSeconds } from "../utils/time"
 
 const familyIdRowSchema = z.object({ id: z.string() })

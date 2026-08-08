@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { generateId, ID_PREFIX } from "../../utils/id"
 import { nowSeconds } from "../../utils/time"
 

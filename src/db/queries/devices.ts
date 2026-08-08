@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import type { DeviceStatus } from "../../types/domain"
 import { DEVICE_STATUSES } from "../../types/domain"
 import { generateId, ID_PREFIX } from "../../utils/id"

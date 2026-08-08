@@ -29,6 +29,34 @@ const DATE_LOCALES: Readonly<Record<Locale, string>> = {
   ja: "ja-JP",
 }
 
+const dateFormatters = new Map<Locale, Intl.DateTimeFormat>()
+const dateTimeFormatters = new Map<Locale, Intl.DateTimeFormat>()
+
+function dateFormatter(locale: Locale): Intl.DateTimeFormat {
+  const cached = dateFormatters.get(locale)
+  if (cached !== undefined) return cached
+  const formatter = new Intl.DateTimeFormat(DATE_LOCALES[locale], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })
+  dateFormatters.set(locale, formatter)
+  return formatter
+}
+
+function dateTimeFormatter(locale: Locale): Intl.DateTimeFormat {
+  const cached = dateTimeFormatters.get(locale)
+  if (cached !== undefined) return cached
+  const formatter = new Intl.DateTimeFormat(DATE_LOCALES[locale], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  dateTimeFormatters.set(locale, formatter)
+  return formatter
+}
+
 export function isLocale(value: string | undefined): value is Locale {
   return SUPPORTED_LOCALES.some((locale) => locale === value)
 }
@@ -98,24 +126,14 @@ export function translate(locale: Locale, message: string, values?: MessageValue
 }
 
 export function createI18n(resolved: ResolvedLocale, returnTo = "/"): I18n {
-  const dateLocale = DATE_LOCALES[resolved.locale]
   return {
     ...resolved,
     returnTo,
     t: (message, values) => translate(resolved.locale, message, values),
     formatDate: (epochSeconds) =>
-      new Intl.DateTimeFormat(dateLocale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }).format(new Date(epochSeconds * 1000)),
+      dateFormatter(resolved.locale).format(new Date(epochSeconds * 1000)),
     formatDateTime: (epochSeconds) =>
-      new Intl.DateTimeFormat(dateLocale, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(epochSeconds * 1000)),
+      dateTimeFormatter(resolved.locale).format(new Date(epochSeconds * 1000)),
   }
 }
 

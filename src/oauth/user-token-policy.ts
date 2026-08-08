@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { yoloAllow } from "../operations/yolo"
 
 const ADMIN_SCOPES: Record<string, true> = { "admin.read": true, "admin.write": true }

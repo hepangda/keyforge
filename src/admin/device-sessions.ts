@@ -1,5 +1,5 @@
 import type { Hono } from "hono"
-import { z } from "zod"
+import * as z from "zod"
 import type { AdminDeviceSession } from "../db/queries/admin-devices"
 import {
   getDeviceSessionById,

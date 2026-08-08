@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono"
-import { z } from "zod"
+import * as z from "zod"
 import {
   createClient,
   deleteClient,

@@ -1,8 +1,9 @@
-import { z } from "zod"
+import * as z from "zod"
+import { mapUser } from "../db/queries/users"
 import { AppError } from "../security/errors"
 import { revokeRefreshFamilyDurableObjects } from "../tokens/refresh-token-revocation"
 import { hashOpaqueToken } from "../tokens/token-hash"
-import type { AuthMethod, SessionId, SessionRecord } from "../types/domain"
+import type { AuthMethod, SessionId, SessionRecord, User } from "../types/domain"
 import { AUTH_METHODS, asSessionId, asUserId } from "../types/domain"
 import { generateId, ID_PREFIX } from "../utils/id"
 import { randomToken } from "../utils/random"
@@ -104,6 +105,74 @@ const sessionRowSchema = z.object({
   expires_at: z.number(),
   revoked_at: z.number().nullable(),
 })
+
+const authenticatedSessionRowSchema = z.object({
+  session_id: z.string(),
+  session_user_id: z.string(),
+  session_auth_method: z.enum(AUTH_METHODS),
+  session_auth_time: z.number(),
+  session_passkey_authenticated: z.number(),
+  session_created_at: z.number(),
+  session_last_seen_at: z.number(),
+  session_expires_at: z.number(),
+  session_revoked_at: z.number().nullable(),
+})
+
+export type AuthenticatedSession = {
+  readonly session: SessionRecord
+  readonly user: User
+}
+
+/** Resolve an authenticated browser context in one D1 query. */
+export async function getAuthenticatedSessionByToken(
+  env: Env,
+  token: string,
+): Promise<AuthenticatedSession | null> {
+  const row = await env.DB.prepare(
+    `SELECT
+       s.id AS session_id,
+       s.user_id AS session_user_id,
+       s.auth_method AS session_auth_method,
+       s.auth_time AS session_auth_time,
+       s.passkey_authenticated AS session_passkey_authenticated,
+       s.created_at AS session_created_at,
+       s.last_seen_at AS session_last_seen_at,
+       s.expires_at AS session_expires_at,
+       s.revoked_at AS session_revoked_at,
+       u.id, u.email, u.alias, u.email_verified, u.name, u.picture,
+       u.avatar_key, u.avatar_content_type, u.avatar_updated_at,
+       u.disabled, u.created_at
+     FROM sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = ?`,
+  )
+    .bind(await hashOpaqueToken(token))
+    .first()
+  if (row === null) return null
+
+  const parsed = authenticatedSessionRowSchema.parse(row)
+  const user = mapUser(row)
+  if (
+    parsed.session_revoked_at !== null ||
+    nowSeconds() >= parsed.session_expires_at ||
+    user.disabled
+  ) {
+    return null
+  }
+  return {
+    session: {
+      id: asSessionId(parsed.session_id),
+      userId: asUserId(parsed.session_user_id),
+      authMethod: parsed.session_auth_method,
+      authTime: parsed.session_auth_time,
+      passkeyAuthenticated: parsed.session_passkey_authenticated === 1,
+      createdAt: parsed.session_created_at,
+      lastSeenAt: parsed.session_last_seen_at,
+      expiresAt: parsed.session_expires_at,
+    },
+    user,
+  }
+}
 
 export async function getSessionByToken(env: Env, token: string): Promise<SessionRecord | null> {
   const row = await env.DB.prepare(

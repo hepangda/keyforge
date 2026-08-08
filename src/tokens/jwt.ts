@@ -5,6 +5,17 @@ import { nowSeconds } from "../utils/time"
 import { getActiveSigningKey, getPublicJwks } from "./key-rotation"
 
 const ALG = "RS256"
+type LocalJwkSet = ReturnType<typeof createLocalJWKSet>
+let localJwkSetCache: { readonly kids: string; readonly jwks: LocalJwkSet } | null = null
+
+async function localJwkSet(env: Env): Promise<LocalJwkSet> {
+  const { keys } = await getPublicJwks(env)
+  const kids = keys.map((key) => key.kid ?? "").join("\0")
+  if (localJwkSetCache?.kids === kids) return localJwkSetCache.jwks
+  const jwks = createLocalJWKSet({ keys: [...keys] })
+  localJwkSetCache = { kids, jwks }
+  return jwks
+}
 
 export type SignJwtOptions = {
   /** JWT `typ` header — `JWT` for id_token, `at+jwt` for access tokens. */
@@ -46,8 +57,7 @@ export async function verifyJwt(
   token: string,
   options: VerifyJwtOptions = {},
 ): Promise<JWTPayload> {
-  const { keys } = await getPublicJwks(env)
-  const jwks = createLocalJWKSet({ keys: [...keys] })
+  const jwks = await localJwkSet(env)
   const verifyOptions: JWTVerifyOptions = {
     algorithms: [ALG],
     issuer: options.issuer ?? env.ISSUER,
@@ -69,8 +79,7 @@ export async function verifyHistoricalJwt(env: Env, token: string): Promise<JWTP
   if (typeof unverified.iat !== "number" || !Number.isSafeInteger(unverified.iat)) {
     throw new Error("historical JWT has no valid iat")
   }
-  const { keys } = await getPublicJwks(env)
-  const jwks = createLocalJWKSet({ keys: [...keys] })
+  const jwks = await localJwkSet(env)
   const { payload } = await jwtVerify(token, jwks, {
     algorithms: [ALG],
     issuer: env.ISSUER,
@@ -98,8 +107,7 @@ export async function verifyAccessToken(
   token: string,
   options: VerifyAccessTokenOptions = {},
 ): Promise<JWTPayload> {
-  const { keys } = await getPublicJwks(env)
-  const jwks = createLocalJWKSet({ keys: [...keys] })
+  const jwks = await localJwkSet(env)
   const verifyOptions: JWTVerifyOptions = {
     algorithms: [ALG],
     issuer: env.ISSUER,

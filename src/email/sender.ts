@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { AppError } from "../security/errors"
 import type { EmailContent } from "./templates"
 

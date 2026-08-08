@@ -1,6 +1,6 @@
 import type { Context } from "hono"
 import { Hono } from "hono"
-import { z } from "zod"
+import * as z from "zod"
 import { createEmailChangeToken, createEmailVerificationToken } from "../auth/account-tokens"
 import {
   addUserPassword,

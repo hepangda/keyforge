@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { revokeRefreshFamilyDurableObjects } from "../../tokens/refresh-token-revocation"
 
 const ADMIN_PROMOTION_PREDICATE = `EXISTS (

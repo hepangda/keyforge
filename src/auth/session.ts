@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { AppError } from "../security/errors"
 import { revokeRefreshFamilyDurableObjects } from "../tokens/refresh-token-revocation"
 import { hashOpaqueToken } from "../tokens/token-hash"

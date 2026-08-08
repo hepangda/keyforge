@@ -1,6 +1,6 @@
 import type { JWK } from "jose"
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, importJWK } from "jose"
-import { z } from "zod"
+import * as z from "zod"
 import { KV_KEYS } from "../config"
 import { AppError } from "../security/errors"
 import { nowSeconds } from "../utils/time"

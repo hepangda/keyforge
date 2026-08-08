@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import type { OAuthResource } from "../../types/domain"
 import { asResourceUri } from "../../types/domain"
 import { nowSeconds } from "../../utils/time"

@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import type { ClientKind, ClientType, OAuthClient } from "../../types/domain"
 import { asClientId } from "../../types/domain"
 import { nowSeconds } from "../../utils/time"

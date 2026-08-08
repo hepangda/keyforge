@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { revokeRefreshFamilyDurableObjects } from "../../tokens/refresh-token-revocation"
 import type { User } from "../../types/domain"
 import { asUserId } from "../../types/domain"

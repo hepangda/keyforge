@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 
 export const MAX_PERMISSION_GROUP_TARGETS = 100
 

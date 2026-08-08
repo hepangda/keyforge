@@ -1,4 +1,4 @@
-import { z } from "zod"
+import * as z from "zod"
 import { getUserById, isUserAdmin } from "../db/queries/users"
 import { isYoloEnabled, noteYoloBypass } from "../operations/yolo"
 import { hashPassword, verifyPassword } from "../security/crypto"

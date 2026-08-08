@@ -32,7 +32,12 @@ async function script(body: string, ifNoneMatch: string | undefined): Promise<Re
     "cache-control": "public, no-cache",
     etag,
   }
-  if (ifNoneMatch === etag) {
+  const matches =
+    ifNoneMatch?.split(",").some((candidate) => {
+      const normalized = candidate.trim()
+      return normalized === "*" || normalized.replace(/^W\//, "") === etag
+    }) ?? false
+  if (matches) {
     return new Response(null, { status: 304, headers })
   }
   return new Response(body, {

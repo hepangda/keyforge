@@ -266,7 +266,7 @@ describe("browser assets", () => {
     expect(initial.headers.get("cache-control")).toContain("no-cache")
 
     const revalidated = await SELF.fetch(`${ISSUER}/assets/forms.js`, {
-      headers: { "if-none-match": etag ?? "" },
+      headers: { "if-none-match": `"unrelated", W/${etag ?? ""}` },
     })
     expect(revalidated.status).toBe(304)
   })

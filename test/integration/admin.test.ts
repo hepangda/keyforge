@@ -16,6 +16,7 @@ import {
 import { evaluateUserTokenAccess } from "../../src/oauth/user-token-policy"
 import { issueUserAccessToken } from "../../src/tokens/access-token"
 import { issueRefreshToken } from "../../src/tokens/refresh-token"
+import { nowSeconds } from "../../src/utils/time"
 
 const ISSUER = "https://auth.pangda.app"
 
@@ -58,6 +59,7 @@ beforeEach(async () => {
       clientId: "pangda_admin",
       resource: ADMIN_API.audience,
       scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+      authTime: nowSeconds(),
     })
   ).token
 
@@ -113,6 +115,7 @@ describe("admin API access control", () => {
         clientId: "pangda_admin",
         resource: ADMIN_API.audience,
         scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+        authTime: nowSeconds(),
       })
     ).token
     expect(
@@ -143,6 +146,7 @@ describe("admin API access control", () => {
         clientId: "pangda_admin",
         resource: ADMIN_API.audience,
         scope: ADMIN_API.readScope,
+        authTime: nowSeconds(),
       })
     ).token
     const writeOnly = (
@@ -151,6 +155,7 @@ describe("admin API access control", () => {
         clientId: "pangda_admin",
         resource: ADMIN_API.audience,
         scope: ADMIN_API.writeScope,
+        authTime: nowSeconds(),
       })
     ).token
     const wrongAudience = (
@@ -159,6 +164,7 @@ describe("admin API access control", () => {
         clientId: "pangda_app",
         resource: "https://api.pangda.app",
         scope: "api.read",
+        authTime: nowSeconds(),
       })
     ).token
 
@@ -195,6 +201,28 @@ describe("admin API access control", () => {
         })
       ).status,
     ).toBe(401)
+  })
+
+  it("requires recent authentication for mutations but not reads", async () => {
+    const staleToken = (
+      await issueUserAccessToken(env, {
+        userId: adminUserId,
+        clientId: "pangda_admin",
+        resource: ADMIN_API.audience,
+        scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+        authTime: nowSeconds() - 601,
+      })
+    ).token
+    const headers = { authorization: authorization(staleToken) }
+
+    expect((await SELF.fetch(`${ISSUER}/admin/groups`, { headers })).status).toBe(200)
+    const mutation = await SELF.fetch(`${ISSUER}/admin/groups`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ name: "test-stale-auth-denied" }),
+    })
+    expect(mutation.status).toBe(403)
+    expect(await mutation.json()).toEqual({ error: "reauthentication_required" })
   })
 
   it("answers browser preflight before bearer authentication", async () => {

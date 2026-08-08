@@ -9,8 +9,10 @@ import { parseScopeString } from "../oauth/scopes"
 import { evaluateUserTokenAccess } from "../oauth/user-token-policy"
 import { isYoloEnabled } from "../operations/yolo"
 import { isPlausibleCompactJwt } from "../security/ingress"
+import { RECENT_AUTH_SECONDS } from "../security/recent-auth"
 import { verifyAccessToken } from "../tokens/jwt"
 import type { AppBindings } from "../types/app"
+import { nowSeconds } from "../utils/time"
 
 const READ_METHODS = new Set(["GET", "HEAD"])
 const BEARER_SCHEME = "Bearer"
@@ -26,6 +28,10 @@ function insufficientScope(c: Context<AppBindings>, requiredScope: string): Resp
     `${BEARER_SCHEME} realm="admin", error="insufficient_scope", scope="${requiredScope}"`,
   )
   return c.json({ error: "insufficient_scope", required_scope: requiredScope }, 403)
+}
+
+function reauthenticationRequired(c: Context<AppBindings>): Response {
+  return c.json({ error: "reauthentication_required" }, 403)
 }
 
 export const requireAdminApiToken = createMiddleware<AppBindings>(async (c, next) => {
@@ -63,7 +69,6 @@ export const requireAdminApiToken = createMiddleware<AppBindings>(async (c, next
     ? ADMIN_API.readScope
     : ADMIN_API.writeScope
   if (!scopes.includes(requiredScope)) return insufficientScope(c, requiredScope)
-
   const [user, client] = await Promise.all([
     getUserById(c.env, payload.sub),
     getClientById(c.env, payload["client_id"]),
@@ -84,6 +89,19 @@ export const requireAdminApiToken = createMiddleware<AppBindings>(async (c, next
     scopes,
   })
   if (!access.allowed) return invalidToken(c)
+
+  if (requiredScope === ADMIN_API.writeScope) {
+    const authTime = payload["auth_time"]
+    const now = nowSeconds()
+    if (
+      typeof authTime !== "number" ||
+      !Number.isSafeInteger(authTime) ||
+      authTime > now ||
+      now - authTime > RECENT_AUTH_SECONDS
+    ) {
+      return reauthenticationRequired(c)
+    }
+  }
 
   c.set("user", user)
   await next()

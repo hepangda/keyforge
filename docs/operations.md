@@ -93,8 +93,11 @@ Migration `0018_permission_group_access.sql` seeds `employees` for `pangda_app`,
 user-facing resources. It initially seeds `admins` for `pangda_admin` and
 `https://admin.pangda.app`; migration `0020_all_permission_group.sql` adds and
 backfills `all`, automatically joins future users, and moves `pangda_admin` to
-that universal group while leaving the API resource on `admins`. The local demo
-seed separately assigns `demo_local` to `employees`. Operators that removed an
+that universal group while leaving the API resource on `admins`. If an operator
+previously created a custom group named `all`, the migration preserves it and
+its assignments under a deterministic `legacy-all-*` name before creating the
+built-in group, preventing an accidental universal grant. The local demo seed
+separately assigns `demo_local` to `employees`. Operators that removed an
 optional seeded target before the migration do not have it recreated. Deleting
 a group, client, or resource cascades its assignments and therefore leaves the
 affected authorization path denied rather than widening access.

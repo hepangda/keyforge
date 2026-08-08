@@ -6,6 +6,7 @@ import { createUser, getUserById } from "../../src/db/queries/users"
 import { MAX_AVATAR_BYTES } from "../../src/media/avatar"
 import { buildUserClaims } from "../../src/oidc/claims"
 import { issueUserAccessToken } from "../../src/tokens/access-token"
+import { nowSeconds } from "../../src/utils/time"
 
 const ISSUER = "https://auth.pangda.app"
 
@@ -42,6 +43,7 @@ beforeEach(async () => {
       clientId: "pangda_admin",
       resource: ADMIN_API.audience,
       scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+      authTime: nowSeconds(),
     })
   ).token
 
@@ -341,6 +343,7 @@ describe("admin avatar management", () => {
         clientId: "pangda_admin",
         resource: ADMIN_API.audience,
         scope: ADMIN_API.writeScope,
+        authTime: nowSeconds(),
       })
     ).token
     const res = await SELF.fetch(`${ISSUER}/admin/users/${userId}/avatar`, {

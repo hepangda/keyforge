@@ -4,6 +4,7 @@ import { verifyUserPassword } from "../../src/auth/password"
 import { ADMIN_API } from "../../src/config"
 import { getUserByEmail, getUserGroupNames } from "../../src/db/queries/users"
 import { issueUserAccessToken } from "../../src/tokens/access-token"
+import { nowSeconds } from "../../src/utils/time"
 
 const ISSUER = "https://auth.pangda.app"
 
@@ -72,6 +73,7 @@ describe("test-only administrator fixture", () => {
       clientId: "pangda_admin",
       resource: ADMIN_API.audience,
       scope: ADMIN_API.readScope,
+      authTime: nowSeconds(),
     })
     const adminApi = await SELF.fetch(`${ISSUER}/admin/users`, {
       headers: { authorization: authorization(accessToken.token) },

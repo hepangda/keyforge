@@ -6,6 +6,7 @@ import { createUser, getUserByEmail } from "../../src/db/queries/users"
 import worker from "../../src/index"
 import { insertAuditBatch } from "../../src/security/audit"
 import { issueUserAccessToken } from "../../src/tokens/access-token"
+import { nowSeconds } from "../../src/utils/time"
 
 const ISSUER = "https://auth.pangda.app"
 
@@ -101,6 +102,7 @@ async function adminApiToken(): Promise<string> {
       clientId: "pangda_admin",
       resource: ADMIN_API.audience,
       scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+      authTime: nowSeconds(),
     })
   ).token
 }

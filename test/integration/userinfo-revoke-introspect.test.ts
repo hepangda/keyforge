@@ -7,6 +7,7 @@ import { createUser } from "../../src/db/queries/users"
 import { hashClientSecret } from "../../src/security/client-secret"
 import { issueUserAccessToken } from "../../src/tokens/access-token"
 import { issueRefreshToken } from "../../src/tokens/refresh-token"
+import { nowSeconds } from "../../src/utils/time"
 
 const ISSUER = "https://auth.pangda.app"
 const CLIENT = "pangda_app"
@@ -206,6 +207,7 @@ describe("GET /oauth/userinfo", () => {
       clientId: CLIENT,
       resource: "https://unregistered.example",
       scope: "openid",
+      authTime: nowSeconds(),
     })
     const res = await SELF.fetch(`${ISSUER}/oauth/userinfo`, {
       headers: { authorization: `Bearer ${issued.token}` },
@@ -316,6 +318,7 @@ describe("POST /oauth/introspect", () => {
       clientId: CLIENT,
       resource: "https://app.pangda.app",
       scope: "openid app.read",
+      authTime: nowSeconds(),
     })
     const body = await (await post("/oauth/introspect", { token: issued.token }, svcAuth)).json<{
       active: boolean

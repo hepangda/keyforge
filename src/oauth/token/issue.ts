@@ -45,6 +45,7 @@ export async function issueUserTokens(
     clientId: input.client.clientId,
     resource: input.resource,
     scope: input.scope,
+    authTime: input.authTime,
   })
   const response: TokenResponse = {
     access_token: accessToken.token,

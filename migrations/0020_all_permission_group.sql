@@ -2,9 +2,16 @@
 -- user is joined automatically, regardless of which account-creation path is
 -- used.
 
+-- `all` was previously a valid custom name. Preserve any such group's members
+-- and assignments under a deterministic legacy name rather than broadening its
+-- access when universal membership is backfilled.
+UPDATE groups
+SET name = 'legacy-all-' || substr(lower(hex(id)), 1, 40)
+WHERE name = 'all'
+  AND id != 'grp_seed_all';
+
 INSERT INTO groups (id, name, description, created_at)
-SELECT 'grp_seed_all', 'all', 'All users', unixepoch()
-WHERE NOT EXISTS (SELECT 1 FROM groups WHERE name = 'all');
+VALUES ('grp_seed_all', 'all', 'All users', unixepoch());
 
 INSERT OR IGNORE INTO user_groups (user_id, group_id, created_at)
 SELECT users.id, universal_group.id, unixepoch()

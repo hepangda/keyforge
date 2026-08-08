@@ -9,6 +9,8 @@ HTML console is a separate, session-authenticated surface.
 Every endpoint requires a user access token with audience
 `https://admin.pangda.app`. Cookie sessions are not accepted. `GET` and `HEAD`
 requests require `admin.read`; mutations require `admin.write`.
+Mutations additionally require the token's original user authentication to be
+no more than ten minutes old. Refreshing a token does not reset this window.
 
 The seeded `pangda_admin` authorization-code client is available through the
 built-in `all` group, while the Admin API resource is assigned to `admins`.
@@ -33,8 +35,10 @@ curl https://auth.pangda.app/admin/users/usr_example \
 
 A missing, expired, wrong-audience, service, or no-longer-authorized token
 returns `401 {"error":"invalid_token"}`. A valid token missing the method's
-required scope returns `403 {"error":"insufficient_scope",...}`. Browser callers
-may use CORS with the `Authorization` and `Content-Type` headers.
+required scope returns `403 {"error":"insufficient_scope",...}`. A mutation with
+stale authentication returns `403 {"error":"reauthentication_required"}`.
+Browser callers may use CORS with the `Authorization` and `Content-Type`
+headers.
 
 JSON validation failures return `400 {"error":"invalid_request"}`. Missing
 objects return `404 {"error":"not_found"}`. Pagination uses `limit` and

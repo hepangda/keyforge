@@ -129,33 +129,36 @@ async function issueDeviceTokens(
       detail: "approved device session missing user, resource, or authentication context",
     })
   }
-  await resolveResourceForScopes(env, client, resourceUri, parseScopeString(scope))
-  const user = await getUserById(env, userId)
+  const scopes = parseScopeString(scope)
+  const resourceCheck = resolveResourceForScopes(env, client, resourceUri, scopes).then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error }),
+  )
+  const [user, sourceSession, consentCovered, access, resource] = await Promise.all([
+    getUserById(env, userId),
+    getSessionById(env, browserSessionId),
+    consentCoversScopes(env, userId, client.clientId, resourceUri, scopes),
+    evaluateUserTokenAccess(env, {
+      userId,
+      clientId: client.clientId,
+      resourceUri,
+      scopes,
+    }),
+    resourceCheck,
+  ])
+  if (!resource.ok) throw resource.error
   if (user === null || user.disabled) {
     throw new OAuthError("invalid_grant", {
       description: "The account is unavailable",
       detail: `user ${userId} missing or disabled`,
     })
   }
-
-  const scopes = parseScopeString(scope)
-  const sourceSession = await getSessionById(env, browserSessionId)
-  if (
-    sourceSession === null ||
-    sourceSession.userId !== user.id ||
-    !(await consentCoversScopes(env, user.id, client.clientId, resourceUri, scopes))
-  ) {
+  if (sourceSession === null || sourceSession.userId !== user.id || !consentCovered) {
     throw new OAuthError("invalid_grant", {
       description: "The device authorization was revoked",
       detail: "approving session or consent is no longer active",
     })
   }
-  const access = await evaluateUserTokenAccess(env, {
-    userId: user.id,
-    clientId: client.clientId,
-    resourceUri,
-    scopes,
-  })
   if (!access.allowed) {
     throw new OAuthError("invalid_grant", {
       description: "This account is not permitted to access this application or resource.",
@@ -180,6 +183,7 @@ async function issueDeviceTokens(
     // approved it. Password reset/admin/app revocation still revoke all user
     // or client families, including these NULL-session families.
     sessionId: null,
+    accessValidated: true,
   })
   const [sessionAfterIssue, consentAfterIssue] = await Promise.all([
     getSessionById(env, browserSessionId),

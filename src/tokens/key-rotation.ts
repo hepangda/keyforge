@@ -11,6 +11,8 @@ const MODULUS_LENGTH = 2048
 const RETIRED_GRACE_SECONDS = 91 * 24 * 60 * 60
 /** Must exceed the public JWKS cache lifetime before a staged key can sign. */
 export const JWKS_PROPAGATION_SECONDS = 2 * 60
+/** Stay well below propagation so every isolate observes a staged key before activation. */
+const KEYRING_CACHE_TTL_MS = (JWKS_PROPAGATION_SECONDS * 1000) / 4
 const ROTATION_LEASE_SECONDS = 120
 const ROTATION_LEASE_NAME = "signing-key-write"
 const LEGACY_KV_CLEANUP_STATE_KEY = "signing_key_legacy_kv_cleanup_pending"
@@ -53,6 +55,20 @@ export type ActiveSigningKey = {
 
 /** Per-isolate cache of imported private keys, keyed by kid. */
 const privateKeyCache = new Map<string, CryptoKey>()
+let keyringCache: { readonly keyring: StoredKeyring; readonly expiresAt: number } | null = null
+let keyringLoad: Promise<StoredKeyring> | null = null
+
+function rememberKeyring(keyring: StoredKeyring): void {
+  keyringCache = { keyring, expiresAt: Date.now() + KEYRING_CACHE_TTL_MS }
+}
+
+function cachedKeyring(): StoredKeyring | null {
+  if (keyringCache === null || keyringCache.expiresAt <= Date.now()) {
+    keyringCache = null
+    return null
+  }
+  return keyringCache.keyring
+}
 
 function publishedKeys(keyring: StoredKeyring, now = nowSeconds()): readonly StoredSigningKey[] {
   return keyring.keys.filter(
@@ -123,6 +139,7 @@ async function persistKeyring(
     if (inserted.meta.changes !== 1) {
       throw new AppError(503, "Signing key state changed concurrently")
     }
+    rememberKeyring(keyring)
     return 1
   }
   const updated = await env.DB.prepare(
@@ -135,6 +152,7 @@ async function persistKeyring(
   if (updated.meta.changes !== 1) {
     throw new AppError(503, "Signing key state changed concurrently")
   }
+  rememberKeyring(keyring)
   return expectedVersion + 1
 }
 
@@ -311,13 +329,15 @@ export async function rotateSigningKey(env: Env, rotatedAt = nowSeconds()): Prom
     throw new AppError(503, "Signing key rotation is already in progress")
   }
   try {
-    return (await rotatePersistedKeyring(env, rotatedAt)).activeKid
+    const keyring = await rotatePersistedKeyring(env, rotatedAt)
+    rememberKeyring(keyring)
+    return keyring.activeKid
   } finally {
     await releaseRotationLease(env, ownerToken)
   }
 }
 
-async function ensureKeyring(env: Env): Promise<StoredKeyring> {
+async function loadOrInitializeKeyring(env: Env): Promise<StoredKeyring> {
   const current = await loadPersistedKeyring(env)
   if (current !== null && hasUsableActiveKey(current.keyring)) return current.keyring
 
@@ -353,6 +373,22 @@ async function ensureKeyring(env: Env): Promise<StoredKeyring> {
   throw new AppError(503, "Signing key initialization is still in progress")
 }
 
+async function ensureKeyring(env: Env): Promise<StoredKeyring> {
+  const cached = cachedKeyring()
+  if (cached !== null && hasUsableActiveKey(cached)) return cached
+  if (keyringLoad !== null) return keyringLoad
+
+  const loading = loadOrInitializeKeyring(env)
+  keyringLoad = loading
+  try {
+    const keyring = await loading
+    rememberKeyring(keyring)
+    return keyring
+  } finally {
+    if (keyringLoad === loading) keyringLoad = null
+  }
+}
+
 export type SigningKeyStatus = {
   readonly kid: string
   readonly createdAt: number
@@ -364,7 +400,11 @@ export type SigningKeyStatus = {
 /** Inspect the active key without bootstrapping or exposing private material. */
 export async function getSigningKeyStatus(env: Env): Promise<SigningKeyStatus | null> {
   const persisted = await loadPersistedKeyring(env)
-  if (persisted === null) return null
+  if (persisted === null) {
+    keyringCache = null
+    return null
+  }
+  rememberKeyring(persisted.keyring)
   const active = persisted.keyring.keys.find(
     (key) => key.kid === persisted.keyring.activeKid && key.retiredAt === null,
   )

@@ -70,34 +70,41 @@ export async function handleRefreshToken(
     })
   }
   const effectiveScope = scopes.join(" ")
-  const user = await getUserById(env, record.userId)
+  const resourceCheck = resolveResourceForScopes(env, client, record.resource, scopes).then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error }),
+  )
+  const [user, sourceSession, access, consentCovered, resource] = await Promise.all([
+    getUserById(env, record.userId),
+    record.sessionId === null ? Promise.resolve(null) : getSessionById(env, record.sessionId),
+    evaluateUserTokenAccess(env, {
+      userId: record.userId,
+      clientId: client.clientId,
+      resourceUri: record.resource,
+      scopes,
+    }),
+    consentCoversScopes(env, record.userId, client.clientId, record.resource, scopes),
+    resourceCheck,
+  ])
   if (user === null || user.disabled) {
     throw invalidRefreshToken(`user ${record.userId} missing or disabled`)
   }
   if (record.sessionId !== null) {
-    const sourceSession = await getSessionById(env, record.sessionId)
     if (sourceSession === null || sourceSession.userId !== user.id) {
       throw invalidRefreshToken("source session was revoked, expired, or changed owner")
     }
   }
-  const access = await evaluateUserTokenAccess(env, {
-    userId: user.id,
-    clientId: client.clientId,
-    resourceUri: record.resource,
-    scopes,
-  })
   if (!access.allowed) {
     throw new OAuthError("invalid_grant", {
       description: "This account is not permitted to access this application or resource.",
       detail: `user token policy denied ${access.reason}`,
     })
   }
-  if (!(await consentCoversScopes(env, user.id, client.clientId, record.resource, scopes))) {
+  if (!consentCovered) {
     throw invalidRefreshToken("current consent no longer covers the refresh authorization")
   }
-  try {
-    await resolveResourceForScopes(env, client, record.resource, scopes)
-  } catch (error) {
+  if (!resource.ok) {
+    const { error } = resource
     if (error instanceof OAuthError) {
       throw invalidRefreshToken(
         `refresh authorization no longer permitted: ${error.detail ?? error.code}`,

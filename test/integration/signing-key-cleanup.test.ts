@@ -4,6 +4,7 @@ import { health } from "../../src/routes/health"
 import {
   assertLegacySigningKeyCleanupComplete,
   getPublicJwks,
+  getSigningKeyStatus,
   rotateSigningKey,
 } from "../../src/tokens/key-rotation"
 
@@ -17,6 +18,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM signing_key_state"),
   ])
   await Promise.all([env.KV.delete("signing:keys"), env.KV.delete("signing:active")])
+  await getSigningKeyStatus(env)
 })
 
 async function seedLegacyKvKeyring(): Promise<void> {
@@ -36,6 +38,7 @@ async function seedLegacyKvKeyring(): Promise<void> {
     env.KV.put("signing:active", keyring.activeKid),
   ])
   await env.DB.prepare("DELETE FROM signing_key_state").run()
+  await getSigningKeyStatus(env)
 }
 
 function withFailingKvDeletes(base: Env): Env {

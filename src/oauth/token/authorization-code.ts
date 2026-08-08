@@ -51,43 +51,48 @@ export async function handleAuthorizationCode(
     })
   }
   const grant = consumed.value
-
-  const user = await getUserById(env, grant.userId)
+  const scopes = parseScopeString(grant.scope)
+  const resourceCheck = resolveResourceForScopes(env, client, grant.resource, scopes).then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error }),
+  )
+  const [user, sourceSession, consentCovered, access, resource] = await Promise.all([
+    getUserById(env, grant.userId),
+    getSessionById(env, grant.sessionId),
+    consentCoversScopes(env, grant.userId, client.clientId, grant.resource, scopes),
+    evaluateUserTokenAccess(env, {
+      userId: grant.userId,
+      clientId: client.clientId,
+      resourceUri: grant.resource,
+      scopes,
+    }),
+    resourceCheck,
+  ])
   if (user === null || user.disabled) {
     throw new OAuthError("invalid_grant", {
       description: "The account is unavailable",
       detail: `user ${grant.userId} missing or disabled`,
     })
   }
-
-  const scopes = parseScopeString(grant.scope)
-  const sourceSession = await getSessionById(env, grant.sessionId)
   if (sourceSession === null || sourceSession.userId !== user.id) {
     throw new OAuthError("invalid_grant", {
       description: "The authorization session is no longer active",
       detail: `session ${grant.sessionId} was revoked, expired, or changed owner`,
     })
   }
-  if (!(await consentCoversScopes(env, user.id, client.clientId, grant.resource, scopes))) {
+  if (!consentCovered) {
     throw new OAuthError("invalid_grant", {
       description: "The authorization was revoked",
       detail: "consent no longer covers the authorization code grant",
     })
   }
-  const access = await evaluateUserTokenAccess(env, {
-    userId: user.id,
-    clientId: client.clientId,
-    resourceUri: grant.resource,
-    scopes,
-  })
   if (!access.allowed) {
     throw new OAuthError("invalid_grant", {
       description: "This account is not permitted to access this application or resource.",
       detail: `user token policy denied ${access.reason}`,
     })
   }
-
-  await resolveResourceForScopes(env, client, grant.resource, scopes)
+  if (!resource.ok) throw resource.error
 
   const response = await issueUserTokens(env, {
     user,
@@ -97,6 +102,7 @@ export async function handleAuthorizationCode(
     nonce: grant.nonce,
     authTime: grant.authTime,
     sessionId: grant.sessionId,
+    accessValidated: true,
   })
 
   await recordAuthorizationGrant(env, {

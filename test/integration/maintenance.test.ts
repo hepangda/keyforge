@@ -11,6 +11,26 @@ import {
 const NOW = 2_000_000_000
 const DAY = 24 * 60 * 60
 
+function withPrepareCounter(base: Env, onPrepare: () => void): Env {
+  const countingDb = new Proxy(base.DB, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (query: string) => {
+          onPrepare()
+          return target.prepare(query)
+        }
+      }
+      const value = Reflect.get(target, property)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+  return new Proxy(base, {
+    get(target, property) {
+      return property === "DB" ? countingDb : Reflect.get(target, property)
+    },
+  })
+}
+
 beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM maintenance_leases"),
@@ -22,6 +42,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM users WHERE id = 'usr_maintenance_test'"),
   ])
   await Promise.all([env.KV.delete("signing:active"), env.KV.delete("signing:keys")])
+  await getSigningKeyStatus(env)
 })
 
 describe("scheduled maintenance", () => {
@@ -350,5 +371,19 @@ describe("scheduled maintenance", () => {
     expect(persisted?.version).toBe(1)
     expect(await env.KV.get("signing:active")).toBeNull()
     expect(await env.KV.get("signing:keys")).toBeNull()
+  })
+
+  it("reuses the per-isolate keyring without another D1 read", async () => {
+    let prepares = 0
+    const countingEnv = withPrepareCounter(env, () => {
+      prepares += 1
+    })
+
+    await getPublicJwks(countingEnv)
+    const firstLoadPrepares = prepares
+    expect(firstLoadPrepares).toBeGreaterThan(0)
+
+    await getPublicJwks(countingEnv)
+    expect(prepares).toBe(firstLoadPrepares)
   })
 })

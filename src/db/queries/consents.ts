@@ -77,13 +77,18 @@ export async function saveConsent(env: Env, input: SaveConsentInput): Promise<vo
 
 export type ConsentSummary = {
   readonly clientId: string
+  readonly clientName: string
   readonly scope: string
   readonly resource: string | null
 }
 
 export async function listConsentsByUser(env: Env, userId: string): Promise<ConsentSummary[]> {
   const result = await env.DB.prepare(
-    "SELECT client_id, scope, resource FROM consents WHERE user_id = ? ORDER BY updated_at DESC",
+    `SELECT consent.client_id, client.name AS client_name, consent.scope, consent.resource
+     FROM consents consent
+     JOIN oauth_clients client ON client.client_id = consent.client_id
+     WHERE consent.user_id = ?
+     ORDER BY consent.updated_at DESC`,
   )
     .bind(userId)
     .all()
@@ -91,6 +96,7 @@ export async function listConsentsByUser(env: Env, userId: string): Promise<Cons
     .array(
       z.object({
         client_id: z.string(),
+        client_name: z.string(),
         scope: z.string(),
         resource: z.string().nullable(),
       }),
@@ -99,6 +105,7 @@ export async function listConsentsByUser(env: Env, userId: string): Promise<Cons
   return parsed.success
     ? parsed.data.map((row) => ({
         clientId: row.client_id,
+        clientName: row.client_name,
         scope: row.scope,
         resource: row.resource || null,
       }))

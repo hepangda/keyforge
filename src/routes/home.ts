@@ -1,7 +1,6 @@
 import { Hono } from "hono"
 import { listPasswordCredentials, minimumPasswordLength } from "../auth/password"
 import { listSessionsByUser } from "../auth/session"
-import { getClientById } from "../db/queries/clients"
 import { listConsentsByUser } from "../db/queries/consents"
 import { listPermissionGroupsForUser } from "../db/queries/group-memberships"
 import { listDeviceRefreshFamiliesForUser } from "../db/queries/tokens"
@@ -10,12 +9,7 @@ import { listCredentialSummaries } from "../db/queries/webauthn"
 import { issueCsrfToken } from "../security/csrf"
 import { hasRecentAuthentication } from "../security/recent-auth"
 import type { AppBindings } from "../types/app"
-import type {
-  DashboardApp,
-  DashboardData,
-  DashboardFlow,
-  DashboardSection,
-} from "../views/dashboard"
+import type { DashboardData, DashboardFlow, DashboardSection } from "../views/dashboard"
 import { DASHBOARD_FLOWS, DASHBOARD_SECTIONS, renderDashboard } from "../views/dashboard"
 
 const ADMIN_GROUP = "admins"
@@ -81,16 +75,27 @@ home.get("/", async (c) => {
   if (user === undefined || session === undefined) {
     return c.redirect("/login")
   }
-  const [groups, permissionGroups, passwords, passkeys] = await Promise.all([
-    getUserGroupNames(c.env, user.id),
-    listPermissionGroupsForUser(c.env, user.id),
-    listPasswordCredentials(c.env, user.id),
-    listCredentialSummaries(c.env, user.id),
-  ])
+  const groups = await getUserGroupNames(c.env, user.id)
   const isAdmin = groups.includes(ADMIN_GROUP)
   const section = parseSection(c.req.query("section"), isAdmin)
   const flow = parseFlow(c.req.query("flow"), section)
   const targetId = c.req.query("target") ?? null
+  let permissionGroups: DashboardData["permissionGroups"] = []
+  let passwords: DashboardData["passwords"] = []
+  let passkeys: DashboardData["passkeys"] = []
+  let sessions: DashboardData["sessions"] = []
+  let apps: DashboardData["apps"] = []
+  let deviceFamilies: DashboardData["devices"] = []
+
+  if (section === "login-methods") {
+    ;[passwords, passkeys] = await Promise.all([
+      listPasswordCredentials(c.env, user.id),
+      listCredentialSummaries(c.env, user.id),
+    ])
+  } else if (section === "profile" && (flow === "change-email" || flow === "delete-account")) {
+    passwords = await listPasswordCredentials(c.env, user.id)
+  }
+
   const passwordTargetFlow = flow === "manage-password" || flow === "remove-password"
   const passkeyTargetFlow = flow === "manage-passkey" || flow === "remove-passkey"
   if (
@@ -110,32 +115,45 @@ home.get("/", async (c) => {
       reauthenticationRedirect(`${url.pathname}${url.search}`, reauthHintForFlow(flow)),
     )
   }
-  const [sessions, consents, deviceFamilies] = await Promise.all([
-    listSessionsByUser(c.env, user.id),
-    listConsentsByUser(c.env, user.id),
-    listDeviceRefreshFamiliesForUser(c.env, user.id),
-  ])
-  const consentGroups = new Map<string, { scopes: Set<string>; resources: Set<string> }>()
-  for (const consent of consents) {
-    const group = consentGroups.get(consent.clientId) ?? {
-      scopes: new Set<string>(),
-      resources: new Set<string>(),
-    }
-    for (const scope of consent.scope.split(" ").filter(Boolean)) group.scopes.add(scope)
-    if (consent.resource !== null) group.resources.add(consent.resource)
-    consentGroups.set(consent.clientId, group)
-  }
-  const apps: DashboardApp[] = await Promise.all(
-    [...consentGroups.entries()].map(async ([clientId, group]) => {
-      const client = await getClientById(c.env, clientId)
-      return {
-        clientId,
-        name: client?.name ?? clientId,
-        scopes: [...group.scopes].sort(),
-        resources: [...group.resources].sort(),
+  if (section === "groups") {
+    permissionGroups = await listPermissionGroupsForUser(c.env, user.id)
+  } else if (section === "sessions") {
+    sessions = (await listSessionsByUser(c.env, user.id)).map((entry) => ({
+      id: entry.id,
+      authMethod: entry.authMethod,
+      passkeyAuthenticated: entry.passkeyAuthenticated,
+      createdAt: entry.createdAt,
+      lastSeenAt: entry.lastSeenAt,
+      expiresAt: entry.expiresAt,
+      current: entry.id === session.id,
+    }))
+  } else if (section === "apps") {
+    const [consents, devices] = await Promise.all([
+      listConsentsByUser(c.env, user.id),
+      listDeviceRefreshFamiliesForUser(c.env, user.id),
+    ])
+    deviceFamilies = devices
+    const consentGroups = new Map<
+      string,
+      { name: string; scopes: Set<string>; resources: Set<string> }
+    >()
+    for (const consent of consents) {
+      const group = consentGroups.get(consent.clientId) ?? {
+        name: consent.clientName,
+        scopes: new Set<string>(),
+        resources: new Set<string>(),
       }
-    }),
-  )
+      for (const scope of consent.scope.split(" ").filter(Boolean)) group.scopes.add(scope)
+      if (consent.resource !== null) group.resources.add(consent.resource)
+      consentGroups.set(consent.clientId, group)
+    }
+    apps = [...consentGroups.entries()].map(([clientId, group]) => ({
+      clientId,
+      name: group.name,
+      scopes: [...group.scopes].sort(),
+      resources: [...group.resources].sort(),
+    }))
+  }
   if (
     (flow === "revoke-app" &&
       (targetId === null || !apps.some((app) => app.clientId === targetId))) ||
@@ -153,15 +171,7 @@ home.get("/", async (c) => {
     groups,
     permissionGroups,
     isAdmin,
-    sessions: sessions.map((entry) => ({
-      id: entry.id,
-      authMethod: entry.authMethod,
-      passkeyAuthenticated: entry.passkeyAuthenticated,
-      createdAt: entry.createdAt,
-      lastSeenAt: entry.lastSeenAt,
-      expiresAt: entry.expiresAt,
-      current: entry.id === session.id,
-    })),
+    sessions,
     passwords,
     passkeys: passkeys.map((entry) => ({
       id: entry.id,

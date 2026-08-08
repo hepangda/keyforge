@@ -35,7 +35,7 @@ export const MAX_USER_GROUPS = 100
 export const MAX_ALIAS_LENGTH = 64
 export const ALIAS_PATTERN = /^[A-Za-z0-9_-]+$/
 
-function mapUser(row: unknown): User {
+export function mapUser(row: unknown): User {
   const parsed = userRowSchema.parse(row)
   return {
     id: asUserId(parsed.id),

@@ -257,6 +257,21 @@ describe("account dashboard", () => {
   })
 })
 
+describe("browser assets", () => {
+  it("revalidates unchanged scripts with an ETag", async () => {
+    const initial = await SELF.fetch(`${ISSUER}/assets/forms.js`)
+    const etag = initial.headers.get("etag")
+    expect(initial.status).toBe(200)
+    expect(etag).toBeTruthy()
+    expect(initial.headers.get("cache-control")).toContain("no-cache")
+
+    const revalidated = await SELF.fetch(`${ISSUER}/assets/forms.js`, {
+      headers: { "if-none-match": etag ?? "" },
+    })
+    expect(revalidated.status).toBe(304)
+  })
+})
+
 describe("account session management", () => {
   it("signs out all other sessions but keeps the current one", async () => {
     const current = await login()
@@ -380,6 +395,7 @@ describe("account app access", () => {
       headers: { cookie: `__Host-keyforge_session=${token}` },
     })
     const overviewHtml = await overview.text()
+    expect(overviewHtml).toContain("Cloudflare One")
     expect(overviewHtml).toContain("flow=revoke-app&amp;target=cloudflare_one")
     expect(overviewHtml).not.toContain('action="/account/apps/cloudflare_one/revoke"')
     const review = await SELF.fetch(

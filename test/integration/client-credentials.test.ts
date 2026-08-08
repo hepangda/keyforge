@@ -31,7 +31,7 @@ beforeEach(async () => {
   await env.RATE_LIMIT.getByName("oauth:token:ip:unknown").reset()
   await env.DB.prepare(
     `UPDATE oauth_resources
-     SET allowed_scopes_json = '["openid","profile","email","groups","offline_access","api.read","api.write"]'
+     SET allowed_scopes_json = '["openid","profile","email","offline_access","api.read","api.write"]'
      WHERE resource_uri = ?`,
   )
     .bind(RESOURCE)
@@ -96,6 +96,12 @@ describe("POST /oauth/token — client_credentials", () => {
 
   it("issues a verifiable service token for a confidential client", async () => {
     // Given a confidential service client with a valid secret
+    const assignments = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM oauth_client_permission_groups WHERE client_id = ?",
+    )
+      .bind(SVC)
+      .first<{ count: number }>()
+    expect(assignments?.count).toBe(0)
     // When it requests a token via Basic auth
     const res = await tokenRequest(
       { grant_type: "client_credentials", scope: "api.read", resource: RESOURCE },

@@ -110,8 +110,7 @@ describe("account security settings", () => {
     })
     expect(changed.status).toBe(302)
     expect(changed.headers.get("location")).toContain("password_added")
-    expect(changed.headers.get("location")).toContain("flow=add-password")
-    expect(await verifyUserPassword(env, user.id, "old password with enough length")).toBe(true)
+    expect(changed.headers.get("location")).not.toContain("flow=add-password")
     expect(await verifyUserPassword(env, user.id, "new password with enough length")).toBe(true)
 
     expect(
@@ -155,6 +154,22 @@ describe("account security settings", () => {
     })
     const browser = await authenticatedBrowser(user.id)
     await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE user_id = ?").bind(user.id).run()
+    for (const returnTo of [
+      "/?section=login-methods&flow=add-password",
+      "/?section=login-methods&flow=add-passkey",
+      "/?section=profile&flow=change-email",
+      "/?section=profile&flow=delete-account",
+    ]) {
+      const response = await SELF.fetch(`${ISSUER}${returnTo}`, {
+        headers: { cookie: `__Host-keyforge_session=${browser.sessionToken}` },
+        redirect: "manual",
+      })
+      expect(response.status).toBe(302)
+      const login = new URL(response.headers.get("location") ?? "", ISSUER)
+      expect(login.pathname).toBe("/login")
+      expect(login.searchParams.get("reauth")).toBe("1")
+      expect(login.searchParams.get("return_to")).toBe(returnTo)
+    }
 
     for (const [path, fields, returnTo] of [
       [
@@ -163,7 +178,7 @@ describe("account security settings", () => {
           password: "a new password with enough length",
           password_confirm: "a new password with enough length",
         },
-        "/?section=login-methods&flow=add-password&verified=1",
+        "/?section=login-methods&flow=add-password",
       ],
       [
         "/account/email/change",
@@ -197,7 +212,23 @@ describe("account security settings", () => {
     if (credential === undefined) return
 
     const blocked = await postAccount(`/account/passkeys/${credential.id}/delete`, browser)
-    expect(blocked.headers.get("location")).toContain("last_login_method")
+    const blockedLocation = blocked.headers.get("location") ?? ""
+    expect(blockedLocation).toContain("flow=remove-passkey")
+    expect(blockedLocation).toContain(`target=${credential.id}`)
+    expect(blockedLocation).toContain("last_login_method")
+
+    const invalidCsrf = await SELF.fetch(`${ISSUER}/account/passkeys/${credential.id}/delete`, {
+      method: "POST",
+      headers: {
+        cookie: `__Host-keyforge_session=${browser.sessionToken}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      redirect: "manual",
+    })
+    const invalidLocation = invalidCsrf.headers.get("location") ?? ""
+    expect(invalidLocation).toContain("flow=remove-passkey")
+    expect(invalidLocation).toContain(`target=${credential.id}`)
+    expect(invalidLocation).toContain("notice=invalid")
 
     await setUserPassword(env, user.id, "fallback password is long enough")
     const renamed = await postAccount(`/account/passkeys/${credential.id}/rename`, browser, {
@@ -206,8 +237,12 @@ describe("account security settings", () => {
     expect(renamed.headers.get("location")).toContain("passkey_renamed")
     expect((await listCredentialSummaries(env, user.id))[0]?.name).toBe("Laptop passkey")
     const removed = await postAccount(`/account/passkeys/${credential.id}/delete`, browser)
-    expect(removed.headers.get("location")).toContain("passkey_deleted")
+    expect(removed.headers.get("location")).toBe(
+      "/?section=login-methods&notice=login_method_removed",
+    )
     expect(await listCredentialSummaries(env, user.id)).toHaveLength(0)
+    const repeated = await postAccount(`/account/passkeys/${credential.id}/delete`, browser)
+    expect(repeated.headers.get("location")).toBe("/?section=login-methods&notice=not_found")
   })
 
   it("requires a fresh identity check before renaming a login method", async () => {
@@ -224,15 +259,22 @@ describe("account security settings", () => {
     await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE id = ?")
       .bind(browser.sessionId)
       .run()
+    const manageTarget = `/?section=login-methods&flow=manage-password&target=${password.id}`
+    const manage = await SELF.fetch(`${ISSUER}${manageTarget}`, {
+      headers: { cookie: `__Host-keyforge_session=${browser.sessionToken}` },
+      redirect: "manual",
+    })
+    expect(manage.status).toBe(302)
+    expect(
+      new URL(manage.headers.get("location") ?? "", ISSUER).searchParams.get("return_to"),
+    ).toBe(manageTarget)
 
     const response = await postAccount(`/account/passwords/${password.id}/rename`, browser, {
       name: "Should not change",
     })
     const location = response.headers.get("location") ?? ""
     expect(location).toContain("/login?reauth=1")
-    expect(new URL(location, ISSUER).searchParams.get("return_to")).toBe(
-      `/?section=login-methods&flow=manage-password&credential=${password.id}&verified=1`,
-    )
+    expect(new URL(location, ISSUER).searchParams.get("return_to")).toBe(manageTarget)
     const stored = await env.DB.prepare("SELECT name FROM password_credentials WHERE id = ?")
       .bind(password.id)
       .first<{ name: string | null }>()

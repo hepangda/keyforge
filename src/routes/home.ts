@@ -7,6 +7,7 @@ import { listDeviceRefreshFamiliesForUser } from "../db/queries/tokens"
 import { getUserGroupNames } from "../db/queries/users"
 import { listCredentialSummaries } from "../db/queries/webauthn"
 import { issueCsrfToken } from "../security/csrf"
+import { hasRecentAuthentication } from "../security/recent-auth"
 import type { AppBindings } from "../types/app"
 import type {
   DashboardApp,
@@ -25,22 +26,50 @@ function parseSection(raw: string | undefined, isAdmin: boolean): DashboardSecti
   }
   return match
 }
-
 const PROFILE_FLOWS = new Set<DashboardFlow>(["edit-profile", "change-email", "delete-account"])
 const LOGIN_METHOD_FLOWS = new Set<DashboardFlow>([
-  "choose-login-method",
   "add-password",
   "add-passkey",
   "manage-password",
   "manage-passkey",
+  "remove-password",
+  "remove-passkey",
 ])
+const SESSION_FLOWS = new Set<DashboardFlow>(["revoke-other-sessions"])
+const APP_FLOWS = new Set<DashboardFlow>(["revoke-app", "revoke-device"])
 
 function parseFlow(raw: string | undefined, section: DashboardSection): DashboardFlow | null {
   const flow = DASHBOARD_FLOWS.find((candidate) => candidate === raw)
   if (flow === undefined) return null
   if (section === "profile" && PROFILE_FLOWS.has(flow)) return flow
+  if (section === "sessions" && SESSION_FLOWS.has(flow)) return flow
+  if (section === "apps" && APP_FLOWS.has(flow)) return flow
   if (section === "login-methods" && LOGIN_METHOD_FLOWS.has(flow)) return flow
   return null
+}
+const RECENT_AUTH_LOGIN_METHOD_FLOWS = new Set<DashboardFlow>([
+  "add-password",
+  "add-passkey",
+  "manage-password",
+  "manage-passkey",
+  "remove-password",
+  "remove-passkey",
+])
+
+function reauthHintForFlow(flow: DashboardFlow | null): string | undefined {
+  if (flow === "add-password") return "add_password"
+  if (flow === "manage-password" || flow === "remove-password") return "manage_password"
+  if (flow === "add-passkey") return "add_passkey"
+  if (flow === "manage-passkey" || flow === "remove-passkey") return "manage_passkey"
+  if (flow === "change-email") return "change_email"
+  if (flow === "delete-account") return "delete_account"
+  return undefined
+}
+
+function reauthenticationRedirect(returnTo: string, hint?: string): string {
+  const params = new URLSearchParams({ reauth: "1", return_to: returnTo })
+  if (hint !== undefined) params.set("hint", hint)
+  return `/login?${params.toString()}`
 }
 
 export const home = new Hono<AppBindings>()
@@ -51,11 +80,36 @@ home.get("/", async (c) => {
   if (user === undefined || session === undefined) {
     return c.redirect("/login")
   }
-  const [groups, sessions, passwords, passkeys, consents, deviceFamilies] = await Promise.all([
+  const [groups, passwords, passkeys] = await Promise.all([
     getUserGroupNames(c.env, user.id),
-    listSessionsByUser(c.env, user.id),
     listPasswordCredentials(c.env, user.id),
     listCredentialSummaries(c.env, user.id),
+  ])
+  const isAdmin = groups.includes(ADMIN_GROUP)
+  const section = parseSection(c.req.query("section"), isAdmin)
+  const flow = parseFlow(c.req.query("flow"), section)
+  const targetId = c.req.query("target") ?? null
+  const passwordTargetFlow = flow === "manage-password" || flow === "remove-password"
+  const passkeyTargetFlow = flow === "manage-passkey" || flow === "remove-passkey"
+  if (
+    (passwordTargetFlow &&
+      (targetId === null || !passwords.some((credential) => credential.id === targetId))) ||
+    (passkeyTargetFlow &&
+      (targetId === null || !passkeys.some((credential) => credential.id === targetId)))
+  ) {
+    return c.redirect("/?section=login-methods&notice=not_found")
+  }
+  const needsRecentAuthentication =
+    (flow !== null && RECENT_AUTH_LOGIN_METHOD_FLOWS.has(flow)) ||
+    (passwords.length === 0 && (flow === "change-email" || flow === "delete-account"))
+  if (needsRecentAuthentication && !hasRecentAuthentication(session)) {
+    const url = new URL(c.req.url)
+    return c.redirect(
+      reauthenticationRedirect(`${url.pathname}${url.search}`, reauthHintForFlow(flow)),
+    )
+  }
+  const [sessions, consents, deviceFamilies] = await Promise.all([
+    listSessionsByUser(c.env, user.id),
     listConsentsByUser(c.env, user.id),
     listDeviceRefreshFamiliesForUser(c.env, user.id),
   ])
@@ -80,8 +134,15 @@ home.get("/", async (c) => {
       }
     }),
   )
-  const isAdmin = groups.includes(ADMIN_GROUP)
-  const section = parseSection(c.req.query("section"), isAdmin)
+  if (
+    (flow === "revoke-app" &&
+      (targetId === null || !apps.some((app) => app.clientId === targetId))) ||
+    (flow === "revoke-device" &&
+      (targetId === null || !deviceFamilies.some((device) => device.familyId === targetId)))
+  ) {
+    return c.redirect("/?section=apps&notice=not_found")
+  }
+
   const notice = c.req.query("notice")
   const data: DashboardData = {
     i18n: c.get("i18n"),
@@ -112,8 +173,8 @@ home.get("/", async (c) => {
   }
   return c.html(
     renderDashboard(data, section, {
-      flow: parseFlow(c.req.query("flow"), section),
-      credentialId: c.req.query("credential") ?? null,
+      flow,
+      targetId,
     }),
   )
 })

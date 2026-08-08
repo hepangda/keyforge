@@ -1,3 +1,4 @@
+import type { Context } from "hono"
 import { Hono } from "hono"
 import { DEVICE_CODE_GRANT } from "../config"
 import { getClientById } from "../db/queries/clients"
@@ -10,12 +11,13 @@ import {
 import { resolveResourceForScopes } from "../oauth/resources"
 import { parseScopeString } from "../oauth/scopes"
 import { normalizeUserCode } from "../oauth/user-code"
-import { userMayReceiveScopes } from "../oauth/user-scope-policy"
+import { evaluateUserTokenAccess } from "../oauth/user-token-policy"
 import { recordAudit } from "../security/audit"
 import { issueCsrfToken, verifyCsrfToken } from "../security/csrf"
 import { hasRecentAuthentication } from "../security/recent-auth"
 import { hashOpaqueToken } from "../tokens/token-hash"
 import type { AppBindings } from "../types/app"
+import type { SessionRecord, User } from "../types/domain"
 import { readFormField } from "../utils/form"
 import { isExpired } from "../utils/time"
 import {
@@ -48,31 +50,44 @@ async function currentDeviceClient(env: Env, session: DeviceSession) {
     return null
   }
 }
+type DeviceBrowserContext = { readonly user: User; readonly session: SessionRecord }
 
-device.get("/device", async (c) => {
+function deviceBrowserContext(
+  c: Context<AppBindings>,
+  normalizedUserCode: string,
+): DeviceBrowserContext | Response {
   const user = c.get("user")
-  const browserSession = c.get("session")
-  const userCode = c.req.query("user_code") ?? ""
-  if (user === undefined || browserSession === undefined) {
-    const returnTo =
-      userCode === "" ? "/device" : `/device?user_code=${encodeURIComponent(userCode)}`
+  const session = c.get("session")
+  const returnTo =
+    normalizedUserCode === ""
+      ? "/device"
+      : `/device?user_code=${encodeURIComponent(normalizedUserCode)}`
+  if (user === undefined || session === undefined) {
     return c.redirect(`/login?return_to=${encodeURIComponent(returnTo)}`)
   }
-  if (!hasRecentAuthentication(browserSession)) {
-    const returnTo =
-      userCode === "" ? "/device" : `/device?user_code=${encodeURIComponent(userCode)}`
-    return c.redirect(`/login?reauth=1&return_to=${encodeURIComponent(returnTo)}`)
+  if (!hasRecentAuthentication(session)) {
+    const params = new URLSearchParams({
+      reauth: "1",
+      hint: "authorize_device",
+      return_to: returnTo,
+    })
+    return c.redirect(`/login?${params.toString()}`)
   }
+  return { user, session }
+}
+
+device.get("/device", async (c) => {
+  const userCode = normalizeUserCode(c.req.query("user_code") ?? "")
+  const browser = deviceBrowserContext(c, userCode)
+  if (browser instanceof Response) return browser
   if (userCode === "") {
     return c.html(renderDeviceCodeEntryPage(c.get("i18n")))
   }
-  const session = await getDeviceByUserCodeHash(
-    c.env,
-    await hashOpaqueToken(normalizeUserCode(userCode)),
-  )
+  const { user } = browser
+  const session = await getDeviceByUserCodeHash(c.env, await hashOpaqueToken(userCode))
   if (session === null || session.status !== "pending" || isExpired(session.expiresAt)) {
     return c.html(
-      renderDeviceCodeEntryPage(c.get("i18n"), "That code is invalid or has expired."),
+      renderDeviceCodeEntryPage(c.get("i18n"), "That code is invalid or has expired.", userCode),
       400,
     )
   }
@@ -82,13 +97,24 @@ device.get("/device", async (c) => {
       renderDeviceCodeEntryPage(
         c.get("i18n"),
         "That authorization request is no longer available.",
+        userCode,
       ),
       400,
     )
   }
-  if (!(await userMayReceiveScopes(c.env, user.id, parseScopeString(session.scope)))) {
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: client.clientId,
+    resourceUri: session.resourceUri ?? "",
+    scopes: parseScopeString(session.scope),
+  })
+  if (!access.allowed) {
     return c.html(
-      renderDeviceCodeEntryPage(c.get("i18n"), "This account cannot grant the requested access."),
+      renderDeviceCodeEntryPage(
+        c.get("i18n"),
+        "This account cannot grant the requested access.",
+        userCode,
+      ),
       403,
     )
   }
@@ -105,31 +131,23 @@ device.get("/device", async (c) => {
 })
 
 device.post("/device/confirm", async (c) => {
-  const user = c.get("user")
-  const browserSession = c.get("session")
-  if (user === undefined || browserSession === undefined) {
-    return c.redirect("/login")
-  }
   const form = await c.req.raw.formData()
+  const userCode = normalizeUserCode(readFormField(form, "user_code"))
+  const browser = deviceBrowserContext(c, userCode)
+  if (browser instanceof Response) return browser
+  const { user, session: browserSession } = browser
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.html(
-      renderDeviceCodeEntryPage(c.get("i18n"), "Your session expired. Please try again."),
+      renderDeviceCodeEntryPage(c.get("i18n"), "Your session expired. Please try again.", userCode),
       403,
     )
   }
-  const session = await getDeviceByUserCodeHash(
-    c.env,
-    await hashOpaqueToken(normalizeUserCode(readFormField(form, "user_code"))),
-  )
+  const session = await getDeviceByUserCodeHash(c.env, await hashOpaqueToken(userCode))
   if (session === null || session.status !== "pending" || isExpired(session.expiresAt)) {
     return c.html(
-      renderDeviceCodeEntryPage(c.get("i18n"), "That code is invalid or has expired."),
+      renderDeviceCodeEntryPage(c.get("i18n"), "That code is invalid or has expired.", userCode),
       400,
     )
-  }
-  if (!hasRecentAuthentication(browserSession)) {
-    const returnTo = `/device?user_code=${encodeURIComponent(readFormField(form, "user_code"))}`
-    return c.redirect(`/login?reauth=1&return_to=${encodeURIComponent(returnTo)}`)
   }
   const scopes = parseScopeString(session.scope)
   const client = await currentDeviceClient(c.env, session)
@@ -138,20 +156,31 @@ device.post("/device/confirm", async (c) => {
       renderDeviceCodeEntryPage(
         c.get("i18n"),
         "That authorization request is no longer available.",
+        userCode,
       ),
       400,
     )
   }
-  if (!(await userMayReceiveScopes(c.env, user.id, scopes))) {
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: client.clientId,
+    resourceUri: session.resourceUri ?? "",
+    scopes,
+  })
+  if (!access.allowed) {
     return c.html(
-      renderDeviceCodeEntryPage(c.get("i18n"), "This account cannot grant the requested access."),
+      renderDeviceCodeEntryPage(
+        c.get("i18n"),
+        "This account cannot grant the requested access.",
+        userCode,
+      ),
       403,
     )
   }
   if (readFormField(form, "decision") === "approve") {
     if (session.resourceUri === null) {
       return c.html(
-        renderDeviceCodeEntryPage(c.get("i18n"), "That request has no valid resource."),
+        renderDeviceCodeEntryPage(c.get("i18n"), "That request has no valid resource.", userCode),
         400,
       )
     }
@@ -166,7 +195,7 @@ device.post("/device/confirm", async (c) => {
     })
     if (!approved) {
       return c.html(
-        renderDeviceCodeEntryPage(c.get("i18n"), "That request was already handled."),
+        renderDeviceCodeEntryPage(c.get("i18n"), "That request was already handled.", userCode),
         409,
       )
     }
@@ -181,7 +210,7 @@ device.post("/device/confirm", async (c) => {
   }
   if (!(await denyDevice(c.env, session.id))) {
     return c.html(
-      renderDeviceCodeEntryPage(c.get("i18n"), "That request was already handled."),
+      renderDeviceCodeEntryPage(c.get("i18n"), "That request was already handled.", userCode),
       409,
     )
   }

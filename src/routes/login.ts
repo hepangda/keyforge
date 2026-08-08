@@ -2,7 +2,7 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 import { decodeProtectedHeader } from "jose"
 import { verifyLoginPassword } from "../auth/password"
-import { createSession, revokeSessionByToken } from "../auth/session"
+import { createSession, replaceReauthenticatedSession, revokeSessionByToken } from "../auth/session"
 import { JWT_TYP, SESSION_TTL } from "../config"
 import { getClientById } from "../db/queries/clients"
 import { getUserByLogin } from "../db/queries/users"
@@ -39,10 +39,10 @@ const LOGIN_IP_RATE_LIMIT = 50
 const LOGIN_RATE_WINDOW_SECONDS = 300
 const GENERIC_LOGIN_ERROR = "Invalid email, username, or password."
 
-async function allowRegisteredOAuthCallback(
+async function resolveRegisteredOAuthClient(
   c: Context<AppBindings>,
   returnTo: string,
-): Promise<void> {
+): Promise<Awaited<ReturnType<typeof getClientById>>> {
   const requestUrl = new URL(c.req.url)
   const authorizationUrl = new URL(returnTo, requestUrl.origin)
   if (
@@ -52,12 +52,12 @@ async function allowRegisteredOAuthCallback(
     authorizationUrl.searchParams.getAll("client_id").length !== 1 ||
     authorizationUrl.searchParams.getAll("redirect_uri").length !== 1
   ) {
-    return
+    return null
   }
 
   const clientId = authorizationUrl.searchParams.get("client_id")
   const redirectUri = authorizationUrl.searchParams.get("redirect_uri")
-  if (clientId === null || redirectUri === null) return
+  if (clientId === null || redirectUri === null) return null
 
   const client = await getClientById(c.env, clientId)
   if (
@@ -66,10 +66,11 @@ async function allowRegisteredOAuthCallback(
     !client.allowedGrantTypes.includes("authorization_code") ||
     !isRegisteredRedirectUri(client, redirectUri)
   ) {
-    return
+    return null
   }
 
   c.set("oauthRedirectFormAction", formActionSource(redirectUri))
+  return client
 }
 
 login.get("/login", async (c) => {
@@ -78,9 +79,11 @@ login.get("/login", async (c) => {
   if (c.get("user") !== undefined && !reauthenticating) {
     return c.redirect(returnTo)
   }
-  await allowRegisteredOAuthCallback(c, returnTo)
+  const oauthClient = await resolveRegisteredOAuthClient(c, returnTo)
   const csrfToken = issueCsrfToken(c)
   const notice = c.req.query("notice")
+  const rawHint = c.req.query("hint")
+  const hint = rawHint !== undefined && rawHint !== "" ? rawHint : undefined
   const error = notice === "account_deleted" ? "Your account has been deleted." : undefined
   return c.html(
     renderLoginPage({
@@ -88,6 +91,8 @@ login.get("/login", async (c) => {
       csrfToken,
       returnTo,
       reauthenticating,
+      ...(hint !== undefined ? { hint } : {}),
+      ...(reauthenticating && oauthClient !== null ? { clientName: oauthClient.name } : {}),
       ...(error === undefined ? {} : { error }),
     }),
   )
@@ -99,8 +104,17 @@ login.post("/login", async (c) => {
   const displayIdentifier = identifier.length <= EMAIL_INPUT_MAX_LENGTH ? identifier : ""
   const password = readFormField(form, "password")
   const returnTo = safeLocalPath(readFormField(form, "return_to") || null)
-  await allowRegisteredOAuthCallback(c, returnTo)
+  const oauthClient = await resolveRegisteredOAuthClient(c, returnTo)
   const reauthenticating = readFormField(form, "reauth") === "1"
+  const rawHint = readFormField(form, "hint")
+  const hint = rawHint === "" ? undefined : rawHint
+  const submittedClientName = readFormField(form, "client_name")
+  const clientName =
+    oauthClient?.name ?? (submittedClientName === "" ? undefined : submittedClientName)
+  const feedbackContext = {
+    ...(hint === undefined ? {} : { hint }),
+    ...(reauthenticating && clientName !== undefined ? { clientName } : {}),
+  }
   const requestId = c.get("requestId")
   const ipHash = await clientIpHash(c)
 
@@ -113,6 +127,7 @@ login.post("/login", async (c) => {
         email: displayIdentifier,
         error: GENERIC_LOGIN_ERROR,
         reauthenticating,
+        ...feedbackContext,
       }),
       403,
     )
@@ -143,6 +158,7 @@ login.post("/login", async (c) => {
         email: displayIdentifier,
         error: "Too many attempts. Please wait and try again.",
         reauthenticating,
+        ...feedbackContext,
       }),
       429,
     )
@@ -184,6 +200,7 @@ login.post("/login", async (c) => {
         email: displayIdentifier,
         error: "Too many attempts. Please wait and try again.",
         reauthenticating,
+        ...feedbackContext,
       }),
       429,
     )
@@ -209,6 +226,7 @@ login.post("/login", async (c) => {
         email: displayIdentifier,
         error: GENERIC_LOGIN_ERROR,
         reauthenticating,
+        ...feedbackContext,
       }),
       401,
     )
@@ -226,6 +244,9 @@ login.post("/login", async (c) => {
     ipHash,
     userAgentHash: await userAgentHash(c),
   })
+  if (reauthenticating) {
+    await replaceReauthenticatedSession(c.env, c.get("session"), session, user.id)
+  }
   setSessionCookie(c, session.token, SESSION_TTL.default)
   await recordAudit(c.env, {
     type: "user.login.password.success",
@@ -302,13 +323,21 @@ async function endSession(
   c.header("cache-control", "no-store")
   if (validateOAuthParameterSet(params) !== null) {
     return c.html(
-      renderErrorPage(c.get("i18n"), "The logout request contains invalid parameters."),
+      renderErrorPage(
+        c.get("i18n"),
+        "The logout request contains invalid parameters.",
+        "/",
+        "Back to your account",
+      ),
       400,
     )
   }
   const association = await resolveLogoutClient(c.env, params)
   if (association.kind === "error") {
-    return c.html(renderErrorPage(c.get("i18n"), association.description), 400)
+    return c.html(
+      renderErrorPage(c.get("i18n"), association.description, "/", "Back to your account"),
+      400,
+    )
   }
 
   const postLogoutRedirectUri = params.get("post_logout_redirect_uri")
@@ -318,7 +347,15 @@ async function endSession(
       !association.client.postLogoutRedirectUris.includes(postLogoutRedirectUri) ||
       !isSafePostLogoutRedirectUri(postLogoutRedirectUri)
     ) {
-      return c.html(renderErrorPage(c.get("i18n"), "Invalid post_logout_redirect_uri."), 400)
+      return c.html(
+        renderErrorPage(
+          c.get("i18n"),
+          "Invalid post_logout_redirect_uri.",
+          "/",
+          "Back to your account",
+        ),
+        400,
+      )
     }
   }
 
@@ -330,7 +367,12 @@ async function endSession(
     association.hintedSubject !== user.id
   ) {
     return c.html(
-      renderErrorPage(c.get("i18n"), "id_token_hint does not belong to this session."),
+      renderErrorPage(
+        c.get("i18n"),
+        "id_token_hint does not belong to this session.",
+        "/",
+        "Back to your account",
+      ),
       400,
     )
   }

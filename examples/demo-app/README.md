@@ -18,6 +18,9 @@ examples/demo-app/
 The demo client (`demo_local`) is a **public** client with PKCE, redirecting to
 `http://localhost:8788/callback`. It is only ever registered in the **local** D1
 used by `wrangler dev`, never in production.
+The seed also assigns `demo_local` to the seeded `employees` permission group.
+The demo administrator is an `employees` member, so this explicit rule exercises
+the same default-deny authorization boundary as every other user application.
 
 ## Prerequisites
 

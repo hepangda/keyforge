@@ -58,6 +58,7 @@ export type AuditLogQuery = {
   readonly clientId?: string
   readonly actorUserId?: string
   readonly actorClientId?: string
+  readonly resourceUri?: string
   readonly eventType?: string
 }
 
@@ -79,6 +80,10 @@ export async function listAuditLogs(env: Env, query: AuditLogQuery): Promise<Aud
   if (query.actorClientId !== undefined) {
     clauses.push("actor_client_id = ?")
     binds.push(query.actorClientId)
+  }
+  if (query.resourceUri !== undefined) {
+    clauses.push("resource_uri = ?")
+    binds.push(query.resourceUri)
   }
   if (query.eventType !== undefined) {
     clauses.push("event_type = ?")

@@ -1,11 +1,10 @@
-import { getUserGroupNames } from "../../db/queries/users"
 import { OAuthError } from "../../security/errors"
 import { issueUserAccessToken } from "../../tokens/access-token"
 import { issueIdToken } from "../../tokens/id-token"
 import { issueRefreshToken } from "../../tokens/refresh-token"
 import type { OAuthClient, User } from "../../types/domain"
 import { parseScopeString } from "../scopes"
-import { userMayReceiveScopes } from "../user-scope-policy"
+import { evaluateUserTokenAccess } from "../user-token-policy"
 import type { TokenResponse } from "./response"
 
 export type IssueUserTokensInput = {
@@ -29,10 +28,16 @@ export async function issueUserTokens(
   input: IssueUserTokensInput,
 ): Promise<TokenResponse> {
   const scopes = parseScopeString(input.scope)
-  if (!(await userMayReceiveScopes(env, input.user.id, scopes))) {
+  const access = await evaluateUserTokenAccess(env, {
+    userId: input.user.id,
+    clientId: input.client.clientId,
+    resourceUri: input.resource,
+    scopes,
+  })
+  if (!access.allowed) {
     throw new OAuthError("invalid_grant", {
-      description: "The account is not permitted to receive the requested scopes",
-      detail: "current group policy denies one or more privileged scopes",
+      description: "This account is not permitted to access this application or resource.",
+      detail: `user token policy denied ${access.reason}`,
     })
   }
   const accessToken = await issueUserAccessToken(env, {
@@ -50,7 +55,6 @@ export async function issueUserTokens(
   if (scopes.includes("openid")) {
     response.id_token = await issueIdToken(env, {
       user: input.user,
-      groups: await getUserGroupNames(env, input.user.id),
       clientId: input.client.clientId,
       scopes,
       authTime: input.authTime,

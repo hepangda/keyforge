@@ -156,7 +156,7 @@ Generates and returns a one-time 15-minute sign-in URL for an existing, enabled
 user. The URL is returned only in this response and is never generated for an
 unknown or disabled account.
 
-## Groups
+## Permission groups
 
 ### `GET /admin/groups`
 
@@ -172,6 +172,32 @@ A duplicate name returns `409`.
 
 Returns one group including its current member count.
 
+### `GET /admin/groups/:id/access`
+
+Returns the permission group's deterministic, sorted target assignments:
+
+```json
+{
+  "client_ids": ["pangda_app"],
+  "resource_uris": ["https://api.pangda.app"]
+}
+```
+
+### `PUT /admin/groups/:id/access`
+
+Atomically replaces both target sets using the same shape as the `GET`
+response. Both arrays are required and accept at most 100 entries each. Client
+targets must be existing `application` or `device` clients; service clients and
+unknown clients or resources return `400 { "error": "invalid_access_target" }`
+without changing either set. An unknown group returns `404`.
+
+User-token authorization is default-deny. A current user membership must match
+at least one group assigned to the application and at least one group assigned
+to the API; different memberships may satisfy those independent checks. Empty
+sets grant no access. Renaming a group preserves its assignments because rules
+reference its stable ID. The protected `admins` group can manage these target
+assignments even though its name cannot change.
+
 ### `PATCH /admin/groups/:id`
 
 Updates `name` and/or `description`. The built-in `admins` group cannot be
@@ -179,8 +205,11 @@ renamed, and group names remain globally unique.
 
 ### `DELETE /admin/groups/:id`
 
-Deletes a non-protected group and cascades its memberships. The built-in
-`admins` group cannot be deleted.
+Deletes a non-protected permission group and cascades its memberships plus its
+application and API assignments. Deleting a group, client, or resource cannot
+grant access: cascaded assignments leave the affected target default-denied
+when no matching assignment remains. The built-in `admins` group cannot be
+deleted.
 
 ## OAuth clients
 
@@ -266,6 +295,15 @@ Lists protected resource identifiers and their scope policies.
 
 Updates `name`, `allowed_scopes`, or `enabled`. URL-encode a resource URI when
 placing it in the path.
+
+### `DELETE /admin/resources/:id`
+
+Deletes a registered API resource; URL-encode its resource URI in the path.
+Deletion cascades permission-group assignments, removes the URI from every
+client's allowed resources, clears matching default resources and consents,
+revokes matching refresh/grant records, and denies pending or approved device
+requests. Already-issued self-contained access tokens remain valid until their
+normal expiry. An unknown resource returns `404`.
 
 ## Audit and device sessions
 

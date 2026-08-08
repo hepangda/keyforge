@@ -199,7 +199,15 @@ function acceptsHtml(c: { req: { header(name: string): string | undefined } }): 
 
 app.notFound((c) =>
   acceptsHtml(c)
-    ? c.html(renderErrorPage(c.get("i18n"), "The requested page was not found."), 404)
+    ? c.html(
+        renderErrorPage(
+          c.get("i18n"),
+          "The requested page was not found.",
+          "/",
+          "Back to your account",
+        ),
+        404,
+      )
     : c.json({ error: "not_found" }, 404),
 )
 
@@ -236,13 +244,24 @@ app.onError(async (err, c) => {
   if (err instanceof AppError) {
     console.error("error.app", requestId, err.status, err.detail ?? err.message)
     if (acceptsHtml(c)) {
-      return c.html(renderErrorPage(c.get("i18n"), err.publicMessage), err.status as 400)
+      return c.html(
+        renderErrorPage(c.get("i18n"), err.publicMessage, "/", "Back to your account"),
+        err.status as 400,
+      )
     }
     return Response.json({ error: err.publicMessage }, { status: err.status })
   }
   console.error("error.unhandled", requestId, err)
   if (acceptsHtml(c)) {
-    return c.html(renderErrorPage(c.get("i18n"), "Something went wrong. Please try again."), 500)
+    return c.html(
+      renderErrorPage(
+        c.get("i18n"),
+        "Something went wrong. Please try again.",
+        "/",
+        "Back to your account",
+      ),
+      500,
+    )
   }
   return Response.json(
     { error: "server_error", error_description: "Internal server error" },

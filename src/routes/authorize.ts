@@ -7,7 +7,7 @@ import { consentCoversScopes } from "../oauth/consent"
 import { buildRedirectUrl, formActionSource } from "../oauth/redirect"
 import { validateOAuthParameterSet } from "../oauth/request-limits"
 import { serializeScopes } from "../oauth/scopes"
-import { userMayReceiveScopes } from "../oauth/user-scope-policy"
+import { evaluateUserTokenAccess } from "../oauth/user-token-policy"
 import { recordAudit } from "../security/audit"
 import { issueCsrfToken, verifyCsrfToken } from "../security/csrf"
 import { consumeReauthContinuation } from "../security/reauth-continuation"
@@ -48,6 +48,8 @@ authorize.get("/oauth/authorize", async (c) => {
       renderErrorPage(
         c.get("i18n"),
         "The authorization request contains invalid or oversized parameters.",
+        "/",
+        "Back to your account",
       ),
       400,
     )
@@ -58,25 +60,43 @@ authorize.get("/oauth/authorize", async (c) => {
 })
 
 authorize.post("/oauth/authorize/decision", async (c) => {
+  const form = await c.req.raw.formData()
+  const query = new URLSearchParams()
+  for (const key of AUTHORIZE_PARAM_KEYS) {
+    if (form.has(key)) query.set(key, readFormField(form, key))
+  }
+  if (validateOAuthParameterSet(query) !== null) {
+    return c.html(
+      renderErrorPage(
+        c.get("i18n"),
+        "The authorization request contains invalid or oversized parameters.",
+        "/",
+        "Back to your account",
+      ),
+      400,
+    )
+  }
+  const hiddenFields = collectHiddenFields(query)
+  const authorizeReturnTo = authorizationReturnTo(hiddenFields)
   const user = c.get("user")
   const session = c.get("session")
   if (user === undefined || session === undefined) {
-    return c.redirect("/login")
+    return c.redirect(`/login?return_to=${encodeURIComponent(authorizeReturnTo)}`)
   }
-  const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
-    return c.html(renderErrorPage(c.get("i18n"), "Your session expired. Please try again."), 403)
-  }
-  const query = new URLSearchParams()
-  for (const key of AUTHORIZE_PARAM_KEYS) {
-    const value = readFormField(form, key)
-    if (value !== "") {
-      query.set(key, value)
-    }
+    return c.html(
+      renderErrorPage(
+        c.get("i18n"),
+        "Your session expired. Please try again.",
+        authorizeReturnTo,
+        "Back",
+      ),
+      403,
+    )
   }
   const validation = await validateAuthorizeRequest(c.env, query)
   if (validation.kind !== "ok") {
-    return dispatchValidation(c, validation, {})
+    return dispatchValidation(c, validation, hiddenFields)
   }
   const params = validation.params
   const sessionTooOld =
@@ -85,12 +105,19 @@ authorize.post("/oauth/authorize/decision", async (c) => {
   if (params.prompts.includes("login") || sessionTooOld) {
     return interactionError(c, params, "login_required", "Fresh user authentication is required")
   }
-  if (!(await userMayReceiveScopes(c.env, user.id, params.scopes))) {
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: params.clientId,
+    resourceUri: params.resource,
+    scopes: params.scopes,
+  })
+  if (!access.allowed) {
     return interactionError(
       c,
       params,
       "access_denied",
-      "This account is not permitted to grant the requested privileged scopes",
+      "This account is not permitted to access this application or resource.",
+      `user token policy denied ${access.reason}`,
     )
   }
   if (params.prompts.includes("none")) {
@@ -127,7 +154,10 @@ async function dispatchValidation(
           detail: validation.description,
         })
       }
-      return c.html(renderErrorPage(c.get("i18n"), validation.description), 400)
+      return c.html(
+        renderErrorPage(c.get("i18n"), validation.description, "/", "Back to your account"),
+        400,
+      )
     }
     case "error_redirect":
       return errorRedirect(c, validation)
@@ -178,12 +208,19 @@ async function handleAuthorized(
     }
     return redirectToLogin(c, true)
   }
-  if (!(await userMayReceiveScopes(c.env, user.id, params.scopes))) {
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: params.clientId,
+    resourceUri: params.resource,
+    scopes: params.scopes,
+  })
+  if (!access.allowed) {
     return interactionError(
       c,
       params,
       "access_denied",
-      "This account is not permitted to grant the requested privileged scopes",
+      "This account is not permitted to access this application or resource.",
+      `user token policy denied ${access.reason}`,
     )
   }
   await recordAudit(c.env, {
@@ -243,6 +280,7 @@ function redirectToLogin(c: Context<AppBindings>, forceReauthentication: boolean
   const loginParams = new URLSearchParams({ return_to: returnTo })
   if (forceReauthentication) {
     loginParams.set("reauth", "1")
+    loginParams.set("hint", "oauth_request")
   }
   return c.redirect(`/login?${loginParams.toString()}`)
 }
@@ -252,6 +290,7 @@ async function interactionError(
   params: AuthorizeParams,
   error: "login_required" | "consent_required" | "access_denied",
   description: string,
+  internalDetail?: string,
 ): Promise<Response> {
   await recordAudit(c.env, {
     type: "oauth.authorize.denied",
@@ -261,7 +300,7 @@ async function interactionError(
     scope: serializeScopes(params.scopes),
     requestId: c.get("requestId"),
     success: false,
-    detail: `${error}: ${description}`,
+    detail: `${error}: ${internalDetail ?? description}`,
   })
   return c.redirect(
     buildRedirectUrl(

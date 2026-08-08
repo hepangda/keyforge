@@ -1,5 +1,5 @@
 import type { I18n, MessageValues } from "../i18n"
-import { brandHeader, escapeHtml, htmlLayout, icons } from "./layout"
+import { brandHeader, continuationHref, escapeHtml, htmlLayout, icons } from "./layout"
 
 function alert(i18n: I18n, message?: string): string {
   return message === undefined
@@ -7,8 +7,16 @@ function alert(i18n: I18n, message?: string): string {
     : `<div class="alert" role="alert">${icons.alert}<div>${escapeHtml(i18n.t(message))}</div></div>`
 }
 
-export function renderPasswordResetRequest(i18n: I18n, csrfToken: string, error?: string): string {
-  const body = `<main class="card">
+export function renderPasswordResetRequest(
+  i18n: I18n,
+  csrfToken: string,
+  returnTo: string,
+  reauthenticating: boolean,
+  error?: string,
+  email = "",
+  hint?: string,
+): string {
+  const body = `<div class="card-page"><a class="btn btn--ghost btn--sm btn--auto back-link" href="${escapeHtml(continuationHref("/login", returnTo, reauthenticating, hint))}">${escapeHtml(i18n.t("Back to sign in"))}</a><main class="card">
   <div class="head">
     ${brandHeader()}
     <h1>${escapeHtml(i18n.t("Reset your password"))}</h1>
@@ -17,18 +25,26 @@ export function renderPasswordResetRequest(i18n: I18n, csrfToken: string, error?
   ${alert(i18n, error)}
   <form method="post" action="/password/forgot">
     <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
+    <input type="hidden" name="return_to" value="${escapeHtml(returnTo)}">
+    ${reauthenticating ? '<input type="hidden" name="reauth" value="1">' : ""}
+    ${hint === undefined ? "" : `<input type="hidden" name="hint" value="${escapeHtml(hint)}">`}
     <label class="field">
       <span class="field__label">${escapeHtml(i18n.t("Email"))}</span>
-      <input class="input" type="email" name="email" autocomplete="username" required autofocus>
+      <input class="input" type="email" name="email" autocomplete="username" required autofocus value="${escapeHtml(email)}">
     </label>
     <button class="btn btn--primary" type="submit">${escapeHtml(i18n.t("Send reset link"))}</button>
   </form>
-  <p class="foot foot--split"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Back to sign in"))}</a></p>
-</main>`
+</main></div>`
   return htmlLayout(i18n, i18n.t("Reset password — KeyForge"), body)
 }
 
-export function renderPasswordResetSent(i18n: I18n, email: string): string {
+export function renderPasswordResetSent(
+  i18n: I18n,
+  email: string,
+  returnTo: string,
+  reauthenticating: boolean,
+  hint?: string,
+): string {
   const body = `<main class="card">
   <div class="head">
     ${brandHeader()}
@@ -37,7 +53,8 @@ export function renderPasswordResetSent(i18n: I18n, email: string): string {
     <p class="lead">${escapeHtml(i18n.t("If an account exists for {email}, a reset link is on its way.", { email }))}</p>
   </div>
   <div class="callout">${escapeHtml(i18n.t("The link expires in one hour and works only once."))}</div>
-  <p class="foot"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Return to sign in"))}</a></p>
+  <p class="form-hint">${escapeHtml(i18n.t("Check your spam folder if the email doesn't arrive. You can request another link after it expires."))}</p>
+  <p class="foot"><a class="link-quiet" href="${escapeHtml(continuationHref("/login", returnTo, reauthenticating, hint))}">${escapeHtml(i18n.t("Return to sign in"))}</a></p>
 </main>`
   return htmlLayout(i18n, i18n.t("Check your email — KeyForge"), body)
 }
@@ -83,6 +100,8 @@ export function renderRecoveryResult(
   title: string,
   message: string,
   success: boolean,
+  actionHref: string,
+  actionLabel: string,
 ): string {
   const mark = success ? icons.check : icons.cross
   const muted = success ? "" : " result-mark--muted"
@@ -93,7 +112,7 @@ export function renderRecoveryResult(
     <h1>${escapeHtml(i18n.t(title))}</h1>
     <p class="lead">${escapeHtml(i18n.t(message))}</p>
   </div>
-  <p class="foot"><a class="link-quiet" href="/login">${escapeHtml(i18n.t("Continue to sign in"))}</a></p>
+  <p class="foot"><a class="link-quiet" href="${escapeHtml(actionHref)}">${escapeHtml(i18n.t(actionLabel))}</a></p>
 </main>`
   return htmlLayout(i18n, `${i18n.t(title)} — KeyForge`, body)
 }

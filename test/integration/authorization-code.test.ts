@@ -10,7 +10,7 @@ const ISSUER = "https://auth.pangda.app"
 const CLIENT = "pangda_app"
 const REDIRECT = "https://app.pangda.app/auth/callback"
 const RESOURCE = "https://api.pangda.app"
-const SCOPE = "openid profile email groups offline_access api.read"
+const SCOPE = "openid profile email offline_access api.read"
 // RFC 7636 Appendix B reference PKCE pair.
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
@@ -26,14 +26,25 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM authorization_grants"),
     env.DB.prepare("DELETE FROM user_groups"),
     env.DB.prepare("DELETE FROM users"),
+    env.DB.prepare("DELETE FROM groups WHERE id LIKE 'grp_test_%'"),
   ])
   await env.DB.prepare(
     `UPDATE oauth_resources
-     SET allowed_scopes_json = '["openid","profile","email","groups","offline_access","api.read","api.write"]'
+     SET allowed_scopes_json = '["openid","profile","email","offline_access","api.read","api.write"]'
      WHERE resource_uri = ?`,
   )
     .bind(RESOURCE)
     .run()
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO oauth_client_permission_groups (client_id, group_id, created_at)
+       VALUES (?, 'grp_seed_employees', unixepoch())`,
+    ).bind(CLIENT),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO oauth_resource_permission_groups (resource_uri, group_id, created_at)
+       VALUES (?, 'grp_seed_employees', unixepoch())`,
+    ).bind(RESOURCE),
+  ])
   const user = await createUser(env, {
     email: "alice@pangda.app",
     alias: "alice",
@@ -143,7 +154,7 @@ describe("authorization_code + PKCE flow", () => {
     expect(id["nonce"]).toBe("nonce-abc")
     expect(id["email"]).toBe("alice@pangda.app")
     expect(id["preferred_username"]).toBe("alice")
-    expect(id["groups"]).toContain("employees")
+    expect(id).not.toHaveProperty("groups")
 
     const { payload: at } = await jwtVerify(body.access_token, jwks, {
       issuer: ISSUER,
@@ -153,6 +164,7 @@ describe("authorization_code + PKCE flow", () => {
     expect(at["azp"]).toBe(CLIENT)
     expect(at["client_id"]).toBe(CLIENT)
     expect(at["token_use"]).toBe("access_token")
+    expect(at).not.toHaveProperty("groups")
   })
 
   it("consumes an authorization code exactly once", async () => {
@@ -171,6 +183,105 @@ describe("authorization_code + PKCE flow", () => {
 
     // A failed binding check must not burn a legitimate one-time code.
     expect((await exchange(code)).status).toBe(200)
+  })
+
+  it("rechecks membership after authorization code creation", async () => {
+    const code = await obtainCode()
+    await env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(userId).run()
+
+    const res = await exchange(code)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({
+      error: "invalid_grant",
+      error_description: "This account is not permitted to access this application or resource.",
+    })
+  })
+
+  it("denies when no current membership matches the application", async () => {
+    await env.DB.prepare(
+      "DELETE FROM oauth_client_permission_groups WHERE client_id = ? AND group_id = 'grp_seed_employees'",
+    )
+      .bind(CLIENT)
+      .run()
+
+    const res = await authedFetch(authorizeUrl({ state: "policy-state" }))
+    const redirect = new URL(res.headers.get("location") ?? "")
+    expect(redirect.searchParams.get("error")).toBe("access_denied")
+    expect(redirect.searchParams.get("error_description")).toBe(
+      "This account is not permitted to access this application or resource.",
+    )
+    expect(redirect.searchParams.get("state")).toBe("policy-state")
+  })
+
+  it("denies when membership matches the application but not the API", async () => {
+    await env.DB.prepare(
+      "DELETE FROM oauth_resource_permission_groups WHERE resource_uri = ? AND group_id = 'grp_seed_employees'",
+    )
+      .bind(RESOURCE)
+      .run()
+
+    const res = await authedFetch(authorizeUrl())
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("error")).toBe(
+      "access_denied",
+    )
+  })
+
+  it("allows different memberships to satisfy application and API assignments", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO groups (id, name, description, created_at) VALUES ('grp_test_resource', 'test-resource', NULL, unixepoch())",
+      ),
+      env.DB.prepare(
+        "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_test_resource', unixepoch())",
+      ).bind(userId),
+      env.DB.prepare(
+        "DELETE FROM oauth_resource_permission_groups WHERE resource_uri = ? AND group_id = 'grp_seed_employees'",
+      ).bind(RESOURCE),
+      env.DB.prepare(
+        "INSERT INTO oauth_resource_permission_groups (resource_uri, group_id, created_at) VALUES (?, 'grp_test_resource', unixepoch())",
+      ).bind(RESOURCE),
+    ])
+
+    expect((await exchange(await obtainCode())).status).toBe(200)
+  })
+
+  it("requires admins membership in addition to target assignments for admin scopes", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO groups (id, name, description, created_at) VALUES ('grp_test_admin_target', 'test-admin-target', NULL, unixepoch())",
+      ),
+      env.DB.prepare(
+        "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_test_admin_target', unixepoch())",
+      ).bind(userId),
+      env.DB.prepare(
+        "INSERT INTO oauth_client_permission_groups (client_id, group_id, created_at) VALUES ('pangda_admin', 'grp_test_admin_target', unixepoch())",
+      ),
+      env.DB.prepare(
+        "INSERT INTO oauth_resource_permission_groups (resource_uri, group_id, created_at) VALUES ('https://admin.pangda.app', 'grp_test_admin_target', unixepoch())",
+      ),
+    ])
+    const adminUrl = new URL(`${ISSUER}/oauth/authorize`)
+    adminUrl.search = new URLSearchParams({
+      client_id: "pangda_admin",
+      redirect_uri: "https://admin.pangda.app/auth/callback",
+      response_type: "code",
+      scope: "openid admin.read",
+      code_challenge: CHALLENGE,
+      code_challenge_method: "S256",
+      resource: "https://admin.pangda.app",
+    }).toString()
+
+    const denied = await authedFetch(adminUrl.toString())
+    expect(new URL(denied.headers.get("location") ?? "").searchParams.get("error")).toBe(
+      "access_denied",
+    )
+
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_admins', unixepoch())",
+    )
+      .bind(userId)
+      .run()
+    expect((await authedFetch(adminUrl.toString())).status).toBe(200)
   })
 
   it("renders an error page for an unregistered redirect_uri", async () => {
@@ -245,6 +356,14 @@ describe("authorization_code + PKCE flow", () => {
     expect(res.status).toBe(302)
     const redirect = new URL(res.headers.get("location") ?? "")
     expect(redirect.searchParams.get("error")).toBe("invalid_scope")
+  })
+
+  it("rejects the retired groups scope", async () => {
+    const res = await authedFetch(authorizeUrl({ scope: "openid groups" }))
+    expect(res.status).toBe(302)
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("error")).toBe(
+      "invalid_scope",
+    )
   })
 
   it("does not reuse consent granted for a different resource", async () => {

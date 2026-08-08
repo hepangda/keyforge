@@ -76,13 +76,34 @@ describe("passkey registration ceremony", () => {
     await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE user_id = ?").bind(userId).run()
     const res = await SELF.fetch(`${ISSUER}/webauthn/register/options`, {
       method: "POST",
-      headers: { cookie: csrf.cookie, "x-keyforge-csrf": csrf.token },
+      headers: {
+        cookie: csrf.cookie,
+        "x-keyforge-csrf": csrf.token,
+        "x-keyforge-return-to": "/?section=login-methods&flow=add-passkey",
+      },
     })
     expect(res.status).toBe(403)
     const body = await res.json<{ error: string; reauthenticate_url: string }>()
     expect(body.error).toBe("recent_authentication_required")
     expect(body.reauthenticate_url).toBe(
-      "/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey%26verified%3D1",
+      "/login?reauth=1&hint=add_passkey&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey",
+    )
+  })
+
+  it("rejects unsafe passkey return targets", async () => {
+    const csrf = await authenticatedCsrf()
+    await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE user_id = ?").bind(userId).run()
+    const response = await SELF.fetch(`${ISSUER}/webauthn/register/options`, {
+      method: "POST",
+      headers: {
+        cookie: csrf.cookie,
+        "x-keyforge-csrf": csrf.token,
+        "x-keyforge-return-to": "https://evil.example/flow",
+      },
+    })
+    expect(response.status).toBe(403)
+    expect((await response.json<{ reauthenticate_url: string }>()).reauthenticate_url).toBe(
+      "/login?reauth=1&hint=add_passkey&return_to=%2F",
     )
   })
 

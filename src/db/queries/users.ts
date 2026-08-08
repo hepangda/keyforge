@@ -182,6 +182,28 @@ export async function listUsers(env: Env, limit: number, offset: number): Promis
     .all()
   return result.results.map(mapUser)
 }
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&")
+}
+
+export async function searchUsers(
+  env: Env,
+  query: string,
+  limit: number,
+  offset: number,
+): Promise<User[]> {
+  const pattern = `%${escapeLikePattern(query.toLowerCase())}%`
+  const result = await env.DB.prepare(
+    `SELECT ${USER_COLUMNS} FROM users
+     WHERE id = ?
+        OR lower(email) LIKE ? ESCAPE '\\'
+        OR lower(alias) LIKE ? ESCAPE '\\'
+     ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  )
+    .bind(query, pattern, pattern, limit, offset)
+    .all()
+  return result.results.map(mapUser)
+}
 
 export async function countUsers(env: Env): Promise<number> {
   const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first()
@@ -566,7 +588,7 @@ export async function deleteGroup(env: Env, id: string): Promise<GroupMutationRe
   const result = await env.DB.prepare("DELETE FROM groups WHERE id = ? AND name != 'admins'")
     .bind(id)
     .run()
-  return result.meta.changes === 1 ? "deleted" : "not_found"
+  return result.meta.changes >= 1 ? "deleted" : "not_found"
 }
 
 export async function setUserGroups(

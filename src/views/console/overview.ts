@@ -1,6 +1,6 @@
 import type { AuditLogEntry } from "../../db/queries/audit"
 import { escapeHtml } from "../layout"
-import { dataTable, fmtDateTime, statusBadge } from "./components"
+import { consoleEntityLink, dataTable, fmtDateTime } from "./components"
 import { type ConsoleChrome, consoleShell } from "./layout"
 
 export type ConsoleStats = {
@@ -8,6 +8,7 @@ export type ConsoleStats = {
   readonly clients: number
   readonly resources: number
   readonly devices: number
+  readonly enabledResources: number
 }
 
 const TILES: readonly {
@@ -16,8 +17,8 @@ const TILES: readonly {
   readonly href: string
 }[] = [
   { key: "users", label: "Users", href: "/console/users" },
-  { key: "clients", label: "OAuth clients", href: "/console/clients" },
-  { key: "resources", label: "Resources", href: "/console/resources" },
+  { key: "clients", label: "Applications", href: "/console/clients" },
+  { key: "resources", label: "APIs", href: "/console/resources" },
   { key: "devices", label: "Device sessions", href: "/console/devices" },
 ]
 
@@ -29,25 +30,25 @@ export function renderOverview(
   const { i18n } = chrome
   const setup = [
     {
+      done: stats.enabledResources > 0,
+      title: "Create an API",
+      description: "Register an enabled audience and the scopes applications may request.",
+      href: "/console/resources/new",
+      action: "Create API",
+    },
+    {
       done: stats.clients > 0,
-      title: "Register an application",
+      title: "Create an application",
       description: "Choose an OAuth flow and configure callback URLs.",
       href: "/console/clients/new",
       action: "Create application",
     },
     {
       done: stats.users > 1,
-      title: "Provision your first user",
-      description: "Create a username and choose password, invitation, and group access.",
+      title: "Add a user",
+      description: "Create a username and choose invitation or initial-password setup.",
       href: "/console/users/new",
       action: "Add user",
-    },
-    {
-      done: stats.resources > 0,
-      title: "Define an API",
-      description: "Register an audience and the scopes applications may request.",
-      href: "/console/resources/new",
-      action: "Create API",
     },
     {
       done: recent.length > 0,
@@ -74,13 +75,18 @@ export function renderOverview(
   const rows = recent.map((entry) => [
     `<span class="mono">${escapeHtml(fmtDateTime(i18n, entry.createdAt))}</span>`,
     `<span class="mono">${escapeHtml(entry.eventType)}</span>`,
-    entry.success === null ? "—" : statusBadge(i18n, entry.success, "ok", "fail"),
     entry.actorUserId !== null
-      ? `<span class="mono">${escapeHtml(entry.actorUserId)}</span>`
+      ? consoleEntityLink("user", entry.actorUserId)
       : entry.actorClientId !== null
-        ? `<span class="mono">${escapeHtml(entry.actorClientId)}</span>`
+        ? consoleEntityLink("client", entry.actorClientId)
         : "—",
-    entry.userId === null ? "—" : `<span class="mono">${escapeHtml(entry.userId)}</span>`,
+    entry.userId !== null
+      ? consoleEntityLink("user", entry.userId)
+      : entry.clientId !== null
+        ? consoleEntityLink("client", entry.clientId)
+        : entry.resourceUri !== null
+          ? consoleEntityLink("resource", entry.resourceUri)
+          : "—",
   ])
   const content = `<section class="setup-card">
     <div class="setup-card__intro"><h2>${escapeHtml(i18n.t(completed === setup.length ? "Your workspace is ready" : "Get KeyForge ready"))}</h2><p>${escapeHtml(i18n.t(completed === setup.length ? "Core configuration is in place. Revisit any step when your integration changes." : "Follow these steps to move from a new tenant to a working sign-in flow."))}</p><div class="setup-progress" role="progressbar" aria-label="${escapeHtml(i18n.t("Setup progress"))}" aria-valuemin="0" aria-valuemax="${setup.length}" aria-valuenow="${completed}"><span style="width:${(completed / setup.length) * 100}%"></span></div><span class="setup-card__count">${escapeHtml(i18n.t("{completed} of {total} steps complete", { completed, total: setup.length }))}</span></div>

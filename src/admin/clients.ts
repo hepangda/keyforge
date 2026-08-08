@@ -190,7 +190,7 @@ export function registerAdminClients(app: Hono<AppBindings>): void {
       return c.json({ error: "not_found" }, 404)
     }
     await recordAudit(c.env, {
-      type: "admin.client.updated",
+      type: "admin.client.deleted",
       actorUserId: c.get("user")?.id ?? null,
       clientId: c.req.param("id"),
       requestId: c.get("requestId"),

@@ -21,30 +21,28 @@ const user: User = {
 const AVATAR_KEY = `${"a".repeat(43)}.png`
 
 describe("OIDC claim scope policy", () => {
-  it("releases the username with profile while withholding groups", () => {
-    const claims = buildUserClaims(ENV, user, ["employees"], ["openid", "profile"])
-    expect(claims.groups).toBeUndefined()
+  it("releases the username without exposing permission-group membership", () => {
+    const claims = buildUserClaims(ENV, user, ["openid", "profile"])
+    expect(claims).not.toHaveProperty("groups")
     expect(claims.preferred_username).toBe("claimsuser")
   })
 
-  it("releases groups only with the groups scope", () => {
-    const claims = buildUserClaims(ENV, user, ["employees"], ["openid", "groups"])
-    expect(claims.groups).toEqual(["employees"])
+  it("never emits groups even if a legacy scope reaches the claim builder", () => {
+    const claims = buildUserClaims(ENV, user, ["openid", "groups"])
+    expect(claims).not.toHaveProperty("groups")
     expect(claims.preferred_username).toBeUndefined()
   })
 
   it("omits picture when the account has neither an upload nor an external URL", () => {
-    const claims = buildUserClaims(ENV, user, [], ["openid", "profile"])
+    const claims = buildUserClaims(ENV, user, ["openid", "profile"])
     expect(claims.picture).toBeUndefined()
   })
 
   it("returns the external picture when no avatar was uploaded", () => {
-    const claims = buildUserClaims(
-      ENV,
-      { ...user, picture: "https://cdn.example.com/a.png" },
-      [],
-      ["openid", "profile"],
-    )
+    const claims = buildUserClaims(ENV, { ...user, picture: "https://cdn.example.com/a.png" }, [
+      "openid",
+      "profile",
+    ])
     expect(claims.picture).toBe("https://cdn.example.com/a.png")
   })
 
@@ -52,14 +50,13 @@ describe("OIDC claim scope policy", () => {
     const claims = buildUserClaims(
       ENV,
       { ...user, picture: "https://cdn.example.com/a.png", avatarKey: AVATAR_KEY },
-      [],
       ["openid", "profile"],
     )
     expect(claims.picture).toBe(`https://auth.pangda.app/avatars/${AVATAR_KEY}`)
   })
 
   it("withholds picture without the profile scope", () => {
-    const claims = buildUserClaims(ENV, { ...user, avatarKey: AVATAR_KEY }, [], ["openid", "email"])
+    const claims = buildUserClaims(ENV, { ...user, avatarKey: AVATAR_KEY }, ["openid", "email"])
     expect(claims.picture).toBeUndefined()
   })
 })

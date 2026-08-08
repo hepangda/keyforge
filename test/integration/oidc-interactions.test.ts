@@ -36,6 +36,11 @@ beforeEach(async () => {
     emailVerified: true,
   })
   await setUserPassword(env, user.id, PASSWORD)
+  await env.DB.prepare(
+    "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_employees', unixepoch())",
+  )
+    .bind(user.id)
+    .run()
   const session = await createSession(env, {
     userId: user.id,
     authMethod: "password",
@@ -116,7 +121,7 @@ function fetchWithToken(url: string, token: string): Promise<Response> {
 
 async function confirmEndSession(url: URL): Promise<Response> {
   const confirmation = await fetchWithSession(url.toString())
-  expect(confirmation.status).toBe(200)
+  expect(confirmation.status, await confirmation.clone().text()).toBe(200)
   expect(await confirmation.text()).toContain("Sign out and continue")
   expect(await getSessionByToken(env, sessionToken)).not.toBeNull()
 
@@ -219,6 +224,13 @@ describe("OIDC prompt and max_age", () => {
     const login = new URL(response.headers.get("location") ?? "", ISSUER)
     expect(login.pathname).toBe("/login")
     expect(login.searchParams.get("reauth")).toBe("1")
+    expect(login.searchParams.get("hint")).toBe("oauth_request")
+    const loginHtml = await (
+      await SELF.fetch(login, { headers: { cookie: `__Host-keyforge_session=${sessionToken}` } })
+    ).text()
+    expect(loginHtml).toContain("The requesting application requires a fresh sign-in.")
+    expect(loginHtml).toContain("Requested by")
+    expect(loginHtml).toContain("Pangda App")
     const returnTo = login.searchParams.get("return_to") ?? ""
     expect(new URL(returnTo, ISSUER).searchParams.get("prompt")).toBe("login")
 
@@ -306,7 +318,6 @@ describe("RP-Initiated Logout", () => {
   async function idToken(clientId = CLIENT): Promise<string> {
     return issueIdToken(env, {
       user,
-      groups: [],
       clientId,
       scopes: ["openid"],
       authTime: Math.floor(Date.now() / 1000),

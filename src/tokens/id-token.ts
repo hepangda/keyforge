@@ -6,7 +6,6 @@ import { signJwt } from "./jwt"
 
 export type IdTokenParams = {
   readonly user: User
-  readonly groups: readonly string[]
   readonly clientId: string
   readonly scopes: readonly string[]
   readonly authTime: number
@@ -19,7 +18,7 @@ export async function issueIdToken(env: Env, params: IdTokenParams): Promise<str
     sub: params.user.id,
     aud: params.clientId,
     auth_time: params.authTime,
-    ...buildUserClaims(env, params.user, params.groups, params.scopes),
+    ...buildUserClaims(env, params.user, params.scopes),
   }
   if (params.nonce !== null) {
     claims["nonce"] = params.nonce

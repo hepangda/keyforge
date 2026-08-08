@@ -12,6 +12,7 @@ import {
   setUserGroupsPreservingActiveAdmin,
   updateUser,
 } from "../../src/db/queries/users"
+import { evaluateUserTokenAccess } from "../../src/oauth/user-token-policy"
 import { issueRefreshToken } from "../../src/tokens/refresh-token"
 
 const ISSUER = "https://auth.pangda.app"
@@ -342,6 +343,147 @@ describe("admin users", () => {
   })
 })
 
+describe("admin permission-group access", () => {
+  it("round-trips sorted assignments and preserves them across rename", async () => {
+    const created = await req("POST", "/admin/groups", {
+      name: "test-access-roundtrip",
+      description: "Access round trip",
+    })
+    const group = await created.json<{ id: string }>()
+    expect(await (await req("GET", `/admin/groups/${group.id}/access`)).json()).toEqual({
+      client_ids: [],
+      resource_uris: [],
+    })
+
+    const updated = await req("PUT", `/admin/groups/${group.id}/access`, {
+      client_ids: ["pangda_cli", "pangda_app", "pangda_cli"],
+      resource_uris: ["https://app.pangda.app", "https://api.pangda.app"],
+    })
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toEqual({
+      client_ids: ["pangda_app", "pangda_cli"],
+      resource_uris: ["https://api.pangda.app", "https://app.pangda.app"],
+    })
+
+    expect(
+      (
+        await req("PATCH", `/admin/groups/${group.id}`, {
+          name: "test-access-renamed",
+        })
+      ).status,
+    ).toBe(200)
+    expect(await (await req("GET", `/admin/groups/${group.id}/access`)).json()).toEqual({
+      client_ids: ["pangda_app", "pangda_cli"],
+      resource_uris: ["https://api.pangda.app", "https://app.pangda.app"],
+    })
+  })
+
+  it("rejects invalid and oversized targets without changing either set", async () => {
+    const group = await (
+      await req("POST", "/admin/groups", { name: "test-access-validation" })
+    ).json<{ id: string }>()
+    const path = `/admin/groups/${group.id}/access`
+    const baseline = {
+      client_ids: ["pangda_app"],
+      resource_uris: ["https://api.pangda.app"],
+    }
+    expect((await req("PUT", path, baseline)).status).toBe(200)
+
+    expect((await req("GET", "/admin/groups/missing/access")).status).toBe(404)
+    expect((await req("PUT", "/admin/groups/missing/access", baseline)).status).toBe(404)
+    for (const invalid of [
+      { client_ids: ["missing"], resource_uris: baseline.resource_uris },
+      { client_ids: ["svc_internal_worker"], resource_uris: baseline.resource_uris },
+      { client_ids: baseline.client_ids, resource_uris: ["urn:test:missing"] },
+    ]) {
+      const response = await req("PUT", path, invalid)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({ error: "invalid_access_target" })
+      expect(await (await req("GET", path)).json()).toEqual(baseline)
+    }
+
+    const tooMany = Array.from({ length: 101 }, (_, index) => `missing-${index}`)
+    expect((await req("PUT", path, { client_ids: tooMany, resource_uris: [] })).status).toBe(400)
+    expect((await req("PUT", path, { client_ids: [], resource_uris: tooMany })).status).toBe(400)
+    expect(await (await req("GET", path)).json()).toEqual(baseline)
+  })
+
+  it("fails closed after group, client, and resource deletion cascades", async () => {
+    const group = await (await req("POST", "/admin/groups", { name: "test-access-cascade" })).json<{
+      id: string
+    }>()
+    const clientId = "test_access_cascade"
+    const resourceUri = "urn:test:access-cascade"
+    const clientInsertSql = `INSERT INTO oauth_clients
+       (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
+        allowed_scopes_json, allowed_grant_types_json, allowed_resources_json,
+        default_resource, require_pkce, enabled, created_at, updated_at)
+     VALUES (?, NULL, 'public', 'application', 'Cascade app', '[]', '["openid"]',
+             '["authorization_code"]', ?, ?, 1, 1, unixepoch(), unixepoch())`
+    const resourceInsertSql = `INSERT INTO oauth_resources
+       (resource_uri, name, allowed_scopes_json, enabled, created_at, updated_at)
+     VALUES (?, 'Cascade API', '["openid"]', 1, unixepoch(), unixepoch())`
+    await env.DB.batch([
+      env.DB.prepare(resourceInsertSql).bind(resourceUri),
+      env.DB.prepare(clientInsertSql).bind(clientId, JSON.stringify([resourceUri]), resourceUri),
+    ])
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, ?, unixepoch())",
+    )
+      .bind(regularUserId, group.id)
+      .run()
+    const path = `/admin/groups/${group.id}/access`
+    const assignment = { client_ids: [clientId], resource_uris: [resourceUri] }
+    expect((await req("PUT", path, assignment)).status).toBe(200)
+    expect(
+      await evaluateUserTokenAccess(env, {
+        userId: regularUserId,
+        clientId,
+        resourceUri,
+        scopes: ["openid"],
+      }),
+    ).toEqual({ allowed: true })
+
+    expect((await req("DELETE", `/admin/clients/${clientId}`)).status).toBe(200)
+    await env.DB.prepare(clientInsertSql)
+      .bind(clientId, JSON.stringify([resourceUri]), resourceUri)
+      .run()
+    expect(
+      await evaluateUserTokenAccess(env, {
+        userId: regularUserId,
+        clientId,
+        resourceUri,
+        scopes: ["openid"],
+      }),
+    ).toEqual({ allowed: false, reason: "application" })
+
+    expect((await req("PUT", path, assignment)).status).toBe(200)
+    await env.DB.prepare("DELETE FROM oauth_resources WHERE resource_uri = ?")
+      .bind(resourceUri)
+      .run()
+    await env.DB.prepare(resourceInsertSql).bind(resourceUri).run()
+    expect(
+      await evaluateUserTokenAccess(env, {
+        userId: regularUserId,
+        clientId,
+        resourceUri,
+        scopes: ["openid"],
+      }),
+    ).toEqual({ allowed: false, reason: "resource" })
+
+    expect((await req("PUT", path, assignment)).status).toBe(200)
+    expect((await req("DELETE", `/admin/groups/${group.id}`)).status).toBe(200)
+    expect(
+      await evaluateUserTokenAccess(env, {
+        userId: regularUserId,
+        clientId,
+        resourceUri,
+        scopes: ["openid"],
+      }),
+    ).toEqual({ allowed: false, reason: "application" })
+  })
+})
+
 describe("admin clients", () => {
   it("creates a confidential client whose secret works for client_credentials", async () => {
     const res = await req("POST", "/admin/clients", {
@@ -455,6 +597,112 @@ describe("admin resources", () => {
       enabled: false,
     })
     expect((await patched.json<{ name: string }>()).name).toBe("Widget v2")
+  })
+
+  it("deletes a resource and retires every stored authorization path", async () => {
+    const resourceUri = "urn:test:delete-resource"
+    const clientId = "test_resource_delete"
+    expect(
+      (
+        await req("POST", "/admin/resources", {
+          resource_uri: resourceUri,
+          name: "Delete Resource",
+          allowed_scopes: ["openid"],
+        })
+      ).status,
+    ).toBe(201)
+    await env.DB.prepare(
+      `INSERT INTO oauth_clients
+         (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
+          allowed_scopes_json, allowed_grant_types_json, allowed_resources_json,
+          default_resource, require_pkce, enabled, created_at, updated_at)
+       VALUES (?, NULL, 'public', 'application', 'Resource delete client', '[]',
+               '["openid"]', '["authorization_code","refresh_token"]', ?, ?, 1, 1,
+               unixepoch(), unixepoch())`,
+    )
+      .bind(clientId, JSON.stringify([resourceUri]), resourceUri)
+      .run()
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO oauth_resource_permission_groups (resource_uri, group_id, created_at)
+         VALUES (?, 'grp_seed_employees', unixepoch())`,
+      ).bind(resourceUri),
+      env.DB.prepare(
+        `INSERT INTO consents (id, user_id, client_id, scope, resource, created_at, updated_at)
+         VALUES ('con_test_resource_delete', ?, ?, 'openid', ?, unixepoch(), unixepoch())`,
+      ).bind(regularUserId, clientId, resourceUri),
+      env.DB.prepare(
+        `INSERT INTO authorization_grants
+           (id, user_id, client_id, session_id, scope, resource, grant_type, created_at)
+         VALUES ('grt_test_resource_delete', ?, ?, ?, 'openid', ?, 'authorization_code', unixepoch())`,
+      ).bind(regularUserId, clientId, regularSessionId, resourceUri),
+      env.DB.prepare(
+        `INSERT INTO device_authorization_sessions
+           (id, device_code_hash, user_code_hash, client_id, resource_uri, scope, status,
+            user_id, expires_at, approved_at, created_at)
+         VALUES ('dev_test_resource_delete', 'device-delete-hash', 'user-delete-hash', ?, ?,
+                 'openid', 'approved', ?, unixepoch() + 600, unixepoch(), unixepoch())`,
+      ).bind(clientId, resourceUri, regularUserId),
+    ])
+    const refresh = await issueRefreshToken(env, {
+      userId: regularUserId,
+      clientId,
+      sessionId: regularSessionId,
+      resource: resourceUri,
+      scope: "openid",
+      authTime: Math.floor(Date.now() / 1000),
+      rememberMe: false,
+    })
+
+    const deleted = await req("DELETE", `/admin/resources/${encodeURIComponent(resourceUri)}`)
+    expect(deleted.status).toBe(200)
+    expect(await deleted.json()).toEqual({ deleted: true })
+    expect(
+      (await req("DELETE", `/admin/resources/${encodeURIComponent(resourceUri)}`)).status,
+    ).toBe(404)
+
+    const client = await env.DB.prepare(
+      "SELECT allowed_resources_json, default_resource FROM oauth_clients WHERE client_id = ?",
+    )
+      .bind(clientId)
+      .first<{ allowed_resources_json: string; default_resource: string | null }>()
+    expect(JSON.parse(client?.allowed_resources_json ?? "null")).toEqual([])
+    expect(client?.default_resource).toBeNull()
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM oauth_resource_permission_groups WHERE resource_uri = ?",
+        )
+          .bind(resourceUri)
+          .first<{ count: number }>()
+      )?.count,
+    ).toBe(0)
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS count FROM consents WHERE resource = ?")
+          .bind(resourceUri)
+          .first<{ count: number }>()
+      )?.count,
+    ).toBe(0)
+    expect(
+      (
+        await env.DB.prepare("SELECT revoked_at FROM refresh_tokens WHERE id = ?")
+          .bind(refresh.familyId)
+          .first<{ revoked_at: number | null }>()
+      )?.revoked_at,
+    ).not.toBeNull()
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT revoked_at FROM authorization_grants WHERE id = 'grt_test_resource_delete'",
+        ).first<{ revoked_at: number | null }>()
+      )?.revoked_at,
+    ).not.toBeNull()
+    expect(
+      await env.DB.prepare(
+        "SELECT status, denied_at FROM device_authorization_sessions WHERE id = 'dev_test_resource_delete'",
+      ).first(),
+    ).toMatchObject({ status: "denied", denied_at: expect.any(Number) })
   })
 })
 

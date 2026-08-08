@@ -40,6 +40,14 @@ describe("i18n locale resolution", () => {
     expect(japanese.formatDate(1_767_225_600)).toContain("2026")
   })
 
+  it("uses 登录名 for alias-facing Chinese copy", () => {
+    expect(translate("zh-CN", "Username")).toBe("登录名")
+    expect(translate("zh-CN", "Email or username")).toBe("电子邮箱或登录名")
+    expect(translate("zh-CN", "Only an administrator can change your username.")).toBe(
+      "只有管理员可以更改您的登录名。",
+    )
+  })
+
   it("localizes transactional email content", () => {
     const email = magicLinkEmail("https://auth.example/login?token=secret", "ja")
     expect(email.subject).toBe("KeyForge ログインリンク")

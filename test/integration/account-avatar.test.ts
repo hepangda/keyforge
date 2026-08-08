@@ -142,7 +142,8 @@ describe("account avatar upload", () => {
       body: form,
       redirect: "manual",
     })
-    expect(res.status).not.toBe(302)
+    expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toContain("/login")
   })
 
   it("replaces the previous object and deletes the superseded bytes", async () => {
@@ -284,7 +285,7 @@ describe("public avatar endpoint", () => {
     await uploadAvatar(pngBytes())
     const user = await getUserById(env, userId)
     if (user === null) throw new Error("user missing")
-    const claims = buildUserClaims(env, user, [], ["openid", "profile"])
+    const claims = buildUserClaims(env, user, ["openid", "profile"])
     expect(claims.picture).toBe(`${ISSUER}/avatars/${user.avatarKey}`)
   })
 })

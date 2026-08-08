@@ -20,7 +20,6 @@ const CLIENT_SCOPES = JSON.stringify([
   "openid",
   "profile",
   "email",
-  "groups",
   "offline_access",
   "app.read",
   "api.read",
@@ -30,7 +29,6 @@ const RESOURCE_SCOPES = JSON.stringify([
   "openid",
   "profile",
   "email",
-  "groups",
   "offline_access",
   "api.read",
   "api.write",
@@ -64,6 +62,11 @@ async function seedRefreshFamily() {
     name: "Refresh Policy",
     emailVerified: true,
   })
+  await env.DB.prepare(
+    "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_employees', unixepoch())",
+  )
+    .bind(user.id)
+    .run()
   const session = await createSession(env, {
     userId: user.id,
     authMethod: "password",
@@ -134,11 +137,26 @@ describe("refresh token current-policy enforcement", () => {
     expect((await refreshRequest(refresh.token)).status).toBe(200)
   })
 
+  it("denies removed membership before rotation and accepts the restored token", async () => {
+    const { user, refresh } = await seedRefreshFamily()
+    await env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(user.id).run()
+
+    await expectInvalidGrant(await refreshRequest(refresh.token))
+    await expectGeneration(refresh.familyId, 0)
+
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_employees', unixepoch())",
+    )
+      .bind(user.id)
+      .run()
+    expect((await refreshRequest(refresh.token)).status).toBe(200)
+  })
+
   it("rejects scopes removed from the client's current policy", async () => {
     const { refresh } = await seedRefreshFamily()
     await env.DB.prepare(
       `UPDATE oauth_clients
-       SET allowed_scopes_json = '["openid","profile","email","groups","offline_access"]'
+       SET allowed_scopes_json = '["openid","profile","email","offline_access"]'
        WHERE client_id = ?`,
     )
       .bind(CLIENT)
@@ -172,7 +190,7 @@ describe("refresh token current-policy enforcement", () => {
     const { refresh } = await seedRefreshFamily()
     await env.DB.prepare(
       `UPDATE oauth_resources
-       SET allowed_scopes_json = '["openid","profile","email","groups","offline_access"]'
+       SET allowed_scopes_json = '["openid","profile","email","offline_access"]'
        WHERE resource_uri = ?`,
     )
       .bind(RESOURCE)
@@ -203,6 +221,7 @@ describe("refresh ID token authentication time", () => {
       audience: CLIENT,
     })
     expect(payload["auth_time"]).toBe(AUTH_TIME)
+    expect(payload).not.toHaveProperty("groups")
   })
 })
 

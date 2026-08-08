@@ -18,4 +18,6 @@ VALUES (
 );
 
 INSERT OR REPLACE INTO user_groups (user_id, group_id, created_at)
-VALUES ('usr_demo_admin', 'grp_seed_admins', unixepoch());
+VALUES
+  ('usr_demo_admin', 'grp_seed_admins', unixepoch()),
+  ('usr_demo_admin', 'grp_seed_employees', unixepoch());

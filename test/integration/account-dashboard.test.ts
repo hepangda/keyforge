@@ -118,6 +118,25 @@ describe("account dashboard", () => {
     expect(html).toContain(admin?.id ?? "missing-user-id")
     expect(html).not.toContain("Exposed as sub in ID tokens")
     expect(html).not.toContain("Administrator only")
+    expect(html).toContain(
+      ".mono{font-family:var(--font-mono);font-size:.86em;letter-spacing:.01em;overflow-wrap:anywhere}",
+    )
+    expect(html).toContain(".shell-user__name{min-width:0")
+    expect(html).not.toContain("max-width:600px")
+    expect(html).not.toContain("max-width:420px")
+    expect(html.match(/aria-label="Edit profile">Edit<\/a>/g)).toHaveLength(1)
+    expect(html).toContain('<div class="identity profile-summary">')
+    expect(html).toContain(`<div class="identity__sub">@${admin?.alias}</div>`)
+    expect(html).not.toContain(
+      `<div class="identity__sub">@${admin?.alias} · ${admin?.email}</div>`,
+    )
+    expect(html).not.toContain('<span class="meta__key">Username</span>')
+    expect(html).toContain(
+      '<span class="meta__key">Email</span><span class="meta__val meta__val--email">',
+    )
+    expect(html).not.toContain('<span class="meta__key">Verification</span>')
+    expect(html).toContain('<span class="group-chip" title="admins">admins</span>')
+    expect(html).not.toContain("credential=")
   })
 
   it("keeps passwords and passkeys together under Login methods", async () => {
@@ -129,44 +148,68 @@ describe("account dashboard", () => {
     const html = await res.text()
     expect(html).toContain("Login methods")
     expect(html).toContain("Choose one method to manage")
-    expect(html).toContain("Add login method")
-    expect(html).toContain("flow=choose-login-method")
+    expect(html).toContain("flow=add-passkey")
+    expect(html).toContain("flow=add-password")
+    expect(html).not.toContain("flow=choose-login-method")
     expect(html).not.toContain('action="/account/passwords"')
     expect(html).not.toContain("data-passkey-register")
-
-    const chooser = await SELF.fetch(`${ISSUER}/?section=login-methods&flow=choose-login-method`, {
-      headers: { cookie },
-    })
-    const chooserHtml = await chooser.text()
-    expect(chooserHtml).toContain("Add a login method")
-    expect(chooserHtml).toContain("flow=add-password")
-    expect(chooserHtml).toContain("flow=add-passkey")
 
     const configure = await SELF.fetch(`${ISSUER}/?section=login-methods&flow=add-password`, {
       headers: { cookie },
     })
     const configureHtml = await configure.text()
     expect(configureHtml).toContain('action="/account/passwords"')
-    expect(configureHtml).toContain("Verification happens when you submit")
+    expect(configureHtml).not.toContain("Verification happens when you submit")
     expect(configureHtml).not.toContain("Verify and continue")
+    expect(configureHtml).toContain(
+      ".flow-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+    )
+    expect(configureHtml).toContain('class="field field--wide"')
+    expect(configureHtml).toContain('class="form-hint form-hint--wide"')
 
     const passkey = await SELF.fetch(`${ISSUER}/?section=login-methods&flow=add-passkey`, {
       headers: { cookie },
     })
-    expect(await passkey.text()).toContain("data-passkey-register")
+    const passkeyHtml = await passkey.text()
+    expect(passkeyHtml).toContain("data-passkey-register")
+    expect(passkeyHtml).toContain('data-return-to="/?section=login-methods&amp;flow=add-passkey"')
+    expect(passkeyHtml).toContain("data-passkey-register data-csrf=")
+    expect(passkeyHtml).toContain(" hidden>Add passkey</button>")
+    expect(passkeyHtml).toContain("Add a password instead")
+    expect(passkeyHtml).toContain('<script src="/assets/account.js" defer></script>')
 
     const admin = await getUserByEmail(env, "admin")
     expect(admin).not.toBeNull()
     const password = admin === null ? undefined : (await listPasswordCredentials(env, admin.id))[0]
     expect(password).toBeDefined()
     const manage = await SELF.fetch(
-      `${ISSUER}/?section=login-methods&flow=manage-password&credential=${password?.id ?? "missing"}`,
+      `${ISSUER}/?section=login-methods&flow=manage-password&target=${password?.id ?? "missing"}`,
       { headers: { cookie } },
     )
     const manageHtml = await manage.text()
     expect(manageHtml).toContain(`/account/passwords/${password?.id ?? "missing"}/rename`)
-    expect(manageHtml).toContain(`/account/passwords/${password?.id ?? "missing"}/delete`)
-    expect(manageHtml).toContain("Verification happens when you submit")
+    expect(manageHtml).not.toContain(
+      `action="/account/passwords/${password?.id ?? "missing"}/delete"`,
+    )
+    expect(manageHtml).toContain(`flow=remove-password&amp;target=${password?.id ?? "missing"}`)
+
+    const review = await SELF.fetch(
+      `${ISSUER}/?section=login-methods&flow=remove-password&target=${password?.id ?? "missing"}`,
+      { headers: { cookie } },
+    )
+    const reviewHtml = await review.text()
+    expect(reviewHtml).toContain("Remove login method")
+    expect(reviewHtml).toContain("Keep at least one password or passkey")
+    expect(reviewHtml).toContain(`action="/account/passwords/${password?.id ?? "missing"}/delete"`)
+    expect(reviewHtml).toContain(`flow=manage-password&amp;target=${password?.id ?? "missing"}`)
+
+    const missing = await SELF.fetch(
+      `${ISSUER}/?section=login-methods&flow=manage-password&target=missing`,
+      { headers: { cookie }, redirect: "manual" },
+    )
+    expect(missing.status).toBe(302)
+    expect(missing.headers.get("location")).toBe("/?section=login-methods&notice=not_found")
+    expect(manageHtml).not.toContain("Verification happens when you submit")
   })
 
   it("keeps the username read-only in self-service profile flows", async () => {
@@ -178,6 +221,16 @@ describe("account dashboard", () => {
     expect(html).toContain("Only an administrator can change your username")
     expect(html).toContain('name="name"')
     expect(html).not.toContain('name="alias"')
+    expect(html).toContain('class="profile-edit-grid"')
+    expect(html).toContain('class="flow-form flow-form--single avatar-form"')
+    expect(html).toContain('class="flow-form flow-form--single profile-name-form"')
+    expect(html).toContain(
+      '<div class="flow-page"><a class="btn btn--ghost btn--sm btn--auto flow-back back-link" href="/?section=profile">Back to profile</a><section class="dash-panel flow-panel">',
+    )
+    expect(html).not.toContain('flow-panel__intro"><a class="btn')
+    expect(html).toContain(".flow-panel{width:100%}")
+    expect(html).not.toContain("width:min(100%,720px)")
+    expect(html).not.toContain(".flow-panel__intro{max-width")
   })
 
   it("shows only the selected section on the right", async () => {
@@ -213,6 +266,20 @@ describe("account session management", () => {
     expect(await getSessionByToken(env, current)).not.toBeNull()
     expect(await getSessionByToken(env, other)).not.toBeNull()
 
+    const overview = await SELF.fetch(`${ISSUER}/?section=sessions`, {
+      headers: { cookie: `__Host-keyforge_session=${current}` },
+    })
+    const overviewHtml = await overview.text()
+    expect(overviewHtml).toContain("flow=revoke-other-sessions")
+    expect(overviewHtml).not.toContain('action="/account/sessions/revoke-others"')
+    const review = await SELF.fetch(`${ISSUER}/?section=sessions&flow=revoke-other-sessions`, {
+      headers: { cookie: `__Host-keyforge_session=${current}` },
+    })
+    const reviewHtml = await review.text()
+    expect(reviewHtml).toContain('action="/account/sessions/revoke-others"')
+    expect(reviewHtml).toContain("signs out 1 other sessions")
+    expect(await getSessionByToken(env, other)).not.toBeNull()
+
     const csrf = await freshCsrf(current)
     const res = await postAccount("/account/sessions/revoke-others", current, csrf)
     expect(res.status).toBe(302)
@@ -222,6 +289,14 @@ describe("account session management", () => {
     expect(await getSessionByToken(env, other)).toBeNull()
     await expectFamilyRevoked(currentFamily.familyId, false)
     await expectFamilyRevoked(otherFamily.familyId, true)
+    const repeated = await postAccount("/account/sessions/revoke-others", current, csrf)
+    expect(repeated.headers.get("location")).toBe("/?section=sessions&notice=not_found")
+    const emptyReview = await SELF.fetch(`${ISSUER}/?section=sessions&flow=revoke-other-sessions`, {
+      headers: { cookie: `__Host-keyforge_session=${current}` },
+    })
+    const emptyHtml = await emptyReview.text()
+    expect(emptyHtml).toContain("Active sessions")
+    expect(emptyHtml).not.toContain('action="/account/sessions/revoke-others"')
   })
 
   it("revokes a single session by id", async () => {
@@ -301,6 +376,21 @@ describe("account app access", () => {
       grantType: "authorization_code",
     })
     expect(await getConsent(env, admin.id, "cloudflare_one")).not.toBeNull()
+    const overview = await SELF.fetch(`${ISSUER}/?section=apps`, {
+      headers: { cookie: `__Host-keyforge_session=${token}` },
+    })
+    const overviewHtml = await overview.text()
+    expect(overviewHtml).toContain("flow=revoke-app&amp;target=cloudflare_one")
+    expect(overviewHtml).not.toContain('action="/account/apps/cloudflare_one/revoke"')
+    const review = await SELF.fetch(
+      `${ISSUER}/?section=apps&flow=revoke-app&target=cloudflare_one`,
+      { headers: { cookie: `__Host-keyforge_session=${token}` } },
+    )
+    const reviewHtml = await review.text()
+    expect(reviewHtml).toContain('action="/account/apps/cloudflare_one/revoke"')
+    expect(reviewHtml).toContain("saved consent, authorization grants, and refresh access")
+    expect(reviewHtml).toContain('href="/?section=apps"')
+    expect(await getConsent(env, admin.id, "cloudflare_one")).not.toBeNull()
 
     const csrf = await freshCsrf(token)
     const res = await postAccount("/account/apps/cloudflare_one/revoke", token, csrf)
@@ -314,6 +404,39 @@ describe("account app access", () => {
       .bind(admin.id, "cloudflare_one")
       .first<{ revoked_at: number | null }>()
     expect(grant?.revoked_at).not.toBeNull()
+    const repeated = await postAccount("/account/apps/cloudflare_one/revoke", token, csrf)
+    expect(repeated.headers.get("location")).toBe("/?section=apps&notice=not_found")
+  })
+
+  it("reviews and revokes one independent device family", async () => {
+    const token = await login()
+    const admin = await getUserByEmail(env, "admin")
+    expect(admin).not.toBeNull()
+    if (admin === null) return
+    const family = await issueRefreshToken(env, {
+      userId: admin.id,
+      clientId: "pangda_cli",
+      sessionId: null,
+      resource: "https://api.pangda.app",
+      scope: "openid offline_access api.read",
+      authTime: Math.floor(Date.now() / 1000),
+      rememberMe: false,
+    })
+    const review = await SELF.fetch(
+      `${ISSUER}/?section=apps&flow=revoke-device&target=${family.familyId}`,
+      { headers: { cookie: `__Host-keyforge_session=${token}` } },
+    )
+    const reviewHtml = await review.text()
+    expect(reviewHtml).toContain(`action="/account/devices/${family.familyId}/revoke"`)
+    expect(reviewHtml).toContain("must be authorized again")
+    await expectFamilyRevoked(family.familyId, false)
+
+    const csrf = await freshCsrf(token)
+    const revoked = await postAccount(`/account/devices/${family.familyId}/revoke`, token, csrf)
+    expect(revoked.headers.get("location")).toBe("/?section=apps&notice=device_revoked")
+    await expectFamilyRevoked(family.familyId, true)
+    const repeated = await postAccount(`/account/devices/${family.familyId}/revoke`, token, csrf)
+    expect(repeated.headers.get("location")).toBe("/?section=apps&notice=not_found")
   })
 
   it("ignores an account action with an invalid CSRF token", async () => {

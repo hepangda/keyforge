@@ -1,7 +1,14 @@
 import type { I18n } from "../../i18n"
-import { appShell, brandHeader, escapeHtml, htmlLayout } from "../layout"
+import { appShell, escapeHtml } from "../layout"
 
-export type ConsoleSection = "overview" | "users" | "clients" | "resources" | "devices" | "audit"
+export type ConsoleSection =
+  | "overview"
+  | "users"
+  | "groups"
+  | "clients"
+  | "resources"
+  | "devices"
+  | "audit"
 
 export type ConsoleFlash = { readonly kind: "ok" | "warn"; readonly message: string }
 
@@ -10,6 +17,8 @@ export type ConsoleChrome = {
   readonly section: ConsoleSection
   readonly adminEmail: string
   readonly flash?: ConsoleFlash
+  readonly clearDraftKey?: string
+  readonly draftKey?: string
 }
 
 const NAV: readonly {
@@ -19,6 +28,7 @@ const NAV: readonly {
 }[] = [
   { section: "overview", label: "Overview", href: "/console" },
   { section: "users", label: "Users", href: "/console/users" },
+  { section: "groups", label: "Permission groups", href: "/console/groups" },
   { section: "clients", label: "Applications", href: "/console/clients" },
   { section: "resources", label: "APIs", href: "/console/resources" },
   { section: "devices", label: "Devices", href: "/console/devices" },
@@ -27,7 +37,8 @@ const NAV: readonly {
 
 const SECTION_COPY: Readonly<Record<ConsoleSection, string>> = {
   overview: "A guided view of your identity service and the next useful setup step.",
-  users: "Provision people, organize access groups, and manage their login methods.",
+  users: "Provision people and manage their login methods.",
+  groups: "Assign memberships and control which applications and APIs each group can access.",
   clients: "Register applications and configure OAuth flows without missing required settings.",
   resources: "Define API audiences and the scopes applications may request.",
   devices: "Review and revoke device authorization sessions.",
@@ -39,11 +50,14 @@ const SECTION_COPY: Readonly<Record<ConsoleSection, string>> = {
  * typography all come from the shared KeyForge design system in layout.ts.
  */
 const CONSOLE_STYLES = `
-html{scrollbar-gutter:stable}
 .console-content{display:grid;gap:1.4rem;min-width:0}
 .flash{display:flex;align-items:center;gap:.6rem;padding:.75rem 1rem;border-radius:var(--r-field);font-size:.9rem}
 .flash--ok{color:var(--ok);background:var(--ok-soft);border:1px solid transparent}
 .flash--warn{color:var(--danger);background:var(--danger-bg);border:1px solid var(--danger-line)}
+.subtabs{display:flex;min-width:0;gap:.35rem;overflow-x:auto;padding:.25rem;border-bottom:1px solid var(--line)}
+.subtab{flex:none;padding:.55rem .8rem;color:var(--ink-2);border-bottom:2px solid transparent;font-size:.84rem;font-weight:600}
+.subtab:hover{color:var(--ink);text-decoration:none}
+.subtab--active{color:var(--ink);border-bottom-color:var(--brass)}
 
 .panel{position:relative;min-width:0;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--shadow);animation:rise .5s cubic-bezier(.2,.7,.2,1) both}
 .panel::before,.setup-card::before,.stat::before{content:"";position:absolute;z-index:1;top:0;left:1px;right:1px;height:1px;background:linear-gradient(90deg,transparent,var(--brass-line),transparent)}
@@ -61,6 +75,7 @@ html{scrollbar-gutter:stable}
 .ctable tbody tr:hover td{background:var(--surface-2)}
 .ctable .mono{font-family:var(--font-mono);font-size:.82rem;color:var(--ink-2)}
 .ctable__value{min-width:0;overflow-wrap:anywhere}
+.ctable .badge,.ctable .btn--tiny{white-space:nowrap}
 .ctable__empty{padding:2.5rem 1.5rem;text-align:center;color:var(--ink-2)}
 
 .actions{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;justify-content:flex-end}
@@ -69,12 +84,13 @@ html{scrollbar-gutter:stable}
 .btn--tiny{width:auto;padding:.32rem .65rem;font-size:.78rem;border-radius:var(--r-chip)}
 .btn--auto{width:auto}
 .input--compact{width:auto;min-width:8rem;max-width:100%;padding:.42rem .6rem;font-size:.82rem;flex:1 1 9rem}
+.field__error{display:block;margin-top:.35rem;color:var(--danger);font-size:.78rem}
 .panel__head .btn,.toolbar .btn{width:auto}
 
-.form-grid{display:grid;gap:1.1rem;max-width:620px}
+.form-grid{display:grid;width:100%;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.1rem}
+.form-grid--single{grid-template-columns:minmax(0,1fr)}
 .form-grid .field{margin:0}
-.form-grid--inline{grid-template-columns:minmax(180px,1fr) minmax(240px,1.5fr) auto;max-width:none;align-items:end}
-.form-grid--method{max-width:860px;grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end}
+.form-grid--method{grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end}
 .form-grid--method .form-hint{grid-column:1/-1}
 .form-hint{margin:.3rem 0 0;color:var(--ink-3);font-size:.78rem}
 .form-hint--standalone{margin:-.6rem 0 0}
@@ -86,11 +102,15 @@ html{scrollbar-gutter:stable}
 .group-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
 .group-choice{display:flex;align-items:flex-start;gap:.6rem;padding:.72rem .8rem;border:1px solid var(--line);border-radius:var(--r-field);background:var(--surface-2);cursor:pointer;transition:border-color .16s ease,background .16s ease,box-shadow .16s ease}
 .group-choice:hover{border-color:var(--line-brass)}
+.group-choice:focus-within{border-color:var(--brass-line);box-shadow:var(--focus)}
 .group-choice:has(input:checked){border-color:var(--brass-line);background:var(--brass-soft);box-shadow:var(--focus)}
 .group-choice input{width:auto;margin:.18rem 0 0;accent-color:var(--brass)}
 .group-choice span{display:grid;gap:.1rem;min-width:0}
 .group-choice b{color:var(--ink);font:600 .8rem var(--font-mono)}
 .group-choice small{color:var(--ink-3);font-size:.75rem;line-height:1.35}
+.copy-value{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.65rem}
+.copy-value__text{min-width:0;margin:0;user-select:text;overflow-wrap:anywhere}
+.copy-value__status{grid-column:1/-1;color:var(--ok);font-size:.78rem}
 .resource-choice small{overflow-wrap:anywhere}
 .resource-choice small.mono{font-size:.68rem}
 .wizard-empty{padding:1rem;color:var(--ink-2);background:var(--surface-2);border:1px dashed var(--line-2);border-radius:var(--r-field);font-size:.84rem}
@@ -100,7 +120,7 @@ html{scrollbar-gutter:stable}
 .audit-filters__actions{display:flex;gap:.5rem;align-items:center}
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .pager{display:flex;gap:.6rem;align-items:center;justify-content:flex-end;margin-top:1.1rem;color:var(--ink-3);font-size:.85rem}
-.secret{margin:.4rem 0 0;padding:.85rem 1rem;color:var(--brass-2);background:var(--surface-2);border:1px solid var(--brass-line);border-radius:var(--r-field);font:500 .9rem var(--font-mono);word-break:break-all}
+.secret{margin:.4rem 0 0;padding:.85rem 1rem;color:var(--brass-2);background:var(--surface-2);border:1px solid var(--brass-line);border-radius:var(--r-field);font:500 .9rem var(--font-mono);overflow-wrap:anywhere}
 .secret-done{margin-top:1.2rem}
 .checkline{display:flex;align-items:center;gap:.55rem;color:var(--ink);font-size:.9rem}
 .checkline input{width:auto;margin:0;accent-color:var(--brass)}
@@ -170,11 +190,13 @@ html{scrollbar-gutter:stable}
   .wizard-steps{grid-template-columns:repeat(4,minmax(0,1fr))}
   .wizard-step{justify-content:center;padding:.45rem}
   .wizard-step strong{display:none}
+  .form-grid--method,.choice-cards:not(.choice-cards--two){grid-template-columns:1fr}
+  .form-grid--method .form-hint{grid-column:auto}
 }
 @media(max-width:720px){
   .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .form-grid--inline,.form-grid--method,.group-choice-grid,.wizard-grid,.choice-cards{grid-template-columns:1fr}
-  .wizard-grid .field--wide{grid-column:auto}
+  .form-grid,.group-choice-grid,.wizard-grid,.choice-cards{grid-template-columns:1fr}
+  .field--wide,.form-hint--wide,.form-actions{grid-column:auto}
   .ctable-wrap{overflow:visible}
   .ctable{display:block;min-width:0}
   .ctable thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
@@ -203,15 +225,25 @@ html{scrollbar-gutter:stable}
 }
 `
 
-export function renderForbidden(i18n: I18n): string {
-  const body = `<main class="card"><div class="head">${brandHeader()}<h1>${escapeHtml(i18n.t("Access denied"))}</h1><p class="lead">${escapeHtml(i18n.t("Your account doesn't have administrator access."))}</p></div><p class="foot"><a class="link-quiet" href="/">${escapeHtml(i18n.t("Back to your account"))}</a></p></main>`
-  return htmlLayout(i18n, i18n.t("Access denied — KeyForge"), body)
+export function renderForbidden(i18n: I18n, userEmail: string): string {
+  const barRight = `<span class="shell-bar__who">${escapeHtml(i18n.t("Signed in as"))} <b>${escapeHtml(userEmail)}</b></span><a class="btn btn--ghost btn--sm" href="/">${escapeHtml(i18n.t("Your account"))}</a><a class="btn btn--ghost btn--sm" href="/logout">${escapeHtml(i18n.t("Sign out"))}</a>`
+  const content = `<section class="panel" aria-labelledby="access-denied-title"><div class="panel__head"><div><h2 class="panel__title" id="access-denied-title">${escapeHtml(i18n.t("Access denied"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Your account doesn't have administrator access."))}</p></div></div></section>`
+  return appShell({
+    i18n,
+    title: i18n.t("Access denied — KeyForge"),
+    heading: i18n.t("Access denied"),
+    badge: i18n.t("Admin console"),
+    barRight,
+    tabs: [],
+    content,
+    extraStyles: CONSOLE_STYLES,
+  })
 }
 
 function renderFlash(i18n: I18n, flash: ConsoleFlash | undefined): string {
-  return flash === undefined
-    ? ""
-    : `<div class="flash flash--${flash.kind}" role="status">${escapeHtml(i18n.t(flash.message))}</div>`
+  if (flash === undefined) return ""
+  const role = flash.kind === "ok" ? "status" : "alert"
+  return `<div class="flash flash--${flash.kind}" role="${role}">${escapeHtml(i18n.t(flash.message))}</div>`
 }
 
 export function consoleShell(heading: string, chrome: ConsoleChrome, content: string): string {
@@ -231,7 +263,7 @@ export function consoleShell(heading: string, chrome: ConsoleChrome, content: st
     badge: i18n.t("Admin console"),
     barRight,
     tabs,
-    content: `<div class="console-content">${renderFlash(i18n, chrome.flash)}${content}</div><script src="/assets/console.js" defer></script>`,
+    content: `<div class="console-content"${chrome.draftKey === undefined ? "" : ` data-draft-form data-draft-key="${escapeHtml(chrome.draftKey)}"`}>${chrome.clearDraftKey === undefined ? "" : `<span hidden data-draft-clear="${escapeHtml(chrome.clearDraftKey)}"></span>`}${renderFlash(i18n, chrome.flash)}${content}</div><script src="/assets/console.js" defer></script>`,
     extraStyles: CONSOLE_STYLES,
   })
 }

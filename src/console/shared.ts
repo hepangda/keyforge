@@ -15,6 +15,7 @@ const FLASH: Readonly<Record<string, ConsoleFlash>> = {
   group_created: { kind: "ok", message: "Group created." },
   group_updated: { kind: "ok", message: "Group updated." },
   group_deleted: { kind: "ok", message: "Group deleted." },
+  group_access_updated: { kind: "ok", message: "Permission-group access updated." },
   sessions_revoked: { kind: "ok", message: "All of that user's sessions were revoked." },
   client_created: { kind: "ok", message: "Client created." },
   client_updated: { kind: "ok", message: "Client updated." },
@@ -23,6 +24,7 @@ const FLASH: Readonly<Record<string, ConsoleFlash>> = {
   client_disabled: { kind: "ok", message: "Client disabled." },
   resource_created: { kind: "ok", message: "Resource created." },
   resource_updated: { kind: "ok", message: "Resource updated." },
+  resource_deleted: { kind: "ok", message: "Resource deleted." },
   device_revoked: { kind: "ok", message: "Device session revoked." },
   duplicate_user: { kind: "warn", message: "An account already uses that email address." },
   duplicate_alias: { kind: "warn", message: "An account already uses that username." },
@@ -56,11 +58,51 @@ export function readFlash(c: Context<AppBindings>): ConsoleFlash | undefined {
   return key === undefined ? undefined : FLASH[key]
 }
 
+function consoleDraftKey(c: Context<AppBindings>): string | undefined {
+  const url = new URL(c.req.url)
+  const parts = url.pathname.split("/").filter(Boolean)
+  const section = parts[1]
+  const id = parts[2]
+  if (section === "users" && id === "new") return "keyforge:form:user:new"
+  if (section === "groups" && id !== undefined && parts[3] !== "delete") {
+    if (id === "new") return "keyforge:form:group:new"
+    const view = parts[3] === "access" || c.req.query("view") === "access" ? "access" : "settings"
+    return `keyforge:form:group:${id}:${view}`
+  }
+  if (section === "clients" && id !== undefined) {
+    if (id === "new") return "keyforge:form:client:new"
+    const view = c.req.query("view") === "access" ? "access" : "settings"
+    if (view === "settings" || view === "access") return `keyforge:form:client:${id}:${view}`
+  }
+  if (section === "resources" && id !== undefined) {
+    return `keyforge:form:resource:${id}`
+  }
+  return undefined
+}
+
 export function chrome(c: Context<AppBindings>, section: ConsoleSection): ConsoleChrome {
   const user = c.get("user")
-  const base: ConsoleChrome = { i18n: c.get("i18n"), section, adminEmail: user?.email ?? "" }
+  const clearDraft = c.req.query("clear_draft")
+  const clearDraftKey =
+    clearDraft?.startsWith("keyforge:form:") === true && clearDraft.length <= 200
+      ? clearDraft
+      : undefined
+  const draftKey = consoleDraftKey(c)
+  const base: ConsoleChrome = {
+    i18n: c.get("i18n"),
+    section,
+    adminEmail: user?.email ?? "",
+    ...(clearDraftKey === undefined ? {} : { clearDraftKey }),
+    ...(draftKey === undefined ? {} : { draftKey }),
+  }
   const flash = readFlash(c)
   return flash === undefined ? base : { ...base, flash }
+}
+
+export function withClearedDraft(path: string, key: string): string {
+  const url = new URL(path, "https://keyforge.invalid")
+  url.searchParams.set("clear_draft", key)
+  return `${url.pathname}${url.search}${url.hash}`
 }
 
 export async function readVerifiedForm(c: Context<AppBindings>): Promise<FormData | null> {

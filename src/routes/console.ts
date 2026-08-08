@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { registerConsoleAudit } from "../console/audit"
 import { registerConsoleClients } from "../console/clients"
 import { registerConsoleDevices } from "../console/devices"
+import { registerConsoleGroups } from "../console/groups"
 import { registerConsoleOverview } from "../console/overview"
 import { registerConsoleResources } from "../console/resources"
 import { registerConsoleUsers } from "../console/users"
@@ -15,6 +16,7 @@ adminConsole.use("/console/*", requireConsoleAdmin)
 
 registerConsoleOverview(adminConsole)
 registerConsoleUsers(adminConsole)
+registerConsoleGroups(adminConsole)
 registerConsoleClients(adminConsole)
 registerConsoleResources(adminConsole)
 registerConsoleDevices(adminConsole)

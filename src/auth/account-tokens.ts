@@ -6,7 +6,13 @@ import { generateId, ID_PREFIX } from "../utils/id"
 import { randomToken } from "../utils/random"
 import { nowSeconds } from "../utils/time"
 
-type CreatedAccountToken = { readonly token: string; readonly url: string }
+export type CreatedAccountToken = { readonly token: string; readonly url: string }
+
+export type PasswordResetTokenOptions = {
+  readonly redirectTo: string | null
+  readonly reauthenticate: boolean
+  readonly purpose: "password_reset" | "account_invitation"
+}
 
 export async function createEmailVerificationToken(
   env: Env,
@@ -172,7 +178,7 @@ export async function createPasswordResetToken(
   env: Env,
   userId: string,
   email: string,
-  purpose: "password_reset" | "account_invitation" = "password_reset",
+  options: PasswordResetTokenOptions,
 ): Promise<CreatedAccountToken> {
   const token = randomToken(32)
   const tokenHash = await hashOpaqueToken(token)
@@ -181,10 +187,11 @@ export async function createPasswordResetToken(
   const securityVersion = await getUserSecurityVersion(env, userId)
   if (securityVersion === null) throw new Error("account unavailable")
   const payload: AccountOneTimeTokenPayload = {
-    purpose,
+    purpose: options.purpose,
     userId,
     email,
-    redirectTo: null,
+    redirectTo: options.redirectTo,
+    reauthenticate: options.reauthenticate,
     securityVersion,
   }
   await env.DB.batch([
@@ -203,7 +210,11 @@ export function createAccountInvitationToken(
   userId: string,
   email: string,
 ): Promise<CreatedAccountToken> {
-  return createPasswordResetToken(env, userId, email, "account_invitation")
+  return createPasswordResetToken(env, userId, email, {
+    redirectTo: "/",
+    reauthenticate: false,
+    purpose: "account_invitation",
+  })
 }
 
 export async function peekPasswordResetToken(

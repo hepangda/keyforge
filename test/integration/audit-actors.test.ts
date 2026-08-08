@@ -34,6 +34,25 @@ async function seedActorLogs(): Promise<{ adminId: string }> {
       success: true,
       createdAt: 2_000_000_000,
     },
+    {
+      id: "aud_actor_resource_1",
+      type: "admin.resource.updated",
+      actorUserId: admin.id,
+      resourceUri: "https://api.audit.example",
+      scope: "api.read",
+      requestId: "req-audit-resource",
+      detail: "resource policy updated",
+      success: true,
+      createdAt: 2_000_000_003,
+    },
+    {
+      id: "aud_actor_resource_2",
+      type: "admin.resource.created",
+      actorUserId: admin.id,
+      resourceUri: "https://api.audit.example",
+      success: true,
+      createdAt: 2_000_000_002,
+    },
   ])
   return { adminId: admin.id }
 }
@@ -71,8 +90,8 @@ describe("queryable audit actors", () => {
   it("stores and filters user and client actors with dedicated indexes", async () => {
     const { adminId } = await seedActorLogs()
     const byUser = await listAuditLogs(env, { limit: 10, offset: 0, actorUserId: adminId })
-    expect(byUser).toHaveLength(1)
-    expect(byUser[0]).toMatchObject({
+    expect(byUser).toHaveLength(3)
+    expect(byUser.find((entry) => entry.id === "aud_actor_user")).toMatchObject({
       id: "aud_actor_user",
       actorUserId: adminId,
       actorClientId: null,
@@ -90,6 +109,15 @@ describe("queryable audit actors", () => {
       actorClientId: "svc_actor",
       clientId: "svc_actor",
     })
+    const byResource = await listAuditLogs(env, {
+      limit: 10,
+      offset: 0,
+      resourceUri: "https://api.audit.example",
+    })
+    expect(byResource.map((entry) => entry.id)).toEqual([
+      "aud_actor_resource_1",
+      "aud_actor_resource_2",
+    ])
 
     for (const [column, index, value] of [
       ["actor_user_id", "idx_audit_actor_user_created", adminId],
@@ -119,8 +147,8 @@ describe("queryable audit actors", () => {
     const logs = await api.json<{
       logs: Array<Record<string, unknown>>
     }>()
-    expect(logs.logs).toHaveLength(1)
-    expect(logs.logs[0]).toMatchObject({
+    expect(logs.logs).toHaveLength(3)
+    expect(logs.logs.find((entry) => entry["user_id"] === "usr_actor_subject")).toMatchObject({
       actor_user_id: adminId,
       actor_client_id: null,
       user_id: "usr_actor_subject",
@@ -135,6 +163,18 @@ describe("queryable audit actors", () => {
     expect(html).toContain("Actor client")
     expect(html).toContain("svc_actor")
     expect(html).not.toContain("usr_actor_subject")
+    const resourcePage = await SELF.fetch(
+      `${ISSUER}/console/audit?resource_uri=${encodeURIComponent("https://api.audit.example")}&limit=1`,
+      { headers: { cookie: sessionCookie } },
+    )
+    const resourceHtml = await resourcePage.text()
+    expect(resourceHtml).toContain('name="resource_uri" value="https://api.audit.example"')
+    expect(resourceHtml).toContain("/console/resources/https%3A%2F%2Fapi.audit.example")
+    expect(resourceHtml).toContain("api.read")
+    expect(resourceHtml).toContain("req-audit-resource")
+    expect(resourceHtml).toContain(
+      "resource_uri=https%3A%2F%2Fapi.audit.example&amp;limit=1&amp;offset=1",
+    )
   })
 
   it("emits the authenticated administrator separately from the mutated user", async () => {
@@ -182,7 +222,7 @@ describe("queryable audit actors", () => {
     const admin = await getUserByEmail(env, "admin")
     if (admin === null) throw new Error("seed administrator missing")
     const sessionCookie = await loginAdmin()
-    const formPage = await SELF.fetch(`${ISSUER}/console/users`, {
+    const formPage = await SELF.fetch(`${ISSUER}/console/groups/new`, {
       headers: { cookie: sessionCookie },
     })
     const csrf =

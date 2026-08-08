@@ -65,7 +65,6 @@ export const SUPPORTED_SCOPES = [
   "openid",
   "profile",
   "email",
-  "groups",
   "offline_access",
   "api.read",
   "api.write",
@@ -75,7 +74,7 @@ export const SUPPORTED_SCOPES = [
 ] as const
 
 /** Scopes that identify a user context and are therefore forbidden for client_credentials. */
-export const USER_ONLY_SCOPES = ["openid", "profile", "email", "groups", "offline_access"] as const
+export const USER_ONLY_SCOPES = ["openid", "profile", "email", "offline_access"] as const
 
 /** Claims this server can assert. */
 export const SUPPORTED_CLAIMS = [
@@ -85,7 +84,6 @@ export const SUPPORTED_CLAIMS = [
   "name",
   "preferred_username",
   "picture",
-  "groups",
 ] as const
 
 /** OAuth grant types this server implements. */

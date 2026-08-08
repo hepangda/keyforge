@@ -8,7 +8,12 @@ import {
 } from "../db/queries/admin-devices"
 import type { AuditLogEntry } from "../db/queries/audit"
 import { listAuditLogs } from "../db/queries/audit"
-import { createResource, listResources, updateResource } from "../db/queries/resources"
+import {
+  createResource,
+  deleteResource,
+  listResources,
+  updateResource,
+} from "../db/queries/resources"
 import { recordAudit } from "../security/audit"
 import { isSafeResourceUri } from "../security/redirect-uri"
 import type { AppBindings } from "../types/app"
@@ -118,6 +123,21 @@ export function registerAdminCatalog(app: Hono<AppBindings>): void {
       success: true,
     })
     return c.json(serializeResource(updated))
+  })
+
+  app.delete("/admin/resources/:id", async (c) => {
+    const resourceUri = c.req.param("id")
+    if (!(await deleteResource(c.env, resourceUri))) {
+      return c.json({ error: "not_found" }, 404)
+    }
+    await recordAudit(c.env, {
+      type: "admin.resource.deleted",
+      actorUserId: c.get("user")?.id ?? null,
+      resourceUri,
+      requestId: c.get("requestId"),
+      success: true,
+    })
+    return c.json({ deleted: true })
   })
 
   app.get("/admin/audit-logs", async (c) => {

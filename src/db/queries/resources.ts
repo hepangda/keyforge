@@ -88,3 +88,44 @@ export async function updateResource(
     .run()
   return next
 }
+
+/** Delete an API and retire every D1 authorization path that references it. */
+export async function deleteResource(env: Env, resourceUri: string): Promise<boolean> {
+  if ((await getResourceByUri(env, resourceUri)) === null) return false
+
+  const [deletion] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM oauth_resources WHERE resource_uri = ?").bind(resourceUri),
+    env.DB.prepare(
+      `UPDATE oauth_clients
+         SET allowed_resources_json = (
+               SELECT json_group_array(value)
+               FROM (
+                 SELECT value
+                 FROM json_each(oauth_clients.allowed_resources_json)
+                 WHERE CAST(value AS TEXT) != ?
+                 ORDER BY CAST(key AS INTEGER)
+               )
+             ),
+             default_resource = CASE WHEN default_resource = ? THEN NULL ELSE default_resource END,
+             updated_at = unixepoch()
+         WHERE default_resource = ?
+            OR EXISTS (
+              SELECT 1 FROM json_each(oauth_clients.allowed_resources_json)
+              WHERE CAST(value AS TEXT) = ?
+            )`,
+    ).bind(resourceUri, resourceUri, resourceUri, resourceUri),
+    env.DB.prepare("DELETE FROM consents WHERE resource = ?").bind(resourceUri),
+    env.DB.prepare(
+      "UPDATE refresh_tokens SET revoked_at = unixepoch() WHERE resource = ? AND revoked_at IS NULL",
+    ).bind(resourceUri),
+    env.DB.prepare(
+      "UPDATE authorization_grants SET revoked_at = unixepoch() WHERE resource = ? AND revoked_at IS NULL",
+    ).bind(resourceUri),
+    env.DB.prepare(
+      `UPDATE device_authorization_sessions
+         SET status = 'denied', denied_at = unixepoch()
+         WHERE resource_uri = ? AND status IN ('pending', 'approved')`,
+    ).bind(resourceUri),
+  ])
+  return (deletion?.meta.changes ?? 0) >= 1
+}

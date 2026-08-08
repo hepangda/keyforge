@@ -2,6 +2,8 @@ import { env } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
 import {
   createSession,
+  getSessionByToken,
+  replaceReauthenticatedSession,
   revokeAllUserSessions,
   revokeOtherUserSessions,
   revokeSessionById,
@@ -86,5 +88,37 @@ describe("atomic session and refresh-mirror revocation", () => {
     expect((await env.REFRESH_TOKEN_FAMILY.getByName(refresh.familyId).getState())?.revoked).toBe(
       false,
     )
+  })
+
+  it("reclaims a replacement session when revoking the previous session fails", async () => {
+    const user = await createUser(env, { email: "atomic-reauth@pangda.app" })
+    const previous = await createSession(env, {
+      userId: user.id,
+      authMethod: "password",
+      ttlSeconds: 3600,
+    })
+    const next = await createSession(env, {
+      userId: user.id,
+      authMethod: "passkey",
+      ttlSeconds: 3600,
+    })
+    const previousRecord = await getSessionByToken(env, previous.token)
+    expect(previousRecord).not.toBeNull()
+    if (previousRecord === null) return
+    await env.DB.prepare(
+      `CREATE TRIGGER fail_previous_reauthentication_revoke
+       BEFORE UPDATE OF revoked_at ON sessions
+       WHEN OLD.id = '${previous.sessionId}'
+       BEGIN SELECT RAISE(ABORT, 'simulated previous session failure'); END`,
+    ).run()
+    try {
+      await expect(
+        replaceReauthenticatedSession(env, previousRecord, next, user.id),
+      ).rejects.toThrow()
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_previous_reauthentication_revoke").run()
+    }
+    expect(await getSessionByToken(env, previous.token)).not.toBeNull()
+    expect(await getSessionByToken(env, next.token)).toBeNull()
   })
 })

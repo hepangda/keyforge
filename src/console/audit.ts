@@ -12,6 +12,7 @@ export function registerConsoleAudit(app: Hono<AppBindings>): void {
       eventType: c.req.query("event_type") ?? "",
       userId: c.req.query("user_id") ?? "",
       clientId: c.req.query("client_id") ?? "",
+      resourceUri: c.req.query("resource_uri") ?? "",
       actorUserId: c.req.query("actor_user_id") ?? "",
       actorClientId: c.req.query("actor_client_id") ?? "",
     }
@@ -27,6 +28,9 @@ export function registerConsoleAudit(app: Hono<AppBindings>): void {
     }
     if (filters.clientId !== "") {
       query.clientId = filters.clientId
+    }
+    if (filters.resourceUri !== "") {
+      query.resourceUri = filters.resourceUri
     }
     if (filters.actorUserId !== "") {
       query.actorUserId = filters.actorUserId

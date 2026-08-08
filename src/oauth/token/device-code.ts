@@ -22,6 +22,7 @@ import { isExpired, nowSeconds } from "../../utils/time"
 import { consentCoversScopes } from "../consent"
 import { resolveResourceForScopes } from "../resources"
 import { parseScopeString } from "../scopes"
+import { evaluateUserTokenAccess } from "../user-token-policy"
 import { issueUserTokens } from "./issue"
 
 export async function handleDeviceCodeGrant(
@@ -147,6 +148,18 @@ async function issueDeviceTokens(
     throw new OAuthError("invalid_grant", {
       description: "The device authorization was revoked",
       detail: "approving session or consent is no longer active",
+    })
+  }
+  const access = await evaluateUserTokenAccess(env, {
+    userId: user.id,
+    clientId: client.clientId,
+    resourceUri,
+    scopes,
+  })
+  if (!access.allowed) {
+    throw new OAuthError("invalid_grant", {
+      description: "This account is not permitted to access this application or resource.",
+      detail: `user token policy denied ${access.reason}`,
     })
   }
   if (!(await consumeApprovedDevice(env, sessionId))) {

@@ -69,6 +69,19 @@ export async function listClients(env: Env): Promise<OAuthClient[]> {
   return result.results.map(mapClient)
 }
 
+export async function listClientsPaginated(
+  env: Env,
+  limit: number,
+  offset: number,
+): Promise<OAuthClient[]> {
+  const result = await env.DB.prepare(
+    `SELECT ${CLIENT_COLUMNS} FROM oauth_clients ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  )
+    .bind(limit, offset)
+    .all()
+  return result.results.map(mapClient)
+}
+
 export type CreateClientInput = {
   readonly clientId: string
   readonly name: string
@@ -169,7 +182,7 @@ export async function deleteClient(env: Env, id: string): Promise<boolean> {
   const result = await env.DB.prepare("DELETE FROM oauth_clients WHERE client_id = ?")
     .bind(id)
     .run()
-  return result.meta.changes === 1
+  return result.meta.changes >= 1
 }
 
 export async function setClientEnabled(env: Env, id: string, enabled: boolean): Promise<boolean> {

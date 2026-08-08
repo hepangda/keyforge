@@ -2,6 +2,7 @@ export const LOGIN_BROWSER_SCRIPT = `
 (function(){
   const button=document.querySelector("[data-passkey-login]");
   if(!button||!window.PublicKeyCredential){if(button)button.hidden=true;return}
+  button.hidden=false;
   const status=document.querySelector("[data-passkey-status]");
   const decode=(value)=>{const base=value.replace(/-/g,"+").replace(/_/g,"/");const raw=atob(base+"=".repeat((4-base.length%4)%4));return Uint8Array.from(raw,c=>c.charCodeAt(0)).buffer};
   const encode=(value)=>{const bytes=new Uint8Array(value);let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);return btoa(raw).split("+").join("-").split("/").join("_").replace(/=+$/g,"")};
@@ -10,7 +11,7 @@ export const LOGIN_BROWSER_SCRIPT = `
     button.disabled=true;message(button.dataset.waitingMessage||"");
     try{
       const optionsResponse=await fetch("/webauthn/login/options",{method:"POST",headers:{accept:"application/json"}});
-      if(!optionsResponse.ok)throw new Error("options");
+      if(!optionsResponse.ok){if(optionsResponse.status===429){message(button.dataset.rateLimitedMessage||"");button.disabled=false;return}throw new Error("options")}
       const options=await optionsResponse.json();
       options.challenge=decode(options.challenge);
       if(options.allowCredentials)options.allowCredentials=options.allowCredentials.map(item=>({...item,id:decode(item.id)}));
@@ -18,10 +19,10 @@ export const LOGIN_BROWSER_SCRIPT = `
       if(!credential)throw new Error("cancelled");
       const response={id:credential.id,rawId:encode(credential.rawId),type:credential.type,authenticatorAttachment:credential.authenticatorAttachment,clientExtensionResults:credential.getClientExtensionResults(),returnTo:button.dataset.returnTo||"/",reauthenticate:button.dataset.reauth==="1",response:{clientDataJSON:encode(credential.response.clientDataJSON),authenticatorData:encode(credential.response.authenticatorData),signature:encode(credential.response.signature),userHandle:credential.response.userHandle?encode(credential.response.userHandle):null}};
       const verified=await fetch("/webauthn/login/verify",{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify(response)});
-      if(!verified.ok)throw new Error("verify");
+      if(!verified.ok){if(verified.status===429){message(button.dataset.rateLimitedMessage||"");button.disabled=false;return}throw new Error("verify")}
       const body=await verified.json();if(!body.verified)throw new Error("verify");
       window.location.assign(body.redirect_to||button.dataset.returnTo||"/");
-    }catch(error){if(error&&error.name==="NotAllowedError")message(button.dataset.cancelledMessage||"");else message(button.dataset.errorMessage||"");button.disabled=false}
+    }catch(error){if(error&&error.name==="NotAllowedError")message(button.dataset.cancelledMessage||"");else if(error instanceof TypeError)message(button.dataset.networkErrorMessage||button.dataset.errorMessage||"");else message(button.dataset.errorMessage||"");button.disabled=false}
   });
 })();`
 
@@ -29,26 +30,28 @@ export const ACCOUNT_BROWSER_SCRIPT = `
 (function(){
   const button=document.querySelector("[data-passkey-register]");
   if(!button||!window.PublicKeyCredential){if(button)button.hidden=true;return}
+  button.hidden=false;
   const status=document.querySelector("[data-passkey-status]");
   const decode=(value)=>{const base=value.replace(/-/g,"+").replace(/_/g,"/");const raw=atob(base+"=".repeat((4-base.length%4)%4));return Uint8Array.from(raw,c=>c.charCodeAt(0)).buffer};
   const encode=(value)=>{const bytes=new Uint8Array(value);let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);return btoa(raw).split("+").join("-").split("/").join("_").replace(/=+$/g,"")};
   const message=(value)=>{if(status){status.textContent=value;status.hidden=value===""}};
-  const redirectForReauthentication=async(response)=>{if(response.status!==403)return false;try{const body=await response.clone().json();if(body.error==="recent_authentication_required"){window.location.assign(body.reauthenticate_url||"/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey%26verified%3D1");return true}}catch(error){}return false};
+  const redirectForReauthentication=async(response)=>{if(response.status!==403)return false;try{const body=await response.clone().json();if(body.error==="recent_authentication_required"){window.location.assign(body.reauthenticate_url||"/login?reauth=1&return_to=%2F");return true}}catch(error){}return false};
   button.addEventListener("click",async()=>{
     button.disabled=true;message(button.dataset.waitingMessage||"");
     try{
       const csrf=button.dataset.csrf||"";
-      const optionsResponse=await fetch("/webauthn/register/options",{method:"POST",headers:{accept:"application/json","x-keyforge-csrf":csrf}});
-      if(!optionsResponse.ok){if(await redirectForReauthentication(optionsResponse))return;throw new Error("options")}
+      const returnTo=button.dataset.returnTo||"/";
+      const optionsResponse=await fetch("/webauthn/register/options",{method:"POST",headers:{accept:"application/json","x-keyforge-csrf":csrf,"x-keyforge-return-to":returnTo}});
+      if(!optionsResponse.ok){if(await redirectForReauthentication(optionsResponse))return;if(optionsResponse.status===429){message(button.dataset.rateLimitedMessage||"");button.disabled=false;return}throw new Error("options")}
       const options=await optionsResponse.json();options.challenge=decode(options.challenge);options.user.id=decode(options.user.id);
       if(options.excludeCredentials)options.excludeCredentials=options.excludeCredentials.map(item=>({...item,id:decode(item.id)}));
       const credential=await navigator.credentials.create({publicKey:options});if(!credential)throw new Error("cancelled");
       const transports=typeof credential.response.getTransports==="function"?credential.response.getTransports():[];
       const response={id:credential.id,rawId:encode(credential.rawId),type:credential.type,authenticatorAttachment:credential.authenticatorAttachment,clientExtensionResults:credential.getClientExtensionResults(),response:{clientDataJSON:encode(credential.response.clientDataJSON),attestationObject:encode(credential.response.attestationObject),transports}};
-      const verified=await fetch("/webauthn/register/verify",{method:"POST",headers:{"content-type":"application/json",accept:"application/json","x-keyforge-csrf":csrf},body:JSON.stringify(response)});
-      if(!verified.ok){if(await redirectForReauthentication(verified))return;throw new Error("verify")}const body=await verified.json();if(!body.verified)throw new Error("verify");
-      window.location.assign("/?section=login-methods&flow=add-passkey&notice=passkey_added");
-    }catch(error){if(error&&error.name==="NotAllowedError")message(button.dataset.cancelledMessage||"");else message(button.dataset.errorMessage||"");button.disabled=false}
+      const verified=await fetch("/webauthn/register/verify",{method:"POST",headers:{"content-type":"application/json",accept:"application/json","x-keyforge-csrf":csrf,"x-keyforge-return-to":returnTo},body:JSON.stringify(response)});
+      if(!verified.ok){if(await redirectForReauthentication(verified))return;if(verified.status===429){message(button.dataset.rateLimitedMessage||"");button.disabled=false;return}throw new Error("verify")}const body=await verified.json();if(!body.verified)throw new Error("verify");
+      window.location.assign("/?section=login-methods&notice=passkey_added");
+    }catch(error){if(error&&error.name==="NotAllowedError")message(button.dataset.cancelledMessage||"");else if(error instanceof TypeError)message(button.dataset.networkErrorMessage||button.dataset.errorMessage||"");else message(button.dataset.errorMessage||"");button.disabled=false}
   });
 })();`
 
@@ -408,6 +411,32 @@ export const AVATAR_BROWSER_SCRIPT = `
 
 export const FORMS_BROWSER_SCRIPT = `
 (function(){
+  var clipboard=navigator.clipboard;
+  if(clipboard&&typeof clipboard.writeText==="function"){
+    document.querySelectorAll("[data-copy-value]").forEach(function(button){
+      button.hidden=false;
+      button.addEventListener("click",function(){
+        var root=button.closest(".copy-value");var source=root&&root.querySelector("[data-copy-source]");var status=root&&root.querySelector("[data-copy-status]");
+        if(!source)return;
+        clipboard.writeText(source.textContent||"").then(function(){if(status){status.textContent=button.dataset.copySuccess||"";status.hidden=false}});
+      });
+    });
+  }
+  document.querySelectorAll("[data-uppercase]").forEach(function(input){
+    input.addEventListener("input",function(){var pos=input.selectionStart;var upper=input.value.toUpperCase();if(upper!==input.value){input.value=upper;try{input.setSelectionRange(pos,pos)}catch(e){}}});
+  });
+  document.querySelectorAll("[data-user-setup-form]").forEach(function(form){
+    var region=form.querySelector("[data-user-password-region]");
+    var sync=function(){var mode=form.querySelector('[name="setup_mode"]:checked');if(region)region.hidden=!!mode&&mode.value==="invite"};
+    form.addEventListener("change",function(event){if(event.target&&event.target.name==="setup_mode")sync()});sync();
+  });
+  var storage;try{storage=window.sessionStorage}catch(error){}
+  var eligible=function(field){return field.name&&field.type!=="password"&&field.type!=="file"&&field.type!=="hidden"&&field.name!=="confirmation"&&field.name!=="csrf_token"&&field.name!=="token"&&field.name!=="client_secret"};
+  var serialize=function(form){var values={};Array.from(form.elements).filter(eligible).forEach(function(field){if((field.type==="checkbox"||field.type==="radio")&&!field.checked)return;var value=field.value||"";if(values[field.name]===undefined)values[field.name]=[];values[field.name].push(value)});return values};
+  var restore=function(form,values){Object.keys(values).forEach(function(name){var fields=Array.from(form.elements).filter(function(field){return field.name===name&&eligible(field)});fields.forEach(function(field){if(field.type==="checkbox"||field.type==="radio")field.checked=values[name].includes(field.value);else field.value=values[name][0]||""})})};
+  document.querySelectorAll("[data-draft-clear]").forEach(function(marker){if(storage)try{storage.removeItem(marker.dataset.draftClear)}catch(error){}});
+  document.querySelectorAll("[data-draft-form]").forEach(function(container){var form=container.matches("form")?container:container.querySelector("form");var key=container.dataset.draftKey;if(!form||!key||!storage)return;if(new URLSearchParams(window.location.search).get("draft")==="1")try{var saved=JSON.parse(storage.getItem(key)||"null");if(saved)restore(form,saved)}catch(error){};var save=function(){try{storage.setItem(key,JSON.stringify(serialize(form)))}catch(error){}};form.addEventListener("input",save);form.addEventListener("change",save);var passwordMode=form.querySelector('[name="setup_mode"][value="password"]:checked');var note=form.querySelector("[data-password-draft-note]");if(passwordMode&&note)note.hidden=false;container.querySelectorAll("a[href]").forEach(function(link){link.dataset.draftCancel=key})});
+  document.querySelectorAll("[data-draft-cancel]").forEach(function(link){link.addEventListener("click",function(){if(storage)try{storage.removeItem(link.dataset.draftCancel)}catch(error){}})});
   var setLanguageReturnTo=function(form){
     var returnTo=form.querySelector('[name="return_to"]');
     if(returnTo)returnTo.value=window.location.pathname+window.location.search+window.location.hash;
@@ -439,7 +468,7 @@ export const CONSOLE_BROWSER_SCRIPT = `
     var back=form.querySelector("[data-wizard-back]");
     var submit=form.querySelector("[data-wizard-submit]");
     if(!panels.length||!next||!back||!submit)return;
-    var current=0;
+    var initial=Math.max(0,Math.min(Number(form.dataset.initialStep)||0,panels.length-1));var current=initial;
     var labels={application:form.dataset.labelApplication||"",device:form.dataset.labelDevice||"",service:form.dataset.labelService||"",public:form.dataset.labelPublic||"",confidential:form.dataset.labelConfidential||""};
     var valueFor=function(name){
       var fields=Array.from(form.querySelectorAll('[name="'+name+'"]'));
@@ -513,6 +542,6 @@ export const CONSOLE_BROWSER_SCRIPT = `
     });
     var selectedKind=form.querySelector('[name="client_kind"]:checked');
     syncKindRequirements(selectedKind?selectedKind.value:"application");syncResourceRequirement();
-    form.dataset.wizardReady="1";show(0);updateReview();
+    form.dataset.wizardReady="1";show(initial);updateReview();var summary=form.querySelector("[data-error-summary]");if(summary)summary.focus();
   });
 })();`

@@ -33,8 +33,11 @@ import {
   emailCorrelationValue,
   requestCorrelationHash,
 } from "../security/request-meta"
+import { safeLocalPath } from "../security/return-to"
 import type { AppBindings } from "../types/app"
+import type { AccountOneTimeTokenPayload } from "../types/tokens"
 import { readFormField } from "../utils/form"
+import { continuationHref } from "../views/layout"
 import {
   renderPasswordResetForm,
   renderPasswordResetRequest,
@@ -48,8 +51,25 @@ export const recovery = new Hono<AppBindings>()
 const RESET_RATE_LIMIT = 5
 const RESET_RATE_WINDOW_SECONDS = 15 * 60
 const RECOVERY_CAPABILITY_RATE_LIMIT = 60
+const PASSWORD_RESET_START = "/password/forgot"
+const EMAIL_CHANGE_RETURN_TO = "/?section=profile&flow=change-email"
 
-async function enforceRecoveryCapabilityRate(c: Context<AppBindings>): Promise<Response | null> {
+function resetContinuation(
+  payload: AccountOneTimeTokenPayload,
+  destination: "/login" | "/password/forgot",
+): string {
+  return continuationHref(
+    destination,
+    safeLocalPath(payload.redirectTo),
+    payload.reauthenticate === true,
+  )
+}
+
+async function enforceRecoveryCapabilityRate(
+  c: Context<AppBindings>,
+  actionHref: string,
+  actionLabel: string,
+): Promise<Response | null> {
   const rate = await checkIpRateLimit(
     c,
     "capability:account-recovery",
@@ -63,27 +83,53 @@ async function enforceRecoveryCapabilityRate(c: Context<AppBindings>): Promise<R
       "Recovery temporarily unavailable",
       "Too many attempts. Please wait and try again.",
       false,
+      actionHref,
+      actionLabel,
     ),
     429,
   )
 }
 
-recovery.get("/password/forgot", (c) =>
-  c.html(renderPasswordResetRequest(c.get("i18n"), issueCsrfToken(c))),
-)
+recovery.get("/password/forgot", (c) => {
+  const returnTo = safeLocalPath(c.req.query("return_to") ?? null)
+  return c.html(
+    renderPasswordResetRequest(
+      c.get("i18n"),
+      issueCsrfToken(c),
+      returnTo,
+      c.req.query("reauth") === "1",
+      undefined,
+      "",
+      c.req.query("hint"),
+    ),
+  )
+})
 
 recovery.post("/password/forgot", async (c) => {
   const form = await c.req.raw.formData()
   const email = readFormField(form, "email").trim().toLowerCase()
+  const returnTo = safeLocalPath(readFormField(form, "return_to") || null)
+  const reauthenticating = readFormField(form, "reauth") === "1"
+  const rawHint = readFormField(form, "hint")
+  const hint = rawHint === "" ? undefined : rawHint
+  const displayEmail = email.length <= EMAIL_INPUT_MAX_LENGTH ? email : ""
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.html(
-      renderPasswordResetRequest(c.get("i18n"), issueCsrfToken(c), "Please try again."),
+      renderPasswordResetRequest(
+        c.get("i18n"),
+        issueCsrfToken(c),
+        returnTo,
+        reauthenticating,
+        "Please try again.",
+        displayEmail,
+        hint,
+      ),
       403,
     )
   }
   const ipHash = await clientIpHash(c)
   const requestId = c.get("requestId")
-  const displayEmail = email.length <= EMAIL_INPUT_MAX_LENGTH ? email : ""
+
   const ipRate = await checkRateLimit(
     c.env,
     `password-reset:ip:${ipHash ?? "unknown"}`,
@@ -102,7 +148,9 @@ recovery.post("/password/forgot", async (c) => {
         }),
       )
     }
-    return c.html(renderPasswordResetSent(c.get("i18n"), displayEmail))
+    return c.html(
+      renderPasswordResetSent(c.get("i18n"), displayEmail, returnTo, reauthenticating, hint),
+    )
   }
   const addressHash = await requestCorrelationHash(
     c.env,
@@ -130,7 +178,11 @@ recovery.post("/password/forgot", async (c) => {
         })
         if (user !== null && !user.disabled) {
           try {
-            const { url } = await createPasswordResetToken(c.env, user.id, user.email)
+            const { url } = await createPasswordResetToken(c.env, user.id, user.email, {
+              redirectTo: returnTo,
+              reauthenticate: reauthenticating,
+              purpose: "password_reset",
+            })
             await enqueueEmail(c.env, {
               to: user.email,
               ...passwordResetEmail(url, c.get("i18n").locale),
@@ -152,7 +204,9 @@ recovery.post("/password/forgot", async (c) => {
       }),
     )
   }
-  return c.html(renderPasswordResetSent(c.get("i18n"), displayEmail))
+  return c.html(
+    renderPasswordResetSent(c.get("i18n"), displayEmail, returnTo, reauthenticating, hint),
+  )
 })
 
 recovery.get("/password/reset", async (c) => {
@@ -164,11 +218,17 @@ recovery.get("/password/reset", async (c) => {
         "Reset link unavailable",
         "This password reset link is invalid, expired, or already used.",
         false,
+        PASSWORD_RESET_START,
+        "Request a new reset link",
       ),
       400,
     )
   }
-  const limited = await enforceRecoveryCapabilityRate(c)
+  const limited = await enforceRecoveryCapabilityRate(
+    c,
+    PASSWORD_RESET_START,
+    "Request a new reset link",
+  )
   if (limited !== null) return limited
   const payload = await peekPasswordResetToken(c.env, token)
   if (payload === null) {
@@ -178,6 +238,8 @@ recovery.get("/password/reset", async (c) => {
         "Reset link unavailable",
         "This password reset link is invalid, expired, or already used.",
         false,
+        PASSWORD_RESET_START,
+        "Request a new reset link",
       ),
       400,
     )
@@ -190,6 +252,8 @@ recovery.get("/password/reset", async (c) => {
         "Account unavailable",
         "This account is unavailable.",
         false,
+        resetContinuation(payload, "/password/forgot"),
+        "Request a new reset link",
       ),
       400,
     )
@@ -225,11 +289,17 @@ recovery.post("/password/reset", async (c) => {
         "Reset link unavailable",
         "This password reset link is invalid, expired, or already used.",
         false,
+        PASSWORD_RESET_START,
+        "Request a new reset link",
       ),
       400,
     )
   }
-  const resetLimited = await enforceRecoveryCapabilityRate(c)
+  const resetLimited = await enforceRecoveryCapabilityRate(
+    c,
+    PASSWORD_RESET_START,
+    "Request a new reset link",
+  )
   if (resetLimited !== null) return resetLimited
   const pendingPayload = await peekPasswordResetToken(c.env, token)
   if (pendingPayload === null) {
@@ -239,6 +309,8 @@ recovery.post("/password/reset", async (c) => {
         "Reset link unavailable",
         "This password reset link is invalid, expired, or already used.",
         false,
+        PASSWORD_RESET_START,
+        "Request a new reset link",
       ),
       400,
     )
@@ -251,6 +323,8 @@ recovery.post("/password/reset", async (c) => {
         "Account unavailable",
         "This account is unavailable.",
         false,
+        resetContinuation(pendingPayload, "/password/forgot"),
+        "Request a new reset link",
       ),
       400,
     )
@@ -284,6 +358,8 @@ recovery.post("/password/reset", async (c) => {
         "Reset link unavailable",
         "This password reset link is invalid, expired, or already used.",
         false,
+        resetContinuation(pendingPayload, "/password/forgot"),
+        "Request a new reset link",
       ),
       400,
     )
@@ -296,6 +372,8 @@ recovery.post("/password/reset", async (c) => {
         "Account unavailable",
         "This account is unavailable.",
         false,
+        resetContinuation(payload, "/password/forgot"),
+        "Request a new reset link",
       ),
       400,
     )
@@ -311,6 +389,8 @@ recovery.post("/password/reset", async (c) => {
         "Reset link unavailable",
         "This password reset link is invalid, expired, or already used.",
         false,
+        resetContinuation(payload, "/password/forgot"),
+        "Request a new reset link",
       ),
       400,
     )
@@ -329,6 +409,8 @@ recovery.post("/password/reset", async (c) => {
         ? "Your account is active and ready to use."
         : "Your new password is ready to use.",
       true,
+      resetContinuation(payload, "/login"),
+      "Continue to sign in",
     ),
   )
 })
@@ -342,11 +424,13 @@ recovery.get("/account/email/verify", async (c) => {
         "Verification link unavailable",
         "This email verification link is invalid, expired, or already used.",
         false,
+        "/",
+        "Back to your account",
       ),
       400,
     )
   }
-  const limited = await enforceRecoveryCapabilityRate(c)
+  const limited = await enforceRecoveryCapabilityRate(c, "/", "Back to your account")
   if (limited !== null) return limited
   const payload = await peekEmailVerificationToken(c.env, token)
   if (payload === null) {
@@ -356,6 +440,8 @@ recovery.get("/account/email/verify", async (c) => {
         "Verification link unavailable",
         "This email verification link is invalid, expired, or already used.",
         false,
+        "/",
+        "Back to your account",
       ),
       400,
     )
@@ -378,7 +464,14 @@ recovery.post("/account/email/verify", async (c) => {
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.html(
-      renderRecoveryResult(c.get("i18n"), "Verification unavailable", "Please try again.", false),
+      renderRecoveryResult(
+        c.get("i18n"),
+        "Verification unavailable",
+        "Please try again.",
+        false,
+        "/",
+        "Back to your account",
+      ),
       403,
     )
   }
@@ -390,11 +483,13 @@ recovery.post("/account/email/verify", async (c) => {
         "Verification link unavailable",
         "This email verification link is invalid, expired, or already used.",
         false,
+        "/",
+        "Back to your account",
       ),
       400,
     )
   }
-  const verificationLimited = await enforceRecoveryCapabilityRate(c)
+  const verificationLimited = await enforceRecoveryCapabilityRate(c, "/", "Back to your account")
   if (verificationLimited !== null) return verificationLimited
   const payload = await consumeEmailVerificationToken(c.env, token)
   if (payload === null) {
@@ -404,6 +499,8 @@ recovery.post("/account/email/verify", async (c) => {
         "Verification link unavailable",
         "This email verification link is invalid, expired, or already used.",
         false,
+        "/",
+        "Back to your account",
       ),
       400,
     )
@@ -416,6 +513,8 @@ recovery.post("/account/email/verify", async (c) => {
         "Account unavailable",
         "This account is unavailable.",
         false,
+        "/",
+        "Back to your account",
       ),
       400,
     )
@@ -433,6 +532,8 @@ recovery.post("/account/email/verify", async (c) => {
       "Email verified",
       "Your email address is now verified.",
       true,
+      "/",
+      "Back to your account",
     ),
   )
 })
@@ -446,11 +547,17 @@ recovery.get("/account/email/change/verify", async (c) => {
         "Email change unavailable",
         "This email change link is invalid, expired, or already used.",
         false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
       ),
       400,
     )
   }
-  const limited = await enforceRecoveryCapabilityRate(c)
+  const limited = await enforceRecoveryCapabilityRate(
+    c,
+    EMAIL_CHANGE_RETURN_TO,
+    "Back to your account",
+  )
   if (limited !== null) return limited
   const payload = await peekEmailChangeToken(c.env, token)
   if (payload === null) {
@@ -460,6 +567,8 @@ recovery.get("/account/email/change/verify", async (c) => {
         "Email change unavailable",
         "This email change link is invalid, expired, or already used.",
         false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
       ),
       400,
     )
@@ -482,7 +591,14 @@ recovery.post("/account/email/change/verify", async (c) => {
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.html(
-      renderRecoveryResult(c.get("i18n"), "Email change unavailable", "Please try again.", false),
+      renderRecoveryResult(
+        c.get("i18n"),
+        "Email change unavailable",
+        "Please try again.",
+        false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
+      ),
       403,
     )
   }
@@ -494,11 +610,17 @@ recovery.post("/account/email/change/verify", async (c) => {
         "Email change unavailable",
         "This email change link is invalid, expired, or already used.",
         false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
       ),
       400,
     )
   }
-  const changeLimited = await enforceRecoveryCapabilityRate(c)
+  const changeLimited = await enforceRecoveryCapabilityRate(
+    c,
+    EMAIL_CHANGE_RETURN_TO,
+    "Back to your account",
+  )
   if (changeLimited !== null) return changeLimited
   const payload = await consumeEmailChangeToken(c.env, token)
   if (payload === null) {
@@ -508,6 +630,8 @@ recovery.post("/account/email/change/verify", async (c) => {
         "Email change unavailable",
         "This email change link is invalid, expired, or already used.",
         false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
       ),
       400,
     )
@@ -520,6 +644,8 @@ recovery.post("/account/email/change/verify", async (c) => {
         "Account unavailable",
         "This account is unavailable.",
         false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
       ),
       400,
     )
@@ -539,6 +665,8 @@ recovery.post("/account/email/change/verify", async (c) => {
           ? "That email address is already in use."
           : "This account is unavailable.",
         false,
+        EMAIL_CHANGE_RETURN_TO,
+        "Back to your account",
       ),
       result === "conflict" ? 409 : 400,
     )
@@ -555,6 +683,8 @@ recovery.post("/account/email/change/verify", async (c) => {
       "Email address changed",
       "Your new email is confirmed. Sign in again to continue.",
       true,
+      "/login",
+      "Continue to sign in",
     ),
   )
 })

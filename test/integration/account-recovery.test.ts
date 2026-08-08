@@ -1,8 +1,10 @@
 import { env, SELF } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  createAccountInvitationToken,
   createEmailVerificationToken,
   createPasswordResetToken,
+  peekPasswordResetToken,
 } from "../../src/auth/account-tokens"
 import {
   setUserPassword,
@@ -65,7 +67,10 @@ describe("account recovery", () => {
     )
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toContain("invalid, expired, or already used")
+    const html = await response.text()
+    expect(html).toContain("invalid, expired, or already used")
+    expect(html).toContain('href="/password/forgot"')
+    expect(html).toContain("Request a new reset link")
   })
 
   it("delivers a password reset without exposing whether an account exists", async () => {
@@ -95,6 +100,53 @@ describe("account recovery", () => {
     expect(await missing.text()).toContain("If an account exists")
     expect(await env.KV.get("test:email:missing@pangda.app")).toBeNull()
   })
+  it("preserves safe task state on reset request and sent pages", async () => {
+    const target = "/oauth/authorize?client_id=pangda_app&state="
+    const request = await SELF.fetch(
+      `${ISSUER}/password/forgot?reauth=1&return_to=${encodeURIComponent(target)}`,
+    )
+    const csrf = cookieValue(request, "__Host-keyforge_csrf")
+    const requestHtml = await request.text()
+    expect(requestHtml).toContain(`name="return_to" value="${target.replace("&", "&amp;")}"`)
+    expect(requestHtml).toContain('name="reauth" value="1"')
+    expect(requestHtml).toContain(
+      `href="/login?return_to=${encodeURIComponent(target)}&amp;reauth=1"`,
+    )
+
+    const sent = await postForm(
+      "/password/forgot",
+      { email: "missing@pangda.app", csrf_token: csrf, return_to: target, reauth: "1" },
+      `__Host-keyforge_csrf=${csrf}`,
+    )
+    expect(await sent.text()).toContain(
+      `href="/login?return_to=${encodeURIComponent(target)}&amp;reauth=1"`,
+    )
+
+    const unsafe = await SELF.fetch(
+      `${ISSUER}/password/forgot?return_to=${encodeURIComponent("https://evil.example/task")}`,
+    )
+    expect(await unsafe.text()).not.toContain("evil.example")
+  })
+  it("binds explicit continuation options to reset and invitation tokens", async () => {
+    const user = await createUser(env, { email: EMAIL, name: "Recover" })
+    const reset = await createPasswordResetToken(env, user.id, user.email, {
+      redirectTo: "/oauth/authorize?state=",
+      reauthenticate: true,
+      purpose: "password_reset",
+    })
+    await expect(peekPasswordResetToken(env, reset.token)).resolves.toMatchObject({
+      redirectTo: "/oauth/authorize?state=",
+      reauthenticate: true,
+      purpose: "password_reset",
+    })
+
+    const invitation = await createAccountInvitationToken(env, user.id, user.email)
+    await expect(peekPasswordResetToken(env, invitation.token)).resolves.toMatchObject({
+      redirectTo: "/",
+      reauthenticate: false,
+      purpose: "account_invitation",
+    })
+  })
 
   it("resets a password once and revokes existing sessions", async () => {
     const user = await createUser(env, { email: EMAIL, name: "Recover" })
@@ -113,7 +165,11 @@ describe("account recovery", () => {
       authTime: Math.floor(Date.now() / 1000),
       rememberMe: false,
     })
-    const { token } = await createPasswordResetToken(env, user.id, user.email)
+    const { token } = await createPasswordResetToken(env, user.id, user.email, {
+      redirectTo: "/oauth/authorize?client_id=pangda_app&state=",
+      reauthenticate: true,
+      purpose: "password_reset",
+    })
     const csrf = await csrfPage(`/password/reset?token=${encodeURIComponent(token)}`)
     const result = await postForm(
       "/password/reset",
@@ -126,7 +182,11 @@ describe("account recovery", () => {
       csrf.cookie,
     )
     expect(result.status).toBe(200)
-    expect(await result.text()).toContain("Password reset")
+    const resultHtml = await result.text()
+    expect(resultHtml).toContain("Password reset")
+    expect(resultHtml).toContain(
+      'href="/login?return_to=%2Foauth%2Fauthorize%3Fclient_id%3Dpangda_app%26state%3D&amp;reauth=1"',
+    )
     expect(await verifyUserPassword(env, user.id, "new password that is even longer")).toBe(true)
 
     const oldSession = await SELF.fetch(`${ISSUER}/`, {
@@ -208,7 +268,11 @@ describe("account recovery", () => {
   it("invalidates an issued password-reset capability after a password security change", async () => {
     const user = await createUser(env, { email: EMAIL, name: "Recover" })
     await setUserPassword(env, user.id, "first password that is long enough")
-    const { token } = await createPasswordResetToken(env, user.id, user.email)
+    const { token } = await createPasswordResetToken(env, user.id, user.email, {
+      redirectTo: "/",
+      reauthenticate: false,
+      purpose: "password_reset",
+    })
 
     await setUserPassword(env, user.id, "second password that is long enough")
 
@@ -241,16 +305,32 @@ describe("account recovery", () => {
       `__Host-keyforge_csrf=${csrfToken}`,
     )
     expect(verified.status).toBe(200)
-    expect(await verified.text()).toContain("Email verified")
+    const verifiedHtml = await verified.text()
+    expect(verifiedHtml).toContain("Email verified")
+    expect(verifiedHtml).toContain('href="/"')
     expect((await getUserById(env, user.id))?.emailVerified).toBe(true)
     expect(
       (await SELF.fetch(`${ISSUER}/account/email/verify?token=${encodeURIComponent(token)}`))
         .status,
     ).toBe(400)
   })
+  it("returns failed email changes to the profile flow", async () => {
+    const response = await SELF.fetch(`${ISSUER}/account/email/change/verify?token=invalid`)
+    expect(response.status).toBe(400)
+    expect(await response.text()).toContain('href="/?section=profile&amp;flow=change-email"')
+  })
 
-  it("rejects recovery form submissions without the double-submit token", async () => {
-    const response = await postForm("/password/forgot", { email: EMAIL }, "")
+  it("retains bounded reset request fields after CSRF failure", async () => {
+    const target = "/console/users/new"
+    const response = await postForm(
+      "/password/forgot",
+      { email: "Draft.User@Example.test", return_to: target, reauth: "1" },
+      "",
+    )
     expect(response.status).toBe(403)
+    const html = await response.text()
+    expect(html).toContain('value="draft.user@example.test"')
+    expect(html).toContain(`name="return_to" value="${target}"`)
+    expect(html).toContain('name="reauth" value="1"')
   })
 })

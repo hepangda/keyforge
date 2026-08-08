@@ -98,23 +98,23 @@ function avatarOutcome(reason: "too_large" | "unsupported" | "empty"): AvatarOut
   return reason === "unsupported" ? "avatar_unsupported" : "avatar_missing"
 }
 
-function reauthenticationRedirect(returnTo: string): string {
-  return `/login?reauth=1&return_to=${encodeURIComponent(returnTo)}`
+function reauthenticationRedirect(returnTo: string, hint?: string): string {
+  const params = new URLSearchParams({ reauth: "1", return_to: returnTo })
+  if (hint !== undefined) params.set("hint", hint)
+  return `/login?${params.toString()}`
 }
 
 function accountFlow(
   section: "profile" | "login-methods",
   flow: string,
   options: {
-    readonly credentialId?: string
+    readonly targetId?: string
     readonly notice?: string
-    readonly verified?: boolean
   } = {},
 ): string {
   const query = new URLSearchParams({ section, flow })
-  if (options.credentialId !== undefined) query.set("credential", options.credentialId)
+  if (options.targetId !== undefined) query.set("target", options.targetId)
   if (options.notice !== undefined) query.set("notice", options.notice)
-  if (options.verified === true) query.set("verified", "1")
   return `/?${query.toString()}`
 }
 
@@ -221,9 +221,9 @@ accountSecurity.post("/account/passwords", async (c) => {
   if (user === null || form === null) {
     return c.redirect(accountFlow("login-methods", "add-password", { notice: "invalid" }))
   }
-  const returnTo = accountFlow("login-methods", "add-password", { verified: true })
+  const returnTo = accountFlow("login-methods", "add-password")
   if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect(reauthenticationRedirect(returnTo))
+    return c.redirect(reauthenticationRedirect(returnTo, "add_password"))
   }
   const password = readFormField(form, "password")
   const confirmation = readFormField(form, "password_confirm")
@@ -237,7 +237,6 @@ accountSecurity.post("/account/passwords", async (c) => {
     return c.redirect(
       accountFlow("login-methods", "add-password", {
         notice: "password_invalid",
-        verified: true,
       }),
     )
   }
@@ -246,7 +245,6 @@ accountSecurity.post("/account/passwords", async (c) => {
     return c.redirect(
       accountFlow("login-methods", "add-password", {
         notice: "password_invalid",
-        verified: true,
       }),
     )
   }
@@ -257,7 +255,7 @@ accountSecurity.post("/account/passwords", async (c) => {
     success: true,
     detail: "password login method added",
   })
-  return c.redirect(accountFlow("login-methods", "add-password", { notice: "password_added" }))
+  return c.redirect("/?section=login-methods&notice=password_added")
 })
 
 accountSecurity.post("/account/passwords/:id/rename", async (c) => {
@@ -267,17 +265,16 @@ accountSecurity.post("/account/passwords/:id/rename", async (c) => {
   if (user === null || form === null) {
     return c.redirect(
       accountFlow("login-methods", "manage-password", {
-        credentialId,
+        targetId: credentialId,
         notice: "invalid",
       }),
     )
   }
   const returnTo = accountFlow("login-methods", "manage-password", {
-    credentialId,
-    verified: true,
+    targetId: credentialId,
   })
   if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect(reauthenticationRedirect(returnTo))
+    return c.redirect(reauthenticationRedirect(returnTo, "manage_password"))
   }
   const rawName = readFormField(form, "name").trim()
   const renamed = await renamePasswordCredential(
@@ -297,7 +294,7 @@ accountSecurity.post("/account/passwords/:id/rename", async (c) => {
   }
   return c.redirect(
     accountFlow("login-methods", "manage-password", {
-      credentialId,
+      targetId: credentialId,
       notice: renamed ? "password_renamed" : "not_found",
     }),
   )
@@ -305,25 +302,17 @@ accountSecurity.post("/account/passwords/:id/rename", async (c) => {
 
 accountSecurity.post("/account/passwords/:id/delete", async (c) => {
   const user = currentUser(c)
-  const form = await verifiedForm(c)
   const credentialId = c.req.param("id")
-  if (user === null || form === null) {
-    return c.redirect(
-      accountFlow("login-methods", "manage-password", {
-        credentialId,
-        notice: "invalid",
-      }),
-    )
+  const reviewTarget = accountFlow("login-methods", "remove-password", {
+    targetId: credentialId,
+  })
+  if (user === null) return c.redirect("/?section=login-methods&notice=not_found")
+  const form = await verifiedForm(c)
+  if (form === null) {
+    return c.redirect(`${reviewTarget}&notice=invalid`)
   }
   if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect(
-      reauthenticationRedirect(
-        accountFlow("login-methods", "manage-password", {
-          credentialId,
-          verified: true,
-        }),
-      ),
-    )
+    return c.redirect(reauthenticationRedirect(reviewTarget, "manage_password"))
   }
   const result = await deletePasswordCredentialPreservingLoginMethod(c.env, credentialId, user.id)
   if (result === "deleted") {
@@ -334,14 +323,12 @@ accountSecurity.post("/account/passwords/:id/delete", async (c) => {
       success: true,
       detail: "password login method deleted",
     })
+    return c.redirect("/?section=login-methods&notice=login_method_removed")
   }
-  const notice =
-    result === "deleted"
-      ? "password_deleted"
-      : result === "last_login_method"
-        ? "last_login_method"
-        : "not_found"
-  return c.redirect(accountFlow("login-methods", "manage-password", { credentialId, notice }))
+  if (result === "last_login_method") {
+    return c.redirect(`${reviewTarget}&notice=last_login_method`)
+  }
+  return c.redirect("/?section=login-methods&notice=not_found")
 })
 
 accountSecurity.post("/account/email/verify", async (c) => {
@@ -384,7 +371,9 @@ accountSecurity.post("/account/email/change", async (c) => {
   }
   const authorization = await authorizeSensitivePasswordAction(c, user, form, "change_email")
   if (authorization === "reauthentication_required") {
-    return c.redirect(reauthenticationRedirect(accountFlow("profile", "change-email")))
+    return c.redirect(
+      reauthenticationRedirect(accountFlow("profile", "change-email"), "change_email"),
+    )
   }
   if (authorization !== "authorized") {
     return c.redirect(accountFlow("profile", "change-email", { notice: "email_change_invalid" }))
@@ -416,7 +405,7 @@ accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
   if (user === null || form === null) {
     return c.redirect(
       accountFlow("login-methods", "manage-passkey", {
-        credentialId,
+        targetId: credentialId,
         notice: "invalid",
       }),
     )
@@ -425,9 +414,9 @@ accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
     return c.redirect(
       reauthenticationRedirect(
         accountFlow("login-methods", "manage-passkey", {
-          credentialId,
-          verified: true,
+          targetId: credentialId,
         }),
+        "manage_passkey",
       ),
     )
   }
@@ -449,7 +438,7 @@ accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
   }
   return c.redirect(
     accountFlow("login-methods", "manage-passkey", {
-      credentialId,
+      targetId: credentialId,
       notice: renamed ? "passkey_renamed" : "not_found",
     }),
   )
@@ -457,25 +446,17 @@ accountSecurity.post("/account/passkeys/:id/rename", async (c) => {
 
 accountSecurity.post("/account/passkeys/:id/delete", async (c) => {
   const user = currentUser(c)
-  const form = await verifiedForm(c)
   const credentialId = c.req.param("id")
-  if (user === null || form === null) {
-    return c.redirect(
-      accountFlow("login-methods", "manage-passkey", {
-        credentialId,
-        notice: "invalid",
-      }),
-    )
+  const reviewTarget = accountFlow("login-methods", "remove-passkey", {
+    targetId: credentialId,
+  })
+  if (user === null) return c.redirect("/?section=login-methods&notice=not_found")
+  const form = await verifiedForm(c)
+  if (form === null) {
+    return c.redirect(`${reviewTarget}&notice=invalid`)
   }
   if (!hasRecentAuthentication(c.get("session"))) {
-    return c.redirect(
-      reauthenticationRedirect(
-        accountFlow("login-methods", "manage-passkey", {
-          credentialId,
-          verified: true,
-        }),
-      ),
-    )
+    return c.redirect(reauthenticationRedirect(reviewTarget, "manage_passkey"))
   }
   const result = await deleteCredentialPreservingLoginMethod(c.env, credentialId, user.id)
   if (result === "deleted") {
@@ -486,14 +467,12 @@ accountSecurity.post("/account/passkeys/:id/delete", async (c) => {
       success: true,
       detail: "passkey deleted",
     })
+    return c.redirect("/?section=login-methods&notice=login_method_removed")
   }
-  const notice =
-    result === "deleted"
-      ? "passkey_deleted"
-      : result === "last_login_method"
-        ? "last_login_method"
-        : "not_found"
-  return c.redirect(accountFlow("login-methods", "manage-passkey", { credentialId, notice }))
+  if (result === "last_login_method") {
+    return c.redirect(`${reviewTarget}&notice=last_login_method`)
+  }
+  return c.redirect("/?section=login-methods&notice=not_found")
 })
 
 accountSecurity.post("/account/delete", async (c) => {
@@ -505,7 +484,9 @@ accountSecurity.post("/account/delete", async (c) => {
   const confirmed = readFormField(form, "confirmation") === user.email
   const authorization = await authorizeSensitivePasswordAction(c, user, form, "delete_account")
   if (authorization === "reauthentication_required") {
-    return c.redirect(reauthenticationRedirect(accountFlow("profile", "delete-account")))
+    return c.redirect(
+      reauthenticationRedirect(accountFlow("profile", "delete-account"), "delete_account"),
+    )
   }
   if (!confirmed || authorization !== "authorized") {
     return c.redirect(accountFlow("profile", "delete-account", { notice: "delete_invalid" }))

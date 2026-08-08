@@ -8,6 +8,11 @@ import {
 } from "../auth/password"
 import { revokeAllUserSessions } from "../auth/session"
 import {
+  getPermissionGroupAccess,
+  MAX_PERMISSION_GROUP_TARGETS,
+  replacePermissionGroupAccess,
+} from "../db/queries/permission-group-access"
+import {
   ALIAS_PATTERN,
   createGroup,
   deleteGroup,
@@ -75,6 +80,13 @@ const createGroupSchema = z.object({
 const patchGroupSchema = createGroupSchema
   .partial()
   .refine((value) => Object.keys(value).length > 0)
+
+const permissionGroupAccessSchema = z
+  .object({
+    client_ids: z.array(z.string().min(1)).max(MAX_PERMISSION_GROUP_TARGETS),
+    resource_uris: z.array(z.string().min(1)).max(MAX_PERMISSION_GROUP_TARGETS),
+  })
+  .strict()
 
 /** Read an admin avatar upload from either a multipart field or a raw body. */
 async function readAdminAvatarBody(
@@ -189,6 +201,39 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     return group === undefined ? c.json({ error: "not_found" }, 404) : c.json(group)
   })
 
+  app.get("/admin/groups/:id/access", async (c) => {
+    const access = await getPermissionGroupAccess(c.env, c.req.param("id"))
+    return access === null
+      ? c.json({ error: "not_found" }, 404)
+      : c.json({ client_ids: access.clientIds, resource_uris: access.resourceUris })
+  })
+
+  app.put("/admin/groups/:id/access", async (c) => {
+    const parsed = permissionGroupAccessSchema.safeParse(await readJsonBody(c))
+    if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
+    const id = c.req.param("id")
+    const result = await replacePermissionGroupAccess(c.env, id, {
+      clientIds: parsed.data.client_ids,
+      resourceUris: parsed.data.resource_uris,
+    })
+    if (result === "not_found") return c.json({ error: "not_found" }, 404)
+    if (result !== "updated") return c.json({ error: "invalid_access_target" }, 400)
+    const access = await getPermissionGroupAccess(c.env, id)
+    if (access === null) return c.json({ error: "not_found" }, 404)
+    await recordAudit(c.env, {
+      type: "admin.group.access_updated",
+      actorUserId: c.get("user")?.id ?? null,
+      requestId: c.get("requestId"),
+      success: true,
+      metadata: {
+        group_id: id,
+        client_ids: access.clientIds,
+        resource_uris: access.resourceUris,
+      },
+    })
+    return c.json({ client_ids: access.clientIds, resource_uris: access.resourceUris })
+  })
+
   app.patch("/admin/groups/:id", async (c) => {
     const parsed = patchGroupSchema.safeParse(await readJsonBody(c))
     if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
@@ -247,7 +292,8 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       return c.json({ error: "invalid_request" }, 400)
     }
     const id = c.req.param("id")
-    if ((await getUserById(c.env, id)) === null) {
+    const current = await getUserById(c.env, id)
+    if (current === null) {
       return c.json({ error: "not_found" }, 404)
     }
     const body = parsed.data
@@ -274,14 +320,27 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
         ? c.json({ error: "not_found" }, 404)
         : c.json({ error: "last_active_admin" }, 409)
     }
-    await recordAudit(c.env, {
-      type: "admin.user.updated",
-      actorUserId: c.get("user")?.id ?? null,
-      userId: updated.id,
-      requestId: c.get("requestId"),
-      success: true,
-      detail: `admin updated user ${updated.id}`,
-    })
+    const changedProfile =
+      body.name !== undefined || body.alias !== undefined || body.emailVerified !== undefined
+    if (changedProfile) {
+      await recordAudit(c.env, {
+        type: "admin.user.updated",
+        actorUserId: c.get("user")?.id ?? null,
+        userId: updated.id,
+        requestId: c.get("requestId"),
+        success: true,
+        detail: `admin updated user ${updated.id}`,
+      })
+    }
+    if (body.disabled !== undefined && body.disabled !== current.disabled) {
+      await recordAudit(c.env, {
+        type: body.disabled ? "admin.user.disabled" : "admin.user.enabled",
+        actorUserId: c.get("user")?.id ?? null,
+        userId: updated.id,
+        requestId: c.get("requestId"),
+        success: true,
+      })
+    }
     return c.json(serializeUser(c.env, updated))
   })
 
@@ -347,7 +406,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     )
     if (result === null) return c.json({ error: "invalid_password_or_limit" }, 400)
     await recordAudit(c.env, {
-      type: "admin.user.updated",
+      type: "admin.user.password_added",
       actorUserId: c.get("user")?.id ?? null,
       userId: user.id,
       requestId: c.get("requestId"),
@@ -369,7 +428,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       return c.json({ error: result }, result === "last_login_method" ? 409 : 404)
     }
     await recordAudit(c.env, {
-      type: "admin.user.updated",
+      type: "admin.user.password_deleted",
       actorUserId: c.get("user")?.id ?? null,
       userId: user.id,
       requestId: c.get("requestId"),
@@ -391,7 +450,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       return c.json({ error: result }, result === "last_login_method" ? 409 : 404)
     }
     await recordAudit(c.env, {
-      type: "admin.user.updated",
+      type: "admin.user.passkey_deleted",
       actorUserId: c.get("user")?.id ?? null,
       userId: user.id,
       requestId: c.get("requestId"),
@@ -476,7 +535,7 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     }
     await revokeAllUserSessions(c.env, user.id)
     await recordAudit(c.env, {
-      type: "admin.user.updated",
+      type: "admin.user.sessions_revoked",
       actorUserId: c.get("user")?.id ?? null,
       userId: user.id,
       requestId: c.get("requestId"),

@@ -13,23 +13,59 @@ describe("browser script isolation", () => {
     expect(ACCOUNT_BROWSER_SCRIPT).toContain('body.error==="recent_authentication_required"')
   })
 
+  it("sends the active account flow on both passkey registration requests", () => {
+    expect(ACCOUNT_BROWSER_SCRIPT.match(/"x-keyforge-return-to":returnTo/g)).toHaveLength(2)
+    expect(ACCOUNT_BROWSER_SCRIPT).not.toContain("verified%3D1")
+    expect(() => new Function(ACCOUNT_BROWSER_SCRIPT)).not.toThrow()
+  })
+
   it("does not ship the account-only redirect helper in the login bundle", () => {
     expect(LOGIN_BROWSER_SCRIPT).not.toContain("redirectForReauthentication")
   })
 
+  it("keeps passkey controls hidden until supported and distinguishes failures", () => {
+    for (const script of [LOGIN_BROWSER_SCRIPT, ACCOUNT_BROWSER_SCRIPT]) {
+      expect(script).toContain("button.hidden=false")
+      expect(script).toContain("status===429")
+      expect(script).toContain('error.name==="NotAllowedError"')
+      expect(() => new Function(script)).not.toThrow()
+    }
+  })
+
   it("fills the language return URL in the browser without reflecting request queries in HTML", () => {
     expect(FORMS_BROWSER_SCRIPT).toContain("[data-language-picker]")
+    expect(FORMS_BROWSER_SCRIPT).toContain("[data-copy-value]")
+    expect(FORMS_BROWSER_SCRIPT).toContain("clipboard.writeText")
+    expect(FORMS_BROWSER_SCRIPT).toContain("button.hidden=false")
     expect(FORMS_BROWSER_SCRIPT).toContain('select[name="language"]')
     expect(FORMS_BROWSER_SCRIPT).toContain("form.requestSubmit()")
+    expect(FORMS_BROWSER_SCRIPT).toContain("[data-user-setup-form]")
+    expect(FORMS_BROWSER_SCRIPT).toContain('mode.value==="invite"')
     expect(FORMS_BROWSER_SCRIPT).toContain(
       "window.location.pathname+window.location.search+window.location.hash",
     )
     expect(() => new Function(FORMS_BROWSER_SCRIPT)).not.toThrow()
+    for (const fragment of [
+      "window.sessionStorage",
+      'field.type!=="password"',
+      'field.type!=="file"',
+      'field.type!=="hidden"',
+      'field.name!=="confirmation"',
+      'field.name!=="csrf_token"',
+      'get("draft")==="1"',
+      "[data-draft-clear]",
+      "[data-draft-cancel]",
+    ]) {
+      expect(FORMS_BROWSER_SCRIPT).toContain(fragment)
+    }
   })
 
   it("progressively enhances the Console application wizard", () => {
     expect(CONSOLE_BROWSER_SCRIPT).toContain("[data-console-wizard]")
     expect(CONSOLE_BROWSER_SCRIPT).toContain('form.dataset.wizardReady="1"')
+    expect(CONSOLE_BROWSER_SCRIPT).toContain("form.dataset.initialStep")
+    expect(CONSOLE_BROWSER_SCRIPT).toContain('form.querySelector("[data-error-summary]")')
+    expect(CONSOLE_BROWSER_SCRIPT).toContain("show(initial)")
     expect(CONSOLE_BROWSER_SCRIPT).toContain("updateReview")
     expect(CONSOLE_BROWSER_SCRIPT).toContain("setKindDefaults")
     expect(CONSOLE_BROWSER_SCRIPT).toContain("client_credentials")

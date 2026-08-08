@@ -11,7 +11,7 @@ const PASSWORD = "correct horse battery staple e2e"
 const CLIENT = "pangda_app"
 const REDIRECT = "https://app.pangda.app/auth/callback"
 const RESOURCE = "https://api.pangda.app"
-const SCOPE = "openid profile email groups offline_access api.read"
+const SCOPE = "openid profile email offline_access api.read"
 // RFC 7636 Appendix B reference PKCE pair.
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
@@ -130,6 +130,28 @@ function postDecision(opts: {
     redirect: "manual",
   })
 }
+const COMPLETE_DECISION_PARAMS: Readonly<Record<string, string>> = {
+  client_id: CLIENT,
+  redirect_uri: REDIRECT,
+  response_type: "code",
+  scope: SCOPE,
+  state: "",
+  nonce: "continuation-nonce",
+  code_challenge: CHALLENGE,
+  code_challenge_method: "S256",
+  resource: RESOURCE,
+  prompt: "consent",
+  max_age: "60",
+}
+
+function expectCompleteAuthorizeTarget(target: string): void {
+  const authorize = new URL(target.replaceAll("&amp;", "&"), ISSUER)
+  expect(authorize.pathname).toBe("/oauth/authorize")
+  for (const [key, value] of Object.entries(COMPLETE_DECISION_PARAMS)) {
+    expect(authorize.searchParams.has(key), key).toBe(true)
+    expect(authorize.searchParams.get(key), key).toBe(value)
+  }
+}
 
 describe("oauth login + callback (end to end)", () => {
   it("logs in, approves consent, receives a code at the callback, and exchanges it for tokens", async () => {
@@ -158,7 +180,13 @@ describe("oauth login + callback (end to end)", () => {
       redirect: "manual",
     })
     expect(consent.status).toBe(200)
-    expect(await consent.text()).toContain("Pangda App")
+    const consentPage = await consent.text()
+    expect(consentPage).toContain("Pangda App")
+    expect(consentPage).toContain('<main class="card consent-card">')
+    expect(consentPage).not.toContain("card--wide")
+    expect(consentPage).toContain("--layout-card-max:480px")
+    expect(consentPage).toContain("@media(max-width:720px)")
+    expect(consentPage).not.toContain("max-width:520px")
     expect(consent.headers.get("content-security-policy")).toContain(
       "form-action 'self' https://app.pangda.app;",
     )
@@ -209,6 +237,50 @@ describe("oauth login + callback (end to end)", () => {
     expect(payload.sub).toBe(userId)
     expect(payload["nonce"]).toBe(nonce)
     expect(payload["email"]).toBe(EMAIL)
+  })
+  it("rebuilds every authorize parameter before session and CSRF recovery", async () => {
+    const missingSession = await SELF.fetch(`${ISSUER}/oauth/authorize/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(COMPLETE_DECISION_PARAMS).toString(),
+      redirect: "manual",
+    })
+    expect(missingSession.status).toBe(302)
+    const loginUrl = new URL(missingSession.headers.get("location") ?? "", ISSUER)
+    expect(loginUrl.pathname).toBe("/login")
+    expectCompleteAuthorizeTarget(loginUrl.searchParams.get("return_to") ?? "")
+
+    const { session } = await login("/")
+    const authorize = await SELF.fetch(
+      authorizeUrl({
+        state: "",
+        nonce: COMPLETE_DECISION_PARAMS["nonce"] ?? "",
+        prompt: "consent",
+        max_age: "60",
+      }),
+      {
+        headers: { cookie: `__Host-keyforge_session=${session}` },
+      },
+    )
+    expect(authorize.status).toBe(200)
+    const csrf = cookieValue(authorize.headers.getSetCookie(), "__Host-keyforge_csrf")
+    const expired = await SELF.fetch(`${ISSUER}/oauth/authorize/decision`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `__Host-keyforge_session=${session}; __Host-keyforge_csrf=${csrf}`,
+      },
+      body: new URLSearchParams({
+        ...COMPLETE_DECISION_PARAMS,
+        csrf_token: "invalid",
+        decision: "approve",
+      }).toString(),
+    })
+    expect(expired.status).toBe(403)
+    const html = await expired.text()
+    const match = html.match(/<p class="foot"><a class="link-quiet" href="([^"]+)"/)
+    expect(match?.[1]).toBeDefined()
+    expectCompleteAuthorizeTarget(match?.[1] ?? "")
   })
 
   it("sends access_denied back to the callback when the user rejects consent", async () => {

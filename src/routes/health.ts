@@ -41,6 +41,8 @@ const REQUIRED_TABLES = [
   "webauthn_credentials",
   "oauth_clients",
   "oauth_resources",
+  "oauth_client_permission_groups",
+  "oauth_resource_permission_groups",
   "sessions",
   "refresh_tokens",
   "device_authorization_sessions",
@@ -71,6 +73,8 @@ const REQUIRED_INDEXES = [
   "idx_audit_actor_client_created",
   "idx_users_alias_canonical",
   "idx_password_credentials_user",
+  "idx_oauth_client_permission_groups_group",
+  "idx_oauth_resource_permission_groups_group",
 ] as const
 
 function requireNonEmpty(value: unknown, name: string, minimumLength = 1): void {

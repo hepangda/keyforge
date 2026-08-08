@@ -12,7 +12,7 @@ const ISSUER = "https://auth.pangda.app"
 const CLIENT = "pangda_app"
 const REDIRECT = "https://app.pangda.app/auth/callback"
 const RESOURCE = "https://api.pangda.app"
-const SCOPE = "openid profile email groups offline_access api.read"
+const SCOPE = "openid profile email offline_access api.read"
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 const SVC = "svc_internal_worker"
@@ -42,6 +42,11 @@ beforeEach(async () => {
     emailVerified: true,
   })
   userId = user.id
+  await env.DB.prepare(
+    "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_employees', unixepoch())",
+  )
+    .bind(user.id)
+    .run()
   const session = await createSession(env, {
     userId: user.id,
     authMethod: "password",
@@ -130,6 +135,23 @@ describe("GET /oauth/userinfo", () => {
     expect(body.preferred_username).toBe("bob")
   })
 
+  it("invalidates UserInfo and introspection after membership removal", async () => {
+    const { access_token } = await obtainTokens()
+    await env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(userId).run()
+
+    const userInfo = await SELF.fetch(`${ISSUER}/oauth/userinfo`, {
+      headers: { authorization: `Bearer ${access_token}` },
+    })
+    expect(userInfo.status).toBe(401)
+
+    const introspection = await post(
+      "/oauth/introspect",
+      { token: access_token },
+      `Basic ${btoa(`${SVC}:${SVC_SECRET}`)}`,
+    )
+    expect(await introspection.json()).toEqual({ active: false })
+  })
+
   it("rejects a missing token with a 401 and WWW-Authenticate", async () => {
     const res = await SELF.fetch(`${ISSUER}/oauth/userinfo`)
     expect(res.status).toBe(401)
@@ -152,10 +174,11 @@ describe("GET /oauth/userinfo", () => {
     expect(res.headers.get("www-authenticate")).toContain("invalid_token")
   })
 
-  it("withholds groups when the groups scope was not granted", async () => {
-    const tokens = await obtainTokens("openid profile email api.read")
+  it("never exposes permission-group membership in tokens or UserInfo", async () => {
+    const tokens = await obtainTokens()
+    expect(decodeJwt(tokens.access_token)).not.toHaveProperty("groups")
     expect(decodeJwt(tokens.access_token)["user_type"]).toBeUndefined()
-    expect(decodeJwt(tokens.id_token)["groups"]).toBeUndefined()
+    expect(decodeJwt(tokens.id_token)).not.toHaveProperty("groups")
     expect(decodeJwt(tokens.id_token)["user_type"]).toBeUndefined()
     expect(decodeJwt(tokens.id_token)["preferred_username"]).toBe("bob")
 
@@ -164,7 +187,7 @@ describe("GET /oauth/userinfo", () => {
     })
     const body = await res.json<Record<string, unknown>>()
     expect(res.status).toBe(200)
-    expect(body["groups"]).toBeUndefined()
+    expect(body).not.toHaveProperty("groups")
     expect(body["user_type"]).toBeUndefined()
     expect(body["preferred_username"]).toBe("bob")
   })

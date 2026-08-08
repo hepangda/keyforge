@@ -52,6 +52,29 @@ export function scopeTags(values: readonly string[]): string {
   }
   return values.map((value) => `<span class="tag">${escapeHtml(value)}</span>`).join("")
 }
+export function secondaryTabs(
+  i18n: I18n,
+  ariaLabel: string,
+  tabs: readonly { readonly label: string; readonly href: string; readonly active: boolean }[],
+): string {
+  const links = tabs
+    .map((tab) => {
+      const active = tab.active ? " subtab--active" : ""
+      const current = tab.active ? ' aria-current="page"' : ""
+      return `<a class="subtab${active}" href="${escapeHtml(tab.href)}"${current}>${escapeHtml(i18n.t(tab.label))}</a>`
+    })
+    .join("")
+  return `<nav class="subtabs" aria-label="${escapeHtml(i18n.t(ariaLabel))}">${links}</nav>`
+}
+export function consoleEntityLink(kind: "user" | "client" | "resource", value: string): string {
+  const href =
+    kind === "user"
+      ? `/console/users/${encodeURIComponent(value)}`
+      : kind === "client"
+        ? `/console/clients/${encodeURIComponent(value)}`
+        : `/console/resources/${encodeURIComponent(value)}`
+  return `<a class="mono" href="${escapeHtml(href)}">${escapeHtml(value)}</a>`
+}
 
 export function pager(
   i18n: I18n,
@@ -90,6 +113,8 @@ export type FieldOptions = {
   readonly required?: boolean
   readonly placeholder?: string
   readonly readonly?: boolean
+  readonly wide?: boolean
+  readonly error?: string | undefined
 }
 
 export function textField(
@@ -104,7 +129,16 @@ export function textField(
   const ph =
     opts?.placeholder === undefined ? "" : ` placeholder="${escapeHtml(i18n.t(opts.placeholder))}"`
   const ro = opts?.readonly === true ? " readonly" : ""
-  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><input class="input" type="${type}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${req}${ph}${ro}></label>`
+  const fieldId = `${name}-field`
+  const errorId = `${name}-error`
+  const invalid = opts?.error === undefined ? "" : ' aria-invalid="true"'
+  const describedBy = opts?.error === undefined ? "" : ` aria-describedby="${escapeHtml(errorId)}"`
+  const wide = opts?.wide === true ? " field--wide" : ""
+  const errorHtml =
+    opts?.error === undefined
+      ? ""
+      : `<span class="field__error" id="${escapeHtml(errorId)}">${escapeHtml(i18n.t(opts.error))}</span>`
+  return `<label class="field${wide}" id="${escapeHtml(fieldId)}"><span class="field__label">${escapeHtml(i18n.t(label))}</span><input class="input" type="${type}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${req}${ph}${ro}${invalid}${describedBy}>${errorHtml}</label>`
 }
 
 export function textAreaField(
@@ -113,29 +147,22 @@ export function textAreaField(
   name: string,
   value: string,
   hint?: string,
-  opts?: { readonly required?: boolean },
+  opts?: FieldOptions,
 ): string {
   const hintHtml = hint === undefined ? "" : `<p class="form-hint">${escapeHtml(i18n.t(hint))}</p>`
   const required = opts?.required === true ? " required" : ""
-  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><textarea class="input" name="${escapeHtml(name)}" rows="3"${required}>${escapeHtml(value)}</textarea>${hintHtml}</label>`
+  const fieldId = `${name}-field`
+  const errorId = `${name}-error`
+  const invalid = opts?.error === undefined ? "" : ' aria-invalid="true"'
+  const describedBy = opts?.error === undefined ? "" : ` aria-describedby="${escapeHtml(errorId)}"`
+  const wide = opts?.wide === true ? " field--wide" : ""
+  const errorHtml =
+    opts?.error === undefined
+      ? ""
+      : `<span class="field__error" id="${escapeHtml(errorId)}">${escapeHtml(i18n.t(opts.error))}</span>`
+  return `<label class="field${wide}" id="${escapeHtml(fieldId)}"><span class="field__label">${escapeHtml(i18n.t(label))}</span><textarea class="input" name="${escapeHtml(name)}" rows="3"${required}${invalid}${describedBy}>${escapeHtml(value)}</textarea>${errorHtml}${hintHtml}</label>`
 }
 
 export function checkboxField(i18n: I18n, label: string, name: string, checked: boolean): string {
   return `<label class="checkline"><input type="checkbox" name="${escapeHtml(name)}" value="1"${checked ? " checked" : ""}>${escapeHtml(i18n.t(label))}</label>`
-}
-
-export function selectField(
-  i18n: I18n,
-  label: string,
-  name: string,
-  options: readonly { readonly value: string; readonly label: string }[],
-  selected: string,
-): string {
-  const opts = options
-    .map(
-      (option) =>
-        `<option value="${escapeHtml(option.value)}"${option.value === selected ? " selected" : ""}>${escapeHtml(i18n.t(option.label))}</option>`,
-    )
-    .join("")
-  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><select class="input" name="${escapeHtml(name)}">${opts}</select></label>`
 }

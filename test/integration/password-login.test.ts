@@ -6,6 +6,7 @@ import {
   setUserPassword,
   verifyLoginPassword,
 } from "../../src/auth/password"
+import { createSession, getSessionByToken, listSessionsByUser } from "../../src/auth/session"
 import {
   createUser,
   getGroupByName,
@@ -89,10 +90,59 @@ describe("password login + session", () => {
     expect(policy).not.toContain("script-src 'unsafe-inline'")
     expect(res.headers.get("permissions-policy")).toContain("camera=()")
   })
+  it("preserves only safe task state through alternate recovery links", async () => {
+    const target = "/console/users/new?view=profile"
+    const page = await SELF.fetch(
+      `${ISSUER}/login?reauth=1&return_to=${encodeURIComponent(target)}`,
+    )
+    const html = await page.text()
+    expect(html).toContain(
+      `href="/password/forgot?return_to=${encodeURIComponent(target)}&amp;reauth=1"`,
+    )
+    expect(html).toContain(
+      `href="/login/magic?return_to=${encodeURIComponent(target)}&amp;reauth=1"`,
+    )
+
+    const unsafe = await SELF.fetch(
+      `${ISSUER}/login?reauth=1&return_to=${encodeURIComponent("https://evil.example/task")}`,
+    )
+    const unsafeHtml = await unsafe.text()
+    expect(unsafeHtml).toContain('name="return_to" value="/"')
+    expect(unsafeHtml).not.toContain("evil.example")
+  })
+
+  it("shows why reauthentication is required and preserves that context after errors", async () => {
+    const target = "/?section=login-methods&flow=add-passkey"
+    const page = await SELF.fetch(
+      `${ISSUER}/login?reauth=1&hint=add_passkey&return_to=${encodeURIComponent(target)}`,
+    )
+    const html = await page.text()
+    expect(html).toContain("Adding a passkey to your account requires a fresh sign-in.")
+    expect(html).toContain('name="hint" value="add_passkey"')
+    expect(html).toContain(
+      `href="/login/magic?return_to=${encodeURIComponent(target)}&amp;reauth=1&amp;hint=add_passkey"`,
+    )
+    const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf") ?? ""
+    const failed = await postLogin(
+      {
+        email: EMAIL,
+        password: "wrong password",
+        csrf_token: csrf,
+        return_to: target,
+        reauth: "1",
+        hint: "add_passkey",
+      },
+      `__Host-keyforge_csrf=${csrf}`,
+    )
+    expect(await failed.text()).toContain(
+      "Adding a passkey to your account requires a fresh sign-in.",
+    )
+  })
 
   it("allows only a registered OAuth callback through the login form redirect chain", async () => {
     const registeredReturnTo = `/oauth/authorize?${new URLSearchParams({
       client_id: "pangda_app",
+
       redirect_uri: REGISTERED_REDIRECT,
     })}`
     const registered = await SELF.fetch(
@@ -113,6 +163,37 @@ describe("password login + session", () => {
     expect(unregistered.headers.get("content-security-policy")).not.toContain(
       "https://evil.example",
     )
+  })
+  it("replaces the previous browser session during password reauthentication", async () => {
+    const previousUser = await createUser(env, { email: "previous-browser@pangda.app" })
+    const previous = await createSession(env, {
+      userId: previousUser.id,
+      authMethod: "password",
+      ttlSeconds: 3600,
+    })
+    const target = "/console/users/new"
+    const page = await SELF.fetch(
+      `${ISSUER}/login?reauth=1&return_to=${encodeURIComponent(target)}`,
+      { headers: { cookie: `__Host-keyforge_session=${previous.token}` } },
+    )
+    const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf") ?? ""
+    const response = await postLogin(
+      {
+        email: EMAIL,
+        password: PASSWORD,
+        csrf_token: csrf,
+        return_to: target,
+        reauth: "1",
+      },
+      `__Host-keyforge_session=${previous.token}; __Host-keyforge_csrf=${csrf}`,
+    )
+    expect(response.status).toBe(302)
+    expect(await getSessionByToken(env, previous.token)).toBeNull()
+    const nextToken = cookieValue(response.headers.getSetCookie(), "__Host-keyforge_session")
+    expect(nextToken).not.toBeNull()
+    const user = await getUserByEmail(env, EMAIL)
+    expect(user).not.toBeNull()
+    expect(await listSessionsByUser(env, user?.id ?? "missing")).toHaveLength(1)
   })
 
   it("does not expose the retired social login endpoints", async () => {

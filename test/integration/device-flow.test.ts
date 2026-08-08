@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test"
+import { decodeJwt } from "jose"
 import { beforeEach, describe, expect, it } from "vitest"
 import { createSession } from "../../src/auth/session"
 import { DEVICE_CODE_GRANT } from "../../src/config"
@@ -7,10 +8,11 @@ import { hashOpaqueToken } from "../../src/tokens/token-hash"
 
 const ISSUER = "https://auth.pangda.app"
 const CLI = "pangda_cli"
-const SCOPE = "openid profile email groups offline_access api.read"
+const SCOPE = "openid profile email offline_access api.read"
 const RESOURCE = "https://api.pangda.app"
 
 let sessionToken = ""
+let userId = ""
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -22,7 +24,7 @@ beforeEach(async () => {
   ])
   await env.DB.prepare(
     `UPDATE oauth_resources
-     SET allowed_scopes_json = '["openid","profile","email","groups","offline_access","api.read","api.write"]'
+     SET allowed_scopes_json = '["openid","profile","email","offline_access","api.read","api.write"]'
      WHERE resource_uri = ?`,
   )
     .bind(RESOURCE)
@@ -31,6 +33,12 @@ beforeEach(async () => {
     email: "cli@pangda.app",
     name: "CLI User",
   })
+  userId = user.id
+  await env.DB.prepare(
+    "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_employees', unixepoch())",
+  )
+    .bind(user.id)
+    .run()
   const session = await createSession(env, {
     userId: user.id,
     authMethod: "password",
@@ -148,6 +156,8 @@ describe("device authorization grant", () => {
     expect(body.access_token).toBeTruthy()
     expect(body.id_token).toBeTruthy()
     expect(body.refresh_token).toBeTruthy()
+    expect(decodeJwt(body.id_token)).not.toHaveProperty("groups")
+    expect(decodeJwt(body.access_token)).not.toHaveProperty("groups")
 
     await resetPollTimer(deviceCode)
     const second = await poll(deviceCode)
@@ -155,6 +165,30 @@ describe("device authorization grant", () => {
     expect((await second.json<{ error: string }>()).error).toBe("invalid_grant")
   })
 
+  it("does not consume an approved code when current membership denies access", async () => {
+    const { deviceCode, userCode } = await startDevice()
+    await decide(userCode, "approve")
+    await env.DB.prepare("DELETE FROM user_groups WHERE user_id = ?").bind(userId).run()
+    await resetPollTimer(deviceCode)
+
+    const denied = await poll(deviceCode)
+    expect(denied.status).toBe(400)
+    expect((await denied.json<{ error: string }>()).error).toBe("invalid_grant")
+    const pending = await env.DB.prepare(
+      "SELECT status FROM device_authorization_sessions WHERE device_code_hash = ?",
+    )
+      .bind(await hashOpaqueToken(deviceCode))
+      .first<{ status: string }>()
+    expect(pending?.status).toBe("approved")
+
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_seed_employees', unixepoch())",
+    )
+      .bind(userId)
+      .run()
+    await resetPollTimer(deviceCode)
+    expect((await poll(deviceCode)).status).toBe(200)
+  })
   it("returns access_denied after the user denies", async () => {
     const { deviceCode, userCode } = await startDevice()
     await decide(userCode, "deny")
@@ -176,9 +210,67 @@ describe("device authorization grant", () => {
     expect((await res.json<{ error: string }>()).error).toBe("expired_token")
   })
 
-  it("redirects unauthenticated device verification to login", async () => {
-    const res = await SELF.fetch(`${ISSUER}/device?user_code=ABCD-EFGH`, { redirect: "manual" })
-    expect(res.status).toBe(302)
-    expect(res.headers.get("location")).toContain("/login")
+  it("preserves normalized codes for missing GET and POST sessions", async () => {
+    const getResponse = await SELF.fetch(`${ISSUER}/device?user_code=abcd-efgh`, {
+      redirect: "manual",
+    })
+    expect(getResponse.status).toBe(302)
+    const getLogin = new URL(getResponse.headers.get("location") ?? "", ISSUER)
+    expect(getLogin.pathname).toBe("/login")
+    expect(getLogin.searchParams.has("reauth")).toBe(false)
+    expect(getLogin.searchParams.get("return_to")).toBe("/device?user_code=ABCDEFGH")
+
+    const postResponse = await SELF.fetch(`${ISSUER}/device/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ user_code: "abcd efgh", decision: "approve" }).toString(),
+      redirect: "manual",
+    })
+    expect(postResponse.status).toBe(302)
+    const postLogin = new URL(postResponse.headers.get("location") ?? "", ISSUER)
+    expect(postLogin.searchParams.has("reauth")).toBe(false)
+    expect(postLogin.searchParams.get("return_to")).toBe("/device?user_code=ABCDEFGH")
+  })
+
+  it("uses reauthentication for stale GET and POST sessions without looping", async () => {
+    await env.DB.prepare("UPDATE sessions SET auth_time = 0 WHERE revoked_at IS NULL").run()
+    for (const request of [
+      SELF.fetch(`${ISSUER}/device?user_code=abcd-efgh`, {
+        headers: { cookie: `__Host-keyforge_session=${sessionToken}` },
+        redirect: "manual",
+      }),
+      SELF.fetch(`${ISSUER}/device/confirm`, {
+        method: "POST",
+        headers: {
+          cookie: `__Host-keyforge_session=${sessionToken}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ user_code: "abcd-efgh", decision: "approve" }).toString(),
+        redirect: "manual",
+      }),
+    ]) {
+      const response = await request
+      expect(response.status).toBe(302)
+      const login = new URL(response.headers.get("location") ?? "", ISSUER)
+      expect(login.pathname).toBe("/login")
+      expect(login.searchParams.get("reauth")).toBe("1")
+      expect(login.searchParams.get("hint")).toBe("authorize_device")
+      expect(login.searchParams.get("return_to")).toBe("/device?user_code=ABCDEFGH")
+    }
+  })
+
+  it("retains the normalized code after a CSRF error", async () => {
+    const response = await SELF.fetch(`${ISSUER}/device/confirm`, {
+      method: "POST",
+      headers: {
+        cookie: `__Host-keyforge_session=${sessionToken}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ user_code: "abcd-efgh", decision: "approve" }).toString(),
+    })
+    expect(response.status).toBe(403)
+    const html = await response.text()
+    expect(html).toContain('name="user_code" required')
+    expect(html).toContain('value="ABCDEFGH"')
   })
 })

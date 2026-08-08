@@ -23,7 +23,6 @@ export const MESSAGE_CATALOG = {
   },
   "Your postal address": { "zh-CN": "您的邮寄地址", ja: "住所" },
   "Your phone number": { "zh-CN": "您的电话号码", ja: "電話番号" },
-  "Your group memberships": { "zh-CN": "您的群组成员身份", ja: "所属グループ" },
   "This app isn't requesting any specific permissions.": {
     "zh-CN": "此应用未请求任何特定权限。",
     ja: "このアプリは特定の権限を要求していません。",
@@ -34,11 +33,52 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "应用要求您重新验证身份后再继续。",
     ja: "続行するには、アプリケーションの要求により再認証が必要です。",
   },
+  "For your security, please confirm your identity to continue.": {
+    "zh-CN": "为了您的安全，请重新确认身份后继续。",
+    ja: "セキュリティのため、続行する前に本人確認をお願いします。",
+  },
+  "Adding a password to your account requires a fresh sign-in.": {
+    "zh-CN": "为账户添加密码需要重新登录。",
+    ja: "アカウントへのパスワード追加には、再度ログインが必要です。",
+  },
+  "Managing your password requires a fresh sign-in.": {
+    "zh-CN": "管理密码需要重新登录。",
+    ja: "パスワードを管理するには、再度ログインが必要です。",
+  },
+  "Adding a passkey to your account requires a fresh sign-in.": {
+    "zh-CN": "为账户添加通行密钥需要重新登录。",
+    ja: "アカウントへのパスキー追加には、再度ログインが必要です。",
+  },
+  "Managing your passkey requires a fresh sign-in.": {
+    "zh-CN": "管理通行密钥需要重新登录。",
+    ja: "パスキーを管理するには、再度ログインが必要です。",
+  },
+  "Changing your email address requires a fresh sign-in.": {
+    "zh-CN": "更改电子邮箱地址需要重新登录。",
+    ja: "メールアドレスを変更するには、再度ログインが必要です。",
+  },
+  "Deleting your account permanently requires a fresh sign-in.": {
+    "zh-CN": "永久删除账户需要重新登录。",
+    ja: "アカウントを完全に削除するには、再度ログインが必要です。",
+  },
+  "Admin console management actions require a recent sign-in.": {
+    "zh-CN": "管理控制台操作需要近期的登录凭据。",
+    ja: "管理コンソールの操作には、最近のログインが必要です。",
+  },
+  "Authorizing a device requires a fresh sign-in.": {
+    "zh-CN": "授权设备需要重新登录。",
+    ja: "デバイスを承認するには、再度ログインが必要です。",
+  },
+  "The requesting application requires a fresh sign-in.": {
+    "zh-CN": "发起请求的应用要求您重新登录。",
+    ja: "要求元のアプリケーションにより、再度ログインが必要です。",
+  },
+  "Requested by": { "zh-CN": "请求来源", ja: "要求元" },
   "Enter your credentials to continue to your account.": {
     "zh-CN": "输入您的凭据以继续访问账户。",
     ja: "認証情報を入力してアカウントに進んでください。",
   },
-  "Email or username": { "zh-CN": "电子邮箱或用户名", ja: "メールアドレスまたはユーザー名" },
+  "Email or username": { "zh-CN": "电子邮箱或登录名", ja: "メールアドレスまたはユーザー名" },
   Password: { "zh-CN": "密码", ja: "パスワード" },
   "Forgot password?": { "zh-CN": "忘记密码？", ja: "パスワードを忘れた場合" },
   "Sign in": { "zh-CN": "登录", ja: "ログイン" },
@@ -81,8 +121,18 @@ export const MESSAGE_CATALOG = {
     ja: "があなたの KeyForge アカウントへのアクセスを求めています。",
   },
   Resource: { "zh-CN": "资源", ja: "リソース" },
+  "API audience": { "zh-CN": "API 受众", ja: "API オーディエンス" },
   Deny: { "zh-CN": "拒绝", ja: "拒否" },
   "Allow access": { "zh-CN": "允许访问", ja: "アクセスを許可" },
+  "You can revoke this access at any time in your account settings.": {
+    "zh-CN": "您可以随时在账户设置中撤销此访问权限。",
+    ja: "このアクセスはいつでもアカウント設定から取り消すことができます。",
+  },
+  "Allowing access uses the signed-in account shown above. You can revoke access later in your account settings.":
+    {
+      "zh-CN": "允许后将使用上方显示的已登录账户。您之后可以在账户设置中撤销访问权限。",
+      ja: "許可すると、上に表示されたログイン中のアカウントが使用されます。アクセスは後でアカウント設定から取り消せます。",
+    },
   "Authorize — KeyForge": { "zh-CN": "授权 — KeyForge", ja: "承認 — KeyForge" },
   "Request error": { "zh-CN": "请求错误", ja: "リクエストエラー" },
   "Return to sign in": { "zh-CN": "返回登录", ja: "ログインに戻る" },
@@ -91,6 +141,10 @@ export const MESSAGE_CATALOG = {
   "Enter the code shown on your device to continue.": {
     "zh-CN": "输入设备上显示的代码以继续。",
     ja: "デバイスに表示されているコードを入力してください。",
+  },
+  "Only continue if you started this request on a device you recognize.": {
+    "zh-CN": "仅当您确实在认识的设备上发起了此请求时才继续。",
+    ja: "心当たりのあるデバイスで開始したリクエストの場合のみ続行してください。",
   },
   "Device code": { "zh-CN": "设备代码", ja: "デバイスコード" },
   Continue: { "zh-CN": "继续", ja: "続行" },
@@ -102,9 +156,17 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "确认您希望向此设备授予访问权限。",
     ja: "このデバイスへのアクセスを許可することを確認してください。",
   },
+  "Check that this code matches the one on your device before allowing access.": {
+    "zh-CN": "允许访问前，请确认此代码与设备上显示的代码一致。",
+    ja: "アクセスを許可する前に、このコードがデバイス上のコードと一致することを確認してください。",
+  },
   "Authorize device — KeyForge": {
     "zh-CN": "授权设备 — KeyForge",
     ja: "デバイスを承認 — KeyForge",
+  },
+  "You can revoke device access at any time in your account settings.": {
+    "zh-CN": "您可以随时在账户设置中撤销设备访问权限。",
+    ja: "デバイスのアクセスはいつでもアカウント設定から取り消すことができます。",
   },
   "Device connected": { "zh-CN": "设备已连接", ja: "デバイスを接続しました" },
   "Request denied": { "zh-CN": "请求已拒绝", ja: "リクエストを拒否しました" },
@@ -149,6 +211,8 @@ export const MESSAGE_CATALOG = {
   Email: { "zh-CN": "电子邮箱", ja: "メールアドレス" },
   "Email me a link": { "zh-CN": "向我发送链接", ja: "リンクをメールで送信" },
   "Back to password sign-in": { "zh-CN": "返回密码登录", ja: "パスワードでのログインに戻る" },
+  "Back to sign-in methods": { "zh-CN": "返回登录方式", ja: "ログイン方法に戻る" },
+  "Return to sign-in methods": { "zh-CN": "返回登录方式", ja: "ログイン方法に戻る" },
   "Sign in with email — KeyForge": {
     "zh-CN": "使用电子邮箱登录 — KeyForge",
     ja: "メールでログイン — KeyForge",
@@ -162,12 +226,29 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "链接将在 15 分钟后过期。打开链接后即可关闭此标签页。",
     ja: "リンクの有効期限は15分です。リンクを開いた後、このタブを閉じてもかまいません。",
   },
+  "Check your spam folder if the email doesn't arrive.": {
+    "zh-CN": "如果邮件未能送达，请检查垃圾邮件文件夹。",
+    ja: "メールが届かない場合は、迷惑メールフォルダをご確認ください。",
+  },
+  "Check your spam folder if the email doesn't arrive. You can request another link after it expires.":
+    {
+      "zh-CN": "如果邮件未能送达，请检查垃圾邮件文件夹。链接过期后，您可以重新申请。",
+      ja: "メールが届かない場合は迷惑メールフォルダをご確認ください。有効期限後は新しいリンクを再度リクエストできます。",
+    },
   "Check your email — KeyForge": {
     "zh-CN": "请查收电子邮件 — KeyForge",
     ja: "メールを確認 — KeyForge",
   },
   "Confirm sign in": { "zh-CN": "确认登录", ja: "ログインの確認" },
   "Continue as {email}.": { "zh-CN": "以 {email} 的身份继续。", ja: "{email} として続行します。" },
+  "This link expires in 15 minutes. Sign in before it does.": {
+    "zh-CN": "此链接将在 15 分钟后过期，请尽快登录。",
+    ja: "このリンクは15分で有効期限が切れます。お早めにログインしてください。",
+  },
+  "Could not reach the server. Check your connection and try again.": {
+    "zh-CN": "无法连接到服务器，请检查网络后重试。",
+    ja: "サーバーに接続できませんでした。接続を確認して再度お試しください。",
+  },
   Cancel: { "zh-CN": "取消", ja: "キャンセル" },
   "Confirm sign in — KeyForge": {
     "zh-CN": "确认登录 — KeyForge",
@@ -232,6 +313,10 @@ export const MESSAGE_CATALOG = {
     ja: "新しいパスワードを設定 — KeyForge",
   },
   "Continue to sign in": { "zh-CN": "继续登录", ja: "ログインに進む" },
+  "Request a new reset link": {
+    "zh-CN": "请求新的重置链接",
+    ja: "新しいリセットリンクをリクエスト",
+  },
   "Recovery temporarily unavailable": {
     "zh-CN": "账户恢复暂时不可用",
     ja: "アカウント復旧は一時的に利用できません",
@@ -305,7 +390,7 @@ export const MESSAGE_CATALOG = {
     ja: "問題が発生しました。もう一度お試しください。",
   },
   "Invalid email, username, or password.": {
-    "zh-CN": "电子邮箱、用户名或密码无效。",
+    "zh-CN": "电子邮箱、登录名或密码无效。",
     ja: "メールアドレス、ユーザー名、またはパスワードが正しくありません。",
   },
   "Your account has been deleted.": {
@@ -495,13 +580,59 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "此账户没有密码，因此需要近期登录验证。",
     ja: "このアカウントにはパスワードがないため、直近のログインが必要です。",
   },
+  "Because this account has no password, a sign-in within the last 10 minutes is required to make changes.":
+    {
+      "zh-CN": "此账户没有密码，因此需要 10 分钟内的登录凭据才能进行更改。",
+      ja: "このアカウントにはパスワードがないため、変更するには10分以内にログインしている必要があります。",
+    },
   "Your account identity and information shared with approved applications.": {
     "zh-CN": "您的账户身份以及与已获准应用共享的信息。",
     ja: "アカウント情報と、承認済みアプリに共有される情報です。",
   },
-  Username: { "zh-CN": "用户名", ja: "ユーザー名" },
-  Verification: { "zh-CN": "验证状态", ja: "確認状態" },
-  Groups: { "zh-CN": "群组", ja: "グループ" },
+  Username: { "zh-CN": "登录名", ja: "ユーザー名" },
+  Groups: { "zh-CN": "权限组", ja: "グループ" },
+  "Create a group": { "zh-CN": "创建权限组", ja: "グループを作成" },
+  "Edit group": { "zh-CN": "编辑权限组", ja: "グループを編集" },
+  "Create a group first": { "zh-CN": "请先创建权限组", ja: "先にグループを作成" },
+  "Provision people and manage their login methods.": {
+    "zh-CN": "配置人员并管理其登录方式。",
+    ja: "ユーザーを作成し、ログイン方法を管理します。",
+  },
+  "Assign memberships and control which applications and APIs each group can access.": {
+    "zh-CN": "分配成员，并控制每个权限组可访问的应用和 API。",
+    ja: "メンバーを割り当て、各権限グループがアクセスできるアプリケーションと API を管理します。",
+  },
+  "Members can receive user tokens only for applications and APIs assigned to this permission group.":
+    {
+      "zh-CN": "成员只能为分配给此权限组的应用和 API 获取用户令牌。",
+      ja: "メンバーは、この権限グループに割り当てられたアプリケーションと API に対してのみユーザートークンを取得できます。",
+    },
+  "No access is granted until at least one application and one API are selected.": {
+    "zh-CN": "至少选择一个应用和一个 API 后才会授予访问权限。",
+    ja: "アプリケーションと API を少なくとも 1 つずつ選択するまで、アクセスは許可されません。",
+  },
+  "No groups found. Create the first group to begin.": {
+    "zh-CN": "未找到权限组。请创建第一个权限组。",
+    ja: "グループがありません。最初のグループを作成してください。",
+  },
+  "Descriptions must contain at most 500 characters.": {
+    "zh-CN": "描述最多可包含 500 个字符。",
+    ja: "説明は500文字以内で入力してください。",
+  },
+  "Enter a valid group name of at most 64 characters.": {
+    "zh-CN": "请输入最多 64 个字符的有效权限组名称。",
+    ja: "64文字以内の有効なグループ名を入力してください。",
+  },
+  "Create accounts, invite people, and manage their login methods.": {
+    "zh-CN": "创建账户、邀请人员并管理其登录方式。",
+    ja: "アカウントの作成、ユーザーの招待、ログイン方法の管理を行います。",
+  },
+  "Search users": { "zh-CN": "搜索用户", ja: "ユーザーを検索" },
+  Search: { "zh-CN": "搜索", ja: "検索" },
+  "No users match this search.": {
+    "zh-CN": "没有用户匹配此搜索。",
+    ja: "検索に一致するユーザーはいません。",
+  },
   "Member since": { "zh-CN": "加入时间", ja: "登録日" },
   "Public profile": { "zh-CN": "公开资料", ja: "公開プロフィール" },
   "Account actions": { "zh-CN": "账户操作", ja: "アカウント操作" },
@@ -518,20 +649,24 @@ export const MESSAGE_CATALOG = {
   },
   Change: { "zh-CN": "更改", ja: "変更" },
   "Edit profile": { "zh-CN": "编辑个人资料", ja: "プロフィールを編集" },
+  "Update your profile photo and display name.": {
+    "zh-CN": "更新您的头像和显示名称。",
+    ja: "プロフィール写真と表示名を更新します。",
+  },
   "Usernames are permanent after account creation.": {
-    "zh-CN": "账户创建后，用户名不可更改。",
+    "zh-CN": "账户创建后，登录名不可更改。",
     ja: "ユーザー名はアカウント作成後に変更できません。",
   },
   "Only an administrator can change your username.": {
-    "zh-CN": "只有管理员可以更改您的用户名。",
+    "zh-CN": "只有管理员可以更改您的登录名。",
     ja: "ユーザー名を変更できるのは管理者だけです。",
   },
   "Your username stays fixed; you can update the name shown to applications.": {
-    "zh-CN": "用户名保持不变；您可以更新向应用显示的名称。",
+    "zh-CN": "登录名保持不变；您可以更新向应用显示的名称。",
     ja: "ユーザー名は固定です。アプリに表示する名前は更新できます。",
   },
   "Your username is managed by an administrator; you can update the name shown to applications.": {
-    "zh-CN": "用户名由管理员管理；您可以更新向应用显示的名称。",
+    "zh-CN": "登录名由管理员管理；您可以更新向应用显示的名称。",
     ja: "ユーザー名は管理者が管理します。アプリに表示する名前は更新できます。",
   },
   "Request change": { "zh-CN": "请求更改", ja: "変更を申請" },
@@ -558,7 +693,7 @@ export const MESSAGE_CATALOG = {
     ja: "影響を確認し、このアカウントを完全に削除する場合のみ確定してください。",
   },
   "Your username may contain only English letters, numbers, hyphens, and underscores.": {
-    "zh-CN": "用户名只能包含英文字母、数字、连字符和下划线。",
+    "zh-CN": "登录名只能包含英文字母、数字、连字符和下划线。",
     ja: "ユーザー名には英字、数字、ハイフン、アンダースコアのみ使用できます。",
   },
   "Display name": { "zh-CN": "显示名称", ja: "表示名" },
@@ -594,6 +729,11 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "不可用于管理员登录",
     ja: "管理者ログインには使用できません",
   },
+  "This password does not meet the administrator minimum. Use a passkey or another eligible password for admin actions.":
+    {
+      "zh-CN": "此密码不符合管理员最低要求。执行管理操作时，请使用通行密钥或其他符合要求的密码。",
+      ja: "このパスワードは管理者向けの最低要件を満たしていません。管理操作にはパスキーまたは要件を満たす別のパスワードを使用してください。",
+    },
   "You are adding the first password to this account. A recent sign-in is required.": {
     "zh-CN": "您正在为此账户添加第一个密码，需要近期登录验证。",
     ja: "このアカウントに最初のパスワードを追加します。直近のログインが必要です。",
@@ -607,16 +747,6 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "选择一种登录方式进行管理，或添加一种恢复方式。",
     ja: "管理するログイン方法を1つ選ぶか、復旧用の方法を追加してください。",
   },
-  "Add login method": { "zh-CN": "添加登录方式", ja: "ログイン方法を追加" },
-  "Add a login method": { "zh-CN": "添加一种登录方式", ja: "ログイン方法を追加" },
-  "Choose the method you want to set up. You’ll verify your identity next.": {
-    "zh-CN": "选择要设置的方式。下一步将验证您的身份。",
-    ja: "設定する方法を選択してください。次に本人確認を行います。",
-  },
-  "Choose the method you want to set up. Verification occurs only when you apply the change.": {
-    "zh-CN": "选择要设置的方式。只有应用更改时才会验证身份。",
-    ja: "設定する方法を選択してください。本人確認は変更を適用するときだけ行います。",
-  },
   "Add a separate password for recovery or another password manager.": {
     "zh-CN": "添加一个独立密码，用于恢复或存储在另一密码管理器中。",
     ja: "復旧用、または別のパスワードマネージャー用の独立したパスワードを追加します。",
@@ -625,62 +755,13 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "无需输入密码，即可使用设备、安全密钥或密码管理器。",
     ja: "パスワードを入力せず、デバイス、セキュリティキー、またはパスワードマネージャーを使用します。",
   },
-  Progress: { "zh-CN": "进度", ja: "進行状況" },
-  "Verify identity": { "zh-CN": "验证身份", ja: "本人確認" },
-  "Sign in again to protect this change.": {
-    "zh-CN": "重新登录以保护此次更改。",
-    ja: "この変更を保護するため、再度ログインします。",
-  },
-  "Review and confirm the change.": {
-    "zh-CN": "查看并确认更改。",
-    ja: "変更内容を確認して確定します。",
-  },
-  "Verify it’s you": { "zh-CN": "验证是您本人", ja: "本人確認" },
-  "Before changing a login method, sign in again with one of your current methods.": {
-    "zh-CN": "更改登录方式前，请使用一种当前方式重新登录。",
-    ja: "ログイン方法を変更する前に、現在の方法のいずれかで再度ログインしてください。",
-  },
-  "Verify and continue": { "zh-CN": "验证并继续", ja: "確認して続行" },
-  "Verification happens when you submit.": {
-    "zh-CN": "提交时才会验证身份。",
-    ja: "本人確認は送信時に行います。",
-  },
-  "If your sign-in is no longer recent, we’ll ask you to verify before applying the change.": {
-    "zh-CN": "如果上次登录已不再满足近期验证要求，我们会在应用更改前要求您验证身份。",
-    ja: "直近のログイン確認が期限切れの場合は、変更を適用する前に本人確認を求めます。",
-  },
-  "Complete both steps before the new password can be used to sign in.": {
-    "zh-CN": "完成两个步骤后，新密码才可用于登录。",
-    ja: "2つの手順を完了すると、新しいパスワードでログインできます。",
-  },
-  "Choose the password details first. We verify your identity only when you submit them.": {
-    "zh-CN": "先填写密码信息；只有提交时才会验证您的身份。",
-    ja: "先にパスワード情報を入力してください。本人確認は送信時だけ行います。",
-  },
-  "Complete both steps before the new passkey can be used to sign in.": {
-    "zh-CN": "完成两个步骤后，新通行密钥才可用于登录。",
-    ja: "2つの手順を完了すると、新しいパスキーでログインできます。",
-  },
-  "Start from this page. We verify your identity only when you create the passkey.": {
-    "zh-CN": "从此页面开始；只有创建通行密钥时才会验证您的身份。",
-    ja: "このページから開始してください。本人確認はパスキー作成時だけ行います。",
-  },
   "Create your passkey": { "zh-CN": "创建通行密钥", ja: "パスキーを作成" },
   "Your browser will ask where to save the new passkey.": {
     "zh-CN": "浏览器将询问新通行密钥的保存位置。",
     ja: "ブラウザーが新しいパスキーの保存先を確認します。",
   },
-  "Review change": { "zh-CN": "查看更改", ja: "変更を確認" },
   "Manage password": { "zh-CN": "管理密码", ja: "パスワードを管理" },
   "Manage passkey": { "zh-CN": "管理通行密钥", ja: "パスキーを管理" },
-  "Verify your identity before renaming or removing this login method.": {
-    "zh-CN": "重命名或移除此登录方式前，请先验证身份。",
-    ja: "このログイン方法の名前変更または削除の前に、本人確認を行ってください。",
-  },
-  "Rename or remove this login method. Verification occurs only when you submit a change.": {
-    "zh-CN": "重命名或移除此登录方式；只有提交更改时才会验证身份。",
-    ja: "このログイン方法の名前変更または削除を行います。本人確認は変更の送信時だけ行います。",
-  },
   "Use a name that helps you recognize where this method is stored.": {
     "zh-CN": "使用便于识别此方式存储位置的名称。",
     ja: "この方法の保存場所を識別しやすい名前を付けてください。",
@@ -691,9 +772,161 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "您将无法再使用此方式登录。",
     ja: "この方法ではログインできなくなります。",
   },
+  "Review the impact before removing this login method.": {
+    "zh-CN": "移除此登录方式前，请先查看影响。",
+    ja: "このログイン方法を削除する前に影響を確認してください。",
+  },
+  "Review the login method and its last use before removing it.": {
+    "zh-CN": "移除前，请检查该登录方式及其最后使用时间。",
+    ja: "削除する前にログイン方法と最終使用日時を確認してください。",
+  },
+  "You will no longer be able to sign in with this method. Keep at least one password or passkey.":
+    {
+      "zh-CN": "您将无法再使用此方式登录。请至少保留一个密码或通行密钥。",
+      ja: "この方法ではログインできなくなります。パスワードまたはパスキーを1つ以上残してください。",
+    },
+  "Login method removed.": { "zh-CN": "登录方式已移除。", ja: "ログイン方法を削除しました。" },
+  "Review access": { "zh-CN": "查看访问权限", ja: "アクセスを確認" },
+  "Review device": { "zh-CN": "查看设备", ja: "デバイスを確認" },
+  "This removes saved consent, authorization grants, and refresh access for this application.": {
+    "zh-CN": "这将移除此应用保存的同意、授权记录和刷新访问权限。",
+    ja: "このアプリケーションの保存済み同意、認可グラント、更新アクセスを削除します。",
+  },
+  "This device will lose refresh access and must be authorized again.": {
+    "zh-CN": "此设备将失去刷新访问权限，必须重新授权。",
+    ja: "このデバイスは更新アクセスを失い、再認可が必要になります。",
+  },
+  "Revoke application access?": {
+    "zh-CN": "撤销应用访问权限？",
+    ja: "アプリのアクセスを取り消しますか？",
+  },
+  "Review the grants and refresh access that will be removed.": {
+    "zh-CN": "查看将被移除的授权和刷新访问权限。",
+    ja: "削除されるグラントと更新アクセスを確認します。",
+  },
+  "Revoke device access?": {
+    "zh-CN": "撤销设备访问权限？",
+    ja: "デバイスのアクセスを取り消しますか？",
+  },
+  "Review this device before revoking its refresh access.": {
+    "zh-CN": "撤销刷新访问权限前，请查看此设备。",
+    ja: "更新アクセスを取り消す前にこのデバイスを確認します。",
+  },
+  "Sign out other sessions?": {
+    "zh-CN": "退出其他会话？",
+    ja: "他のセッションをログアウトしますか？",
+  },
+  "Review the sessions that will be signed out.": {
+    "zh-CN": "查看将被退出的会话。",
+    ja: "ログアウトされるセッションを確認します。",
+  },
+  "This signs out {count} other sessions and revokes their refresh access.": {
+    "zh-CN": "这将退出其他 {count} 个会话，并撤销其刷新访问权限。",
+    ja: "他の{count}件のセッションをログアウトし、更新アクセスを取り消します。",
+  },
+  Copy: { "zh-CN": "复制", ja: "コピー" },
+  "Client secret copied.": {
+    "zh-CN": "客户端密钥已复制。",
+    ja: "クライアントシークレットをコピーしました。",
+  },
+  "Magic link copied.": { "zh-CN": "魔法链接已复制。", ja: "マジックリンクをコピーしました。" },
+  "View audit events": { "zh-CN": "查看审计事件", ja: "監査イベントを表示" },
+  "Account setup": { "zh-CN": "账户设置", ja: "アカウント設定" },
+  "Send invitation": { "zh-CN": "发送邀请", ja: "招待を送信" },
+  "Set initial password": { "zh-CN": "设置初始密码", ja: "初期パスワードを設定" },
+  "Choose how the user will complete account setup.": {
+    "zh-CN": "选择用户完成账户设置的方式。",
+    ja: "ユーザーがアカウント設定を完了する方法を選択します。",
+  },
+  "Invitation and initial-password setup have distinct security effects.": {
+    "zh-CN": "邀请和初始密码设置具有不同的安全影响。",
+    ja: "招待と初期パスワード設定には異なるセキュリティ上の影響があります。",
+  },
+  "Email a single-use link so the user chooses their password.": {
+    "zh-CN": "发送一次性链接，让用户自行选择密码。",
+    ja: "使い捨てリンクを送り、ユーザー自身にパスワードを設定してもらいます。",
+  },
+  "Create the account with a password you provide once.": {
+    "zh-CN": "使用您一次性提供的密码创建账户。",
+    ja: "管理者が一度だけ提供するパスワードでアカウントを作成します。",
+  },
+  "Initial passwords require 6–128 characters, or at least 12 when the admins group is selected.": {
+    "zh-CN": "初始密码需为 6–128 个字符；选择 admins 权限组时至少需要 12 个字符。",
+    ja: "初期パスワードは6〜128文字、adminsグループ選択時は12文字以上必要です。",
+  },
+  "Identity attributes and account status.": {
+    "zh-CN": "身份属性和账户状态。",
+    ja: "ID属性とアカウント状態。",
+  },
+  "Passwords, passkeys, and one-time sign-in links.": {
+    "zh-CN": "密码、通行密钥和一次性登录链接。",
+    ja: "パスワード、パスキー、使い捨てログインリンク。",
+  },
+  "Permission-group membership for this user.": {
+    "zh-CN": "此用户的权限组成员身份。",
+    ja: "このユーザーの権限グループメンバーシップ。",
+  },
+  "Active browser sessions for this user.": {
+    "zh-CN": "此用户的活动浏览器会话。",
+    ja: "このユーザーのアクティブなブラウザセッション。",
+  },
+  "Disable user": { "zh-CN": "禁用用户", ja: "ユーザーを無効化" },
+  "Enable user": { "zh-CN": "启用用户", ja: "ユーザーを有効化" },
+  Settings: { "zh-CN": "设置", ja: "設定" },
+  Security: { "zh-CN": "安全", ja: "セキュリティ" },
+  "Application sections": { "zh-CN": "应用部分", ja: "アプリケーションのセクション" },
+  "User sections": { "zh-CN": "用户部分", ja: "ユーザーのセクション" },
+  "Display name and registered browser redirect destinations.": {
+    "zh-CN": "显示名称和已注册的浏览器重定向目标。",
+    ja: "表示名と登録済みブラウザーリダイレクト先。",
+  },
+  "OAuth grants, scopes, and API audiences.": {
+    "zh-CN": "OAuth 授权、作用域和 API 受众。",
+    ja: "OAuthグラント、スコープ、APIオーディエンス。",
+  },
+  "Application lifecycle and client-secret actions.": {
+    "zh-CN": "应用生命周期和客户端密钥操作。",
+    ja: "アプリケーションのライフサイクルとクライアントシークレット操作。",
+  },
+  "Save access": { "zh-CN": "保存访问设置", ja: "アクセス設定を保存" },
+  "Applications must reference at least one enabled API.": {
+    "zh-CN": "应用必须引用至少一个已启用的 API。",
+    ja: "アプリケーションは有効なAPIを1つ以上参照する必要があります。",
+  },
+  "Create an enabled API before registering an application.": {
+    "zh-CN": "注册应用前，请先创建已启用的 API。",
+    ja: "アプリケーションを登録する前に有効なAPIを作成してください。",
+  },
+  "Back to APIs": { "zh-CN": "返回 API", ja: "APIに戻る" },
+  "Protected APIs and audiences that tokens can be issued for.": {
+    "zh-CN": "可为其签发令牌的受保护 API 和受众。",
+    ja: "トークンを発行できる保護対象APIとオーディエンス。",
+  },
+  "Revoke device session?": {
+    "zh-CN": "撤销设备会话？",
+    ja: "デバイスセッションを取り消しますか？",
+  },
+  "This device authorization can no longer be completed or refreshed.": {
+    "zh-CN": "此设备授权将无法再完成或刷新。",
+    ja: "このデバイス認可は完了も更新もできなくなります。",
+  },
+  "Disable application?": { "zh-CN": "禁用应用？", ja: "アプリケーションを無効化しますか？" },
+  "Delete application?": { "zh-CN": "删除应用？", ja: "アプリケーションを削除しますか？" },
+  "Disable application": { "zh-CN": "禁用应用", ja: "アプリケーションを無効化" },
+  "Delete application": { "zh-CN": "删除应用", ja: "アプリケーションを削除" },
+  "This permanently removes the application, its grants, consents, and refresh tokens.": {
+    "zh-CN": "这将永久移除该应用及其授权、同意和刷新令牌。",
+    ja: "アプリケーションとそのグラント、同意、更新トークンを完全に削除します。",
+  },
+  "New authorization requests will stop immediately. Existing grants and refresh tokens remain until revoked or expired.":
+    {
+      "zh-CN": "新的授权请求将立即停止。现有授权和刷新令牌会保留到撤销或过期。",
+      ja: "新しい認可リクエストは直ちに停止します。既存のグラントと更新トークンは取り消しまたは期限切れまで残ります。",
+    },
   Remove: { "zh-CN": "移除", ja: "削除" },
   "Add passkey": { "zh-CN": "添加通行密钥", ja: "パスキーを追加" },
   "Add a passkey": { "zh-CN": "添加通行密钥", ja: "パスキーを追加" },
+  "Add a password instead": { "zh-CN": "改为添加密码", ja: "代わりにパスワードを追加" },
   "No reusable login methods yet. Add a password or passkey.": {
     "zh-CN": "尚无可重复使用的登录方式。请添加密码或通行密钥。",
     ja: "再利用可能なログイン方法がありません。パスワードまたはパスキーを追加してください。",
@@ -807,7 +1040,7 @@ export const MESSAGE_CATALOG = {
   },
   "Profile saved.": { "zh-CN": "个人资料已保存。", ja: "プロフィールを保存しました。" },
   "Choose an available username using only English letters, numbers, hyphens, and underscores.": {
-    "zh-CN": "请选择一个仅含英文字母、数字、连字符和下划线的可用用户名。",
+    "zh-CN": "请选择一个仅含英文字母、数字、连字符和下划线的可用登录名。",
     ja: "英字、数字、ハイフン、アンダースコアのみを使った、利用可能なユーザー名を選んでください。",
   },
   "Password added.": { "zh-CN": "密码已添加。", ja: "パスワードを追加しました。" },
@@ -882,7 +1115,7 @@ export const MESSAGE_CATALOG = {
     ja: "IDサービスの概要と、次に行うべき設定手順を案内します。",
   },
   "Provision people, organize access groups, and manage their login methods.": {
-    "zh-CN": "配置人员、组织访问群组并管理其登录方式。",
+    "zh-CN": "配置人员、组织访问权限组并管理其登录方式。",
     ja: "ユーザーの作成、アクセスグループの整理、ログイン方法の管理を行います。",
   },
   "Register applications and configure OAuth flows without missing required settings.": {
@@ -929,7 +1162,7 @@ export const MESSAGE_CATALOG = {
   "Create application": { "zh-CN": "创建应用", ja: "アプリケーションを作成" },
   "Provision your first user": { "zh-CN": "配置首位用户", ja: "最初のユーザーを作成" },
   "Create a username and choose password, invitation, and group access.": {
-    "zh-CN": "创建用户名，并选择密码、邀请和群组访问权限。",
+    "zh-CN": "创建登录名，并选择密码、邀请和权限组访问权限。",
     ja: "ユーザー名を作成し、パスワード、招待、グループアクセスを設定します。",
   },
   "Add user": { "zh-CN": "添加用户", ja: "ユーザーを追加" },
@@ -1028,15 +1261,25 @@ export const MESSAGE_CATALOG = {
   "One scope per line.": { "zh-CN": "每行一个作用域。", ja: "1行に1つのスコープを入力します。" },
   "Create resource": { "zh-CN": "创建资源", ja: "リソースを作成" },
   "Save changes": { "zh-CN": "保存更改", ja: "変更を保存" },
+  "Delete API": { "zh-CN": "删除 API", ja: "APIを削除" },
+  "Delete API?": { "zh-CN": "删除 API？", ja: "APIを削除しますか？" },
+  "Back to API": { "zh-CN": "返回 API", ja: "APIに戻る" },
+  "Confirm API deletion": { "zh-CN": "确认删除 API", ja: "API削除の確認" },
+  "This removes the API registration, permission-group assignments, client references, and stored authorizations. Existing access tokens remain valid until they expire.":
+    {
+      "zh-CN":
+        "这将移除 API 注册、权限组分配、客户端引用和已存储的授权。已签发的访问令牌在过期前仍然有效。",
+      ja: "API登録、権限グループの割り当て、クライアント参照、保存済みの認可を削除します。発行済みアクセストークンは有効期限まで有効です。",
+    },
   Active: { "zh-CN": "活动", ja: "有効" },
   Manage: { "zh-CN": "管理", ja: "管理" },
-  "Group name": { "zh-CN": "群组名称", ja: "グループ名" },
-  "Group description": { "zh-CN": "群组描述", ja: "グループの説明" },
+  "Group name": { "zh-CN": "权限组名称", ja: "グループ名" },
+  "Group description": { "zh-CN": "权限组描述", ja: "グループの説明" },
   Save: { "zh-CN": "保存", ja: "保存" },
   Protected: { "zh-CN": "受保护", ja: "保護対象" },
   "Identity directory": { "zh-CN": "身份目录", ja: "IDディレクトリ" },
   "Create accounts, invite people, and assign access groups.": {
-    "zh-CN": "创建账户、邀请人员并分配访问群组。",
+    "zh-CN": "创建账户、邀请人员并分配访问权限组。",
     ja: "アカウントの作成、ユーザーの招待、アクセスグループの割り当てを行います。",
   },
   "Everyone who can sign in to this server.": {
@@ -1048,26 +1291,37 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "未找到用户。请添加第一个账户。",
     ja: "ユーザーが見つかりません。最初のアカウントを追加してください。",
   },
-  "Permission groups": { "zh-CN": "权限群组", ja: "権限グループ" },
-  "Use groups to grant application and administrator claims.": {
-    "zh-CN": "使用群组授予应用和管理员声明。",
-    ja: "グループを使って、アプリや管理者向けのクレームを付与します。",
+  "Permission groups": { "zh-CN": "权限组", ja: "権限グループ" },
+  "Group sections": { "zh-CN": "权限组部分", ja: "権限グループのセクション" },
+  "Name and description for this permission group.": {
+    "zh-CN": "此权限组的名称和描述。",
+    ja: "この権限グループの名前と説明です。",
   },
-  Group: { "zh-CN": "群组", ja: "グループ" },
+  "Applications and devices": { "zh-CN": "应用和设备", ja: "アプリケーションとデバイス" },
+  "No user applications or devices are registered.": {
+    "zh-CN": "尚未注册用户应用或设备。",
+    ja: "ユーザーアプリケーションまたはデバイスが登録されていません。",
+  },
+  "Create an application first": {
+    "zh-CN": "请先创建应用",
+    ja: "先にアプリケーションを作成",
+  },
+  "No APIs are registered.": { "zh-CN": "尚未注册 API。", ja: "APIが登録されていません。" },
+  Group: { "zh-CN": "权限组", ja: "グループ" },
   Members: { "zh-CN": "成员", ja: "メンバー" },
   "No groups found. Create one below.": {
-    "zh-CN": "未找到群组。请在下方创建一个。",
+    "zh-CN": "未找到权限组。请在下方创建一个。",
     ja: "グループが見つかりません。下から作成してください。",
   },
   Description: { "zh-CN": "描述", ja: "説明" },
   "What membership grants": { "zh-CN": "成员身份授予的权限", ja: "メンバーシップで付与する内容" },
-  "Create group": { "zh-CN": "创建群组", ja: "グループを作成" },
+  "Create group": { "zh-CN": "创建权限组", ja: "グループを作成" },
   "No groups exist yet. Create one from the user directory.": {
-    "zh-CN": "尚无群组。请从身份目录创建。",
+    "zh-CN": "尚无权限组。请从身份目录创建。",
     ja: "グループはまだありません。ユーザーディレクトリから作成してください。",
   },
   "No description": { "zh-CN": "无描述", ja: "説明なし" },
-  "Delete permission group?": { "zh-CN": "删除权限群组？", ja: "権限グループを削除しますか？" },
+  "Delete permission group?": { "zh-CN": "删除权限组？", ja: "権限グループを削除しますか？" },
   "{group} currently has {count} member.": {
     "zh-CN": "{group} 当前有 {count} 名成员。",
     ja: "{group} には現在{count}人のメンバーがいます。",
@@ -1076,14 +1330,14 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "{group} 当前有 {count} 名成员。",
     ja: "{group} には現在{count}人のメンバーがいます。",
   },
-  "Confirm group deletion": { "zh-CN": "确认删除群组", ja: "グループ削除の確認" },
-  "This permanently removes the group and every membership assignment. User accounts are not deleted.":
+  "Confirm group deletion": { "zh-CN": "确认删除权限组", ja: "グループ削除の確認" },
+  "This permanently removes the group, every membership, and every application or API assignment. User accounts are not deleted.":
     {
-      "zh-CN": "这将永久移除该群组及所有成员分配，但不会删除用户账户。",
-      ja: "グループとすべてのメンバー割り当てを完全に削除します。ユーザーアカウントは削除されません。",
+      "zh-CN": "这将永久移除该权限组、所有成员身份以及所有应用或 API 分配，但不会删除用户账户。",
+      ja: "権限グループ、すべてのメンバーシップ、アプリケーションまたは API の割り当てを完全に削除します。ユーザーアカウントは削除されません。",
     },
-  "Delete group": { "zh-CN": "删除群组", ja: "グループを削除" },
-  "Delete group?": { "zh-CN": "删除群组？", ja: "グループを削除しますか？" },
+  "Delete group": { "zh-CN": "删除权限组", ja: "グループを削除" },
+  "Delete group?": { "zh-CN": "删除权限组？", ja: "グループを削除しますか？" },
   "Add a user": { "zh-CN": "添加用户", ja: "ユーザーを追加" },
   "Give someone a direct credential or send a single-use invitation.": {
     "zh-CN": "为用户提供直接凭据，或发送一次性邀请。",
@@ -1097,7 +1351,7 @@ export const MESSAGE_CATALOG = {
   },
   "English letters, numbers, hyphens, and underscores only; usernames are unique and can be used at sign-in.":
     {
-      "zh-CN": "仅限英文字母、数字、连字符和下划线；用户名唯一，并可用于登录。",
+      "zh-CN": "仅限英文字母、数字、连字符和下划线；登录名唯一，并可用于登录。",
       ja: "英字、数字、ハイフン、アンダースコアのみ使用できます。ユーザー名は一意で、ログインにも使用できます。",
     },
   Optional: { "zh-CN": "可选", ja: "任意" },
@@ -1106,7 +1360,7 @@ export const MESSAGE_CATALOG = {
   "Initial passwords require 6–128 characters, or at least 12 when the admins group is selected. Invitations never expose a credential to the administrator.":
     {
       "zh-CN":
-        "初始密码需要 6–128 个字符；选择 admins 群组时至少需要 12 个字符。邀请不会向管理员暴露凭据。",
+        "初始密码需要 6–128 个字符；选择 admins 权限组时至少需要 12 个字符。邀请不会向管理员暴露凭据。",
       ja: "初期パスワードは6〜128文字、adminsグループを選択した場合は12文字以上必要です。招待では管理者に認証情報が開示されません。",
     },
   "Mark email as verified": { "zh-CN": "将电子邮箱标记为已验证", ja: "メールを確認済みにする" },
@@ -1116,24 +1370,24 @@ export const MESSAGE_CATALOG = {
     ja: "このユーザーが管理者の間は利用できません",
   },
   Never: { "zh-CN": "从未", ja: "未使用" },
-  "Groups:": { "zh-CN": "群组：", ja: "グループ：" },
+  "Groups:": { "zh-CN": "权限组：", ja: "グループ：" },
   "English letters, numbers, hyphens, and underscores only. Users can sign in with this username.":
     {
-      "zh-CN": "仅限英文字母、数字、连字符和下划线。用户可以使用此用户名登录。",
+      "zh-CN": "仅限英文字母、数字、连字符和下划线。用户可以使用此登录名登录。",
       ja: "英字、数字、ハイフン、アンダースコアのみ使用できます。ユーザーはこのユーザー名でログインできます。",
     },
   "This stable ID is exposed as sub in ID tokens and does not change when the username changes.": {
-    "zh-CN": "这个稳定 ID 会在 ID Token 中以 sub 公开，并且不会随用户名更改。",
+    "zh-CN": "这个稳定 ID 会在 ID Token 中以 sub 公开，并且不会随登录名更改。",
     ja: "この安定したIDはIDトークンでsubとして公開され、ユーザー名を変更しても変わりません。",
   },
   "Changing a username can disrupt sign-in and integrations.": {
-    "zh-CN": "更改用户名可能影响登录和集成。",
+    "zh-CN": "更改登录名可能影响登录和集成。",
     ja: "ユーザー名の変更はログインや連携に影響する可能性があります。",
   },
   "The user must sign in with the new username. Saved sign-in details, external mappings, or automation that uses preferred_username may need to be updated.":
     {
       "zh-CN":
-        "用户之后必须使用新用户名登录。保存的登录信息、外部映射，或使用 preferred_username 的自动化可能需要更新。",
+        "用户之后必须使用新登录名登录。保存的登录信息、外部映射，或使用 preferred_username 的自动化可能需要更新。",
       ja: "以後は新しいユーザー名でログインする必要があります。保存済みのログイン情報、外部マッピング、preferred_usernameを使う自動化は更新が必要になる場合があります。",
     },
   "English letters, numbers, hyphens, and underscores only. Only administrators can change this value.":
@@ -1170,13 +1424,13 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "生成登录链接前，请先启用此用户。",
     ja: "ログインリンクを生成する前に、このユーザーを有効にしてください。",
   },
-  "Group access": { "zh-CN": "群组访问权限", ja: "グループアクセス" },
+  "Group access": { "zh-CN": "权限组访问权限", ja: "グループアクセス" },
   "Administrator access comes from the admins group. The last active administrator cannot remove it.":
     {
-      "zh-CN": "管理员访问权限来自 admins 群组。最后一名活动管理员不能移除此权限。",
+      "zh-CN": "管理员访问权限来自 admins 权限组。最后一名活动管理员不能移除此权限。",
       ja: "管理者権限はadminsグループから付与されます。最後の有効な管理者からは削除できません。",
     },
-  "Update groups": { "zh-CN": "更新群组", ja: "グループを更新" },
+  "Update groups": { "zh-CN": "更新权限组", ja: "グループを更新" },
   Sessions: { "zh-CN": "会话", ja: "セッション" },
   "Force sign-out on every device this user is signed in on.": {
     "zh-CN": "强制退出此用户已登录的所有设备。",
@@ -1305,6 +1559,15 @@ export const MESSAGE_CATALOG = {
   Authentication: { "zh-CN": "身份验证", ja: "認証" },
   "Grant types": { "zh-CN": "许可类型", ja: "グラントタイプ" },
   Back: { "zh-CN": "返回", ja: "戻る" },
+  "Back to profile": { "zh-CN": "返回个人资料", ja: "プロフィールに戻る" },
+  "Back to login methods": { "zh-CN": "返回登录方式", ja: "ログイン方法に戻る" },
+  "Back to login method": { "zh-CN": "返回登录方式", ja: "ログイン方法に戻る" },
+  "Back to active sessions": { "zh-CN": "返回活动会话", ja: "アクティブなセッションに戻る" },
+  "Back to authorized apps": { "zh-CN": "返回已授权应用", ja: "承認済みアプリに戻る" },
+  "Back to groups": { "zh-CN": "返回权限组", ja: "グループ一覧に戻る" },
+  "Back to group": { "zh-CN": "返回权限组", ja: "グループに戻る" },
+  "Back to application": { "zh-CN": "返回应用", ja: "アプリケーションに戻る" },
+  "Back to devices": { "zh-CN": "返回设备", ja: "デバイス一覧に戻る" },
   "Confidential (gets a secret)": {
     "zh-CN": "机密（获得密钥）",
     ja: "コンフィデンシャル（シークレットあり）",
@@ -1395,12 +1658,12 @@ export const MESSAGE_CATALOG = {
     ja: "パスキーログインを削除しました。",
   },
   "Group access updated.": {
-    "zh-CN": "群组访问权限已更新。",
+    "zh-CN": "权限组访问权限已更新。",
     ja: "グループアクセスを更新しました。",
   },
-  "Group created.": { "zh-CN": "群组已创建。", ja: "グループを作成しました。" },
-  "Group updated.": { "zh-CN": "群组已更新。", ja: "グループを更新しました。" },
-  "Group deleted.": { "zh-CN": "群组已删除。", ja: "グループを削除しました。" },
+  "Group created.": { "zh-CN": "权限组已创建。", ja: "グループを作成しました。" },
+  "Group updated.": { "zh-CN": "权限组已更新。", ja: "グループを更新しました。" },
+  "Group deleted.": { "zh-CN": "权限组已删除。", ja: "グループを削除しました。" },
   "All of that user's sessions were revoked.": {
     "zh-CN": "该用户的所有会话已撤销。",
     ja: "そのユーザーの全セッションを取り消しました。",
@@ -1412,6 +1675,7 @@ export const MESSAGE_CATALOG = {
   "Client disabled.": { "zh-CN": "客户端已禁用。", ja: "クライアントを無効にしました。" },
   "Resource created.": { "zh-CN": "资源已创建。", ja: "リソースを作成しました。" },
   "Resource updated.": { "zh-CN": "资源已更新。", ja: "リソースを更新しました。" },
+  "Resource deleted.": { "zh-CN": "资源已删除。", ja: "リソースを削除しました。" },
   "Device session revoked.": {
     "zh-CN": "设备会话已撤销。",
     ja: "デバイスセッションを取り消しました。",
@@ -1421,11 +1685,11 @@ export const MESSAGE_CATALOG = {
     ja: "そのメールアドレスは別のアカウントで使用されています。",
   },
   "An account already uses that username.": {
-    "zh-CN": "已有账户使用该用户名。",
+    "zh-CN": "已有账户使用该登录名。",
     ja: "そのユーザー名は別のアカウントで使用されています。",
   },
   "Usernames may contain only English letters, numbers, hyphens, and underscores.": {
-    "zh-CN": "用户名只能包含英文字母、数字、连字符和下划线。",
+    "zh-CN": "登录名只能包含英文字母、数字、连字符和下划线。",
     ja: "ユーザー名には英字、数字、ハイフン、アンダースコアのみ使用できます。",
   },
   "That password does not meet this user's policy.": {
@@ -1441,19 +1705,27 @@ export const MESSAGE_CATALOG = {
     ja: "マジックリンクを生成する前にユーザーを有効にしてください。",
   },
   "A group with that name already exists.": {
-    "zh-CN": "已存在同名群组。",
+    "zh-CN": "已存在同名权限组。",
     ja: "同じ名前のグループがすでに存在します。",
   },
   "The admins group is protected.": {
-    "zh-CN": "admins 群组受保护。",
+    "zh-CN": "admins 权限组受保护。",
     ja: "adminsグループは保護されています。",
   },
   "Choose only groups that currently exist.": {
-    "zh-CN": "只能选择当前存在的群组。",
+    "zh-CN": "只能选择当前存在的权限组。",
     ja: "現在存在するグループのみ選択してください。",
   },
+  "Permission-group access updated.": {
+    "zh-CN": "权限组访问权限已更新。",
+    ja: "権限グループのアクセス権を更新しました。",
+  },
+  "Choose only existing user applications and APIs.": {
+    "zh-CN": "只能选择现有的用户应用和 API。",
+    ja: "既存のユーザーアプリケーションと API のみを選択してください。",
+  },
   "Keep at least one active user in the admins group.": {
-    "zh-CN": "admins 群组中必须至少保留一名活动用户。",
+    "zh-CN": "admins 权限组中必须至少保留一名活动用户。",
     ja: "adminsグループには有効なユーザーを1人以上残してください。",
   },
   "The account was not created. Check email delivery and try again.": {
@@ -1477,7 +1749,7 @@ export const MESSAGE_CATALOG = {
     ja: "初期パスワードは6〜128文字（管理者は12文字以上）で入力してください。",
   },
   "Select no more than {max} valid groups.": {
-    "zh-CN": "最多选择 {max} 个有效群组。",
+    "zh-CN": "最多选择 {max} 个有效权限组。",
     ja: "有効なグループを{max}個以内で選択してください。",
   },
   "Check the form values.": { "zh-CN": "请检查表单值。", ja: "フォームの値を確認してください。" },
@@ -1486,15 +1758,15 @@ export const MESSAGE_CATALOG = {
     ja: "セキュリティのため初期パスワードを消去しました。もう一度入力してください。",
   },
   "That password does not meet the policy for the selected groups.": {
-    "zh-CN": "该密码不符合所选群组的策略。",
+    "zh-CN": "该密码不符合所选权限组的策略。",
     ja: "そのパスワードは選択したグループのポリシーを満たしていません。",
   },
   "One or more selected groups no longer exist. Review the group selection.": {
-    "zh-CN": "一个或多个所选群组已不存在。请检查群组选择。",
+    "zh-CN": "一个或多个所选权限组已不存在。请检查权限组选择。",
     ja: "選択したグループの一部が存在しません。グループ選択を確認してください。",
   },
   "The group name did not match. Nothing was deleted.": {
-    "zh-CN": "群组名称不匹配，未删除任何内容。",
+    "zh-CN": "权限组名称不匹配，未删除任何内容。",
     ja: "グループ名が一致しなかったため、何も削除されませんでした。",
   },
   "Redirect URIs must use HTTPS, loopback HTTP, or a reverse-domain native scheme, without credentials or fragments.":
@@ -1521,6 +1793,10 @@ export const MESSAGE_CATALOG = {
   "The client ID did not match. Nothing was deleted.": {
     "zh-CN": "客户端 ID 不匹配，未删除任何内容。",
     ja: "クライアントIDが一致しなかったため、何も削除されませんでした。",
+  },
+  "The resource URI did not match. Nothing was deleted.": {
+    "zh-CN": "资源 URI 不匹配，未删除任何内容。",
+    ja: "リソースURIが一致しなかったため、何も削除されませんでした。",
   },
   "client_id must be a URL-safe identifier of 1 to 128 characters": {
     "zh-CN": "client_id 必须是 1 到 128 个字符的 URL 安全标识符",

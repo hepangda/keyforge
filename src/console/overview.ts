@@ -20,7 +20,13 @@ export function registerConsoleOverview(app: Hono<AppBindings>): void {
     return c.html(
       renderOverview(
         chrome(c, "overview"),
-        { users, clients: clients.length, resources: resources.length, devices },
+        {
+          users,
+          clients: clients.length,
+          resources: resources.length,
+          enabledResources: resources.filter((resource) => resource.enabled).length,
+          devices,
+        },
         recent,
       ),
     )

@@ -23,3 +23,8 @@ INSERT INTO oauth_clients (
   '["https://api.pangda.app"]',
   'https://api.pangda.app', 1, 1, unixepoch(), unixepoch()
 );
+
+INSERT INTO oauth_client_permission_groups (client_id, group_id, created_at)
+SELECT 'demo_local', id, unixepoch()
+FROM groups
+WHERE id = 'grp_seed_employees';

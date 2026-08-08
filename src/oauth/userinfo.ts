@@ -1,15 +1,16 @@
 import type { Context } from "hono"
 import { getClientById } from "../db/queries/clients"
-import { getUserById, getUserGroupNames } from "../db/queries/users"
+import { getUserById } from "../db/queries/users"
 import { buildUserClaims } from "../oidc/claims"
 import { isPlausibleCompactJwt } from "../security/ingress"
 import { verifyAccessToken } from "../tokens/jwt"
 import type { AppBindings } from "../types/app"
+import type { OAuthClient } from "../types/domain"
 import { extractBearerToken } from "./bearer"
 import { consentCoversScopes } from "./consent"
 import { resolveResourceForScopes } from "./resources"
 import { parseScopeString } from "./scopes"
-import { userMayReceiveScopes } from "./user-scope-policy"
+import { evaluateUserTokenAccess } from "./user-token-policy"
 
 function invalidToken(c: Context<AppBindings>, description: string): Response {
   c.header("www-authenticate", `Bearer error="invalid_token", error_description="${description}"`)
@@ -36,7 +37,14 @@ export async function handleUserInfo(c: Context<AppBindings>): Promise<Response>
 
   const rawScope = payload["scope"]
   const scopes = parseScopeString(typeof rawScope === "string" ? rawScope : "")
-  if (!scopes.includes("openid") || !(await audienceIsCurrent(c, payload))) {
+  if (scopes.includes("groups")) {
+    return invalidToken(c, "The access token is not valid for UserInfo")
+  }
+  if (!scopes.includes("openid")) {
+    return invalidToken(c, "The access token is not valid for UserInfo")
+  }
+  const tokenClient = await currentAudienceClient(c, payload)
+  if (tokenClient === null || typeof payload.aud !== "string") {
     return invalidToken(c, "The access token is not valid for UserInfo")
   }
 
@@ -44,11 +52,16 @@ export async function handleUserInfo(c: Context<AppBindings>): Promise<Response>
   if (user === null || user.disabled) {
     return invalidToken(c, "The subject is unavailable")
   }
-  if (!(await userMayReceiveScopes(c.env, user.id, scopes))) {
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: tokenClient.clientId,
+    resourceUri: payload.aud,
+    scopes,
+  })
+  if (!access.allowed) {
     return invalidToken(c, "The subject is no longer permitted to use this token")
   }
-  const groups = await getUserGroupNames(c.env, user.id)
-  return c.json({ sub: user.id, ...buildUserClaims(c.env, user, groups, scopes) }, 200, {
+  return c.json({ sub: user.id, ...buildUserClaims(c.env, user, scopes) }, 200, {
     "cache-control": "no-store",
   })
 }
@@ -67,16 +80,16 @@ async function verifyUserToken(
   }
 }
 
-async function audienceIsCurrent(
+async function currentAudienceClient(
   c: Context<AppBindings>,
   payload: Awaited<ReturnType<typeof verifyAccessToken>>,
-): Promise<boolean> {
+): Promise<OAuthClient | null> {
   if (typeof payload.aud !== "string" || typeof payload["client_id"] !== "string") {
-    return false
+    return null
   }
   const client = await getClientById(c.env, payload["client_id"])
   if (client === null || !client.enabled) {
-    return false
+    return null
   }
   try {
     await resolveResourceForScopes(
@@ -85,17 +98,19 @@ async function audienceIsCurrent(
       payload.aud,
       parseScopeString(typeof payload["scope"] === "string" ? payload["scope"] : ""),
     )
-    if (typeof payload.sub !== "string") return false
-    return consentCoversScopes(
+    if (typeof payload.sub !== "string") return null
+    return (await consentCoversScopes(
       c.env,
       payload.sub,
       client.clientId,
       payload.aud,
       parseScopeString(typeof payload["scope"] === "string" ? payload["scope"] : ""),
-    )
+    ))
+      ? client
+      : null
   } catch (error) {
     if (error instanceof Error) {
-      return false
+      return null
     }
     throw error
   }

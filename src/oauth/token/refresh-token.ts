@@ -5,7 +5,7 @@ import {
   getRefreshTokenByHash,
   type RefreshTokenRecord,
 } from "../../db/queries/tokens"
-import { getUserById, getUserGroupNames } from "../../db/queries/users"
+import { getUserById } from "../../db/queries/users"
 import { recordAudit } from "../../security/audit"
 import { OAuthError } from "../../security/errors"
 import { issueUserAccessToken } from "../../tokens/access-token"
@@ -19,7 +19,7 @@ import { isExpired } from "../../utils/time"
 import { consentCoversScopes } from "../consent"
 import { resolveResourceForScopes } from "../resources"
 import { parseScopeString } from "../scopes"
-import { userMayReceiveScopes } from "../user-scope-policy"
+import { evaluateUserTokenAccess } from "../user-token-policy"
 import type { TokenResponse } from "./response"
 
 export async function handleRefreshToken(
@@ -80,8 +80,17 @@ export async function handleRefreshToken(
       throw invalidRefreshToken("source session was revoked, expired, or changed owner")
     }
   }
-  if (!(await userMayReceiveScopes(env, user.id, scopes))) {
-    throw invalidRefreshToken("current group policy denies one or more privileged scopes")
+  const access = await evaluateUserTokenAccess(env, {
+    userId: user.id,
+    clientId: client.clientId,
+    resourceUri: record.resource,
+    scopes,
+  })
+  if (!access.allowed) {
+    throw new OAuthError("invalid_grant", {
+      description: "This account is not permitted to access this application or resource.",
+      detail: `user token policy denied ${access.reason}`,
+    })
   }
   if (!(await consentCoversScopes(env, user.id, client.clientId, record.resource, scopes))) {
     throw invalidRefreshToken("current consent no longer covers the refresh authorization")
@@ -165,7 +174,6 @@ async function issueRotatedTokens(
     })
   }
   const scopes = parseScopeString(outcome.scope)
-  const groups = await getUserGroupNames(env, user.id)
   const accessToken = await issueUserAccessToken(env, {
     userId: user.id,
     clientId: client.clientId,
@@ -182,7 +190,6 @@ async function issueRotatedTokens(
   if (scopes.includes("openid")) {
     response.id_token = await issueIdToken(env, {
       user,
-      groups,
       clientId: client.clientId,
       scopes,
       authTime: outcome.authTime,

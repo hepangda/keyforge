@@ -49,6 +49,26 @@ between the selected environment, issuer, Worker, and custom-domain route. A
 Wrangler dry run remains available separately because it validates the build
 and TOML shape without proving that provisioned resources exist.
 
+### Permission-group authorization
+
+User-backed token flows are default-deny. A user's current memberships must
+match an assignment for the requesting application or device and independently
+match an assignment for the selected API. Two different memberships may
+satisfy those checks. Custom clients and resources start unassigned and cannot
+receive user tokens until an operator configures both sides under **Permission
+groups** in the administration console or through `PUT /admin/groups/:id/access`.
+Service clients using `client_credentials` do not carry a user grant and are not
+subject to permission-group assignments.
+
+Migration `0018_permission_group_access.sql` seeds `employees` for `pangda_app`,
+`cloudflare_one`, `pangda_cli`, and `hermes_dashboard`, together with their four
+user-facing resources. It seeds `admins` only for `pangda_admin` and
+`https://admin.pangda.app`. The local demo seed separately assigns `demo_local`
+to `employees`. Operators that removed an optional seeded target before the
+migration do not have it recreated. Deleting a group, client, or resource
+cascades its assignments and therefore leaves the affected authorization path
+denied rather than widening access.
+
 ### YOLO mode (dev only)
 
 `dev` is the only environment that may set `YOLO_MODE = "true"`. It is an
@@ -68,6 +88,7 @@ With YOLO mode on, the server skips:
 | Client authentication | Confidential clients must present a valid secret | Any credential shape accepted |
 | Consent | Stored grant must cover requested scopes | Treated as already consented |
 | Scope/resource policy | Client *and* resource must allow each scope | Every requested scope granted |
+| Permission-group token access | Current membership must match assigned application and API groups | Every user-to-target check allowed |
 | Administrator access | `admins` group plus recent authentication | Any signed-in user, no reauth |
 | Password policy | 6/12-character minimum by role | Length floor dropped |
 | Password login | Verified against stored scrypt hash | Accepted when the password repeats the login name |
@@ -504,9 +525,10 @@ open, while dev and production require
 probed. A missing remote token fails closed with `503`; a missing or incorrect
 request credential returns `401`. The authenticated readiness endpoint verifies all required
 bindings; strict runtime values; Resend and request-hash secrets; the schema
-through migration 0015, including required tables, actor/subject audit columns,
-actor lookup indexes, the audit-retention index, and bounded-cleanup indexes;
-the canonical email/alias and login-method indexes; the administrator seed catalog; the
+through migration 0018, including required tables, actor/subject audit columns,
+permission-group assignment tables and reverse indexes, the audit-retention
+index, bounded-cleanup indexes, canonical email/alias and login-method indexes,
+and the administrator seed catalog; the
 D1-authoritative signing key, published JWKS, and completed legacy-KV cleanup;
 both Queue metrics; and a Durable Object RPC. It returns no secret values or
 failure details. Alert on:

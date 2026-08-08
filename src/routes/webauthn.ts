@@ -7,7 +7,7 @@ import {
   verifyAndStoreRegistration,
   verifyAuthentication,
 } from "../auth/passkey"
-import { createSession } from "../auth/session"
+import { createSession, replaceReauthenticatedSession } from "../auth/session"
 import { SESSION_TTL, TOKEN_TTL } from "../config"
 import { getUserById } from "../db/queries/users"
 import { recordAudit } from "../security/audit"
@@ -31,14 +31,13 @@ const CEREMONY_COOKIE = "__Host-keyforge_webauthn"
 const PASSKEY_RATE_LIMIT = 20
 const PASSKEY_VERIFY_RATE_LIMIT = 40
 const PASSKEY_RATE_WINDOW_SECONDS = 5 * 60
-const PASSKEY_REAUTHENTICATION_URL =
-  "/login?reauth=1&return_to=%2F%3Fsection%3Dlogin-methods%26flow%3Dadd-passkey%26verified%3D1"
 
 function recentAuthenticationRequired(c: Context<AppBindings>): Response {
+  const returnTo = safeLocalPath(c.req.header("x-keyforge-return-to") ?? null)
   return c.json(
     {
       error: "recent_authentication_required",
-      reauthenticate_url: PASSKEY_REAUTHENTICATION_URL,
+      reauthenticate_url: `/login?reauth=1&hint=add_passkey&return_to=${encodeURIComponent(returnTo)}`,
     },
     403,
   )
@@ -157,6 +156,11 @@ webauthn.post("/webauthn/login/verify", async (c) => {
     return c.json({ verified: false, error: "invalid_challenge" }, 400)
   }
   const body = await readJsonBody(c)
+  const metadata =
+    typeof body === "object" && body !== null
+      ? (body as { returnTo?: unknown; reauthenticate?: unknown })
+      : {}
+  const reauthenticating = metadata.reauthenticate === true
   const userId = await verifyAuthentication(c.env, body, challenge.challenge)
   const user = userId === null ? null : await getUserById(c.env, userId)
   if (user === null || user.disabled) {
@@ -176,6 +180,9 @@ webauthn.post("/webauthn/login/verify", async (c) => {
     ipHash: await clientIpHash(c),
     userAgentHash: await userAgentHash(c),
   })
+  if (reauthenticating) {
+    await replaceReauthenticatedSession(c.env, c.get("session"), session, user.id)
+  }
   setSessionCookie(c, session.token, SESSION_TTL.default)
   await recordAudit(c.env, {
     type: "user.login.passkey.success",
@@ -183,14 +190,10 @@ webauthn.post("/webauthn/login/verify", async (c) => {
     requestId,
     success: true,
   })
-  const metadata =
-    typeof body === "object" && body !== null
-      ? (body as { returnTo?: unknown; reauthenticate?: unknown })
-      : {}
+
   const returnTo = safeLocalPath(typeof metadata.returnTo === "string" ? metadata.returnTo : null)
-  const redirectTo =
-    metadata.reauthenticate === true
-      ? await createReauthContinuation(c.env, session.sessionId, returnTo)
-      : returnTo
+  const redirectTo = reauthenticating
+    ? await createReauthContinuation(c.env, session.sessionId, returnTo)
+    : returnTo
   return c.json({ verified: true, redirect_to: redirectTo })
 })

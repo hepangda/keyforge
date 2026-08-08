@@ -10,7 +10,7 @@ import type { OAuthClient } from "../../types/domain"
 import { consentCoversScopes } from "../consent"
 import { resolveResourceForScopes } from "../resources"
 import { parseScopeString } from "../scopes"
-import { userMayReceiveScopes } from "../user-scope-policy"
+import { evaluateUserTokenAccess } from "../user-token-policy"
 import { issueUserTokens } from "./issue"
 
 export async function handleAuthorizationCode(
@@ -74,10 +74,16 @@ export async function handleAuthorizationCode(
       detail: "consent no longer covers the authorization code grant",
     })
   }
-  if (!(await userMayReceiveScopes(env, user.id, scopes))) {
+  const access = await evaluateUserTokenAccess(env, {
+    userId: user.id,
+    clientId: client.clientId,
+    resourceUri: grant.resource,
+    scopes,
+  })
+  if (!access.allowed) {
     throw new OAuthError("invalid_grant", {
-      description: "The account is no longer permitted to use this authorization",
-      detail: "current group policy denies one or more privileged scopes",
+      description: "This account is not permitted to access this application or resource.",
+      detail: `user token policy denied ${access.reason}`,
     })
   }
 

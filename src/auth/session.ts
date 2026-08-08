@@ -257,12 +257,30 @@ export async function revokeSessionById(
   await revokeRefreshFamilyDurableObjects(env, refreshFamilyIds(results[1]))
   return revoked
 }
+export async function replaceReauthenticatedSession(
+  env: Env,
+  previous: SessionRecord | undefined,
+  next: CreatedSession,
+  nextUserId: string,
+): Promise<void> {
+  if (previous === undefined) return
+  try {
+    await revokeSessionById(env, previous.id, previous.userId)
+  } catch (error) {
+    try {
+      await revokeSessionById(env, next.sessionId, nextUserId)
+    } catch (cleanupError) {
+      console.error("session.reauthentication_cleanup_failed", next.sessionId, cleanupError)
+    }
+    throw error
+  }
+}
 
 export async function revokeOtherUserSessions(
   env: Env,
   userId: string,
   keepSessionId: string,
-): Promise<void> {
+): Promise<number> {
   const now = nowSeconds()
   const results = await env.DB.batch([
     env.DB.prepare(
@@ -275,6 +293,7 @@ export async function revokeOtherUserSessions(
     ).bind(now, userId, keepSessionId),
   ])
   await revokeRefreshFamilyDurableObjects(env, refreshFamilyIds(results[1]))
+  return results[0]?.meta.changes ?? 0
 }
 
 function refreshFamilyIds(result: D1Result<unknown> | undefined): string[] {

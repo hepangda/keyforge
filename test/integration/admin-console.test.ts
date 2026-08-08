@@ -16,7 +16,28 @@ import { hashClientSecret } from "../../src/security/client-secret"
 const ISSUER = "https://auth.pangda.app"
 
 beforeEach(async () => {
-  await env.DB.batch([env.DB.prepare("DELETE FROM sessions")])
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions"),
+    env.DB.prepare(
+      "DELETE FROM oauth_client_permission_groups WHERE group_id = 'grp_seed_employees'",
+    ),
+    env.DB.prepare(
+      "DELETE FROM oauth_resource_permission_groups WHERE group_id = 'grp_seed_employees'",
+    ),
+    env.DB.prepare(
+      `INSERT INTO oauth_client_permission_groups (client_id, group_id, created_at)
+       SELECT client_id, 'grp_seed_employees', unixepoch()
+       FROM oauth_clients
+       WHERE client_id IN ('pangda_app', 'cloudflare_one', 'pangda_cli', 'hermes_dashboard')`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO oauth_resource_permission_groups (resource_uri, group_id, created_at)
+       SELECT resource_uri, 'grp_seed_employees', unixepoch()
+       FROM oauth_resources
+       WHERE resource_uri IN ('https://api.pangda.app', 'https://app.pangda.app',
+                              'urn:pangda:cloudflare-one', 'urn:pangda:hermes-agent')`,
+    ),
+  ])
   await env.RATE_LIMIT.getByName("login:unknown:admin").reset()
 })
 
@@ -55,15 +76,23 @@ function postForm(
   path: string,
   session: string,
   csrf: string,
-  fields: Record<string, string>,
+  fields: Record<string, string | readonly string[]>,
 ): Promise<Response> {
+  const body = new URLSearchParams({ csrf_token: csrf })
+  for (const [name, value] of Object.entries(fields)) {
+    if (typeof value === "string") {
+      body.set(name, value)
+    } else {
+      for (const item of value) body.append(name, item)
+    }
+  }
   return SELF.fetch(`${ISSUER}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       cookie: `__Host-keyforge_session=${session}; __Host-keyforge_csrf=${csrf}`,
     },
-    body: new URLSearchParams({ csrf_token: csrf, ...fields }).toString(),
+    body: body.toString(),
     redirect: "manual",
   })
 }
@@ -84,6 +113,14 @@ describe("console access control", () => {
       redirect: "manual",
     })
     expect(res.status).toBe(403)
+    const page = await res.text()
+    expect(page).toContain('class="shell"')
+    expect(page).toContain("--layout-card-max:480px")
+    expect(page).toContain("--layout-shell-max:1080px")
+    expect(page).toContain("nobody@pangda.app")
+    expect(page).toContain('href="/">Your account</a>')
+    expect(page).toContain('href="/logout">Sign out</a>')
+    expect(page).not.toContain('class="shell-tabs"')
   })
 
   it("renders the console overview for an admin", async () => {
@@ -96,8 +133,11 @@ describe("console access control", () => {
     expect(page).toContain("Admin console")
     expect(page).toContain('class="shell"')
     expect(page).toContain('class="shell-tabs"')
-    expect(page).toContain(".shell{width:min(100%,1080px)")
-    expect(page).toContain("html{scrollbar-gutter:stable}")
+    expect(page).toContain(".shell{width:min(100%,var(--layout-shell-max))")
+    expect(page).toContain(".secret{margin:.4rem 0 0;padding:.85rem 1rem")
+    expect(page).toContain("font:500 .9rem var(--font-mono);overflow-wrap:anywhere")
+    expect(page).not.toContain(".form-grid{display:grid;gap:1.1rem;max-width")
+    expect(page).not.toContain(".form-grid--method{max-width")
     expect(page).toContain("<h1>Overview</h1>")
     expect(page).toContain("Get KeyForge ready")
   })
@@ -143,11 +183,100 @@ describe("console access control", () => {
     })
     expect(staleMutation.status).toBe(302)
     const mutationLogin = new URL(staleMutation.headers.get("location") ?? "", ISSUER)
-    expect(mutationLogin.searchParams.get("return_to")).toBe("/console/resources/new")
+    expect(mutationLogin.searchParams.get("return_to")).toBe("/console/resources/new?draft=1")
   })
 })
 
 describe("console users", () => {
+  it("separates Groups from the user directory and preserves invalid form values", async () => {
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const cookie = `__Host-keyforge_session=${session}`
+    const users = await SELF.fetch(`${ISSUER}/console/users`, { headers: { cookie } })
+    const usersHtml = await users.text()
+    expect(usersHtml).toContain('href="/console/groups"')
+    expect(usersHtml).toContain("Permission groups")
+
+    const groups = await SELF.fetch(`${ISSUER}/console/groups`, { headers: { cookie } })
+    const groupsHtml = await groups.text()
+    expect(groupsHtml).toContain("Permission groups")
+    expect(groupsHtml).toContain("Protected")
+    expect(groupsHtml).toContain('href="/console/groups/new"')
+    expect(groupsHtml).not.toContain("Manage membership and the claims applications receive.")
+    expect(groupsHtml).not.toContain("Use groups to grant application and administrator claims.")
+    expect(groupsHtml).not.toContain("Group membership is included in identity claims")
+
+    const form = await SELF.fetch(`${ISSUER}/console/groups/new`, { headers: { cookie } })
+    expect(form.status).toBe(200)
+    const csrf = cookieValue(form.headers.getSetCookie(), "__Host-keyforge_csrf")
+    const invalid = await postForm("/console/groups", session, csrf, {
+      name: "Bad Group Name",
+      description: "Keep this description",
+    })
+    expect(invalid.status).toBe(400)
+    const invalidHtml = await invalid.text()
+    expect(invalidHtml).toContain('value="Bad Group Name"')
+    expect(invalidHtml).toContain('value="Keep this description"')
+
+    const duplicate = await postForm("/console/groups", session, csrf, {
+      name: "admins",
+      description: "Protected duplicate",
+    })
+    expect(duplicate.status).toBe(400)
+    expect(await duplicate.text()).toContain("already exists")
+  })
+
+  it("renders, saves, and validates application and API assignments", async () => {
+    const employees = await getGroupByName(env, "employees")
+    expect(employees).not.toBeNull()
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const cookie = `__Host-keyforge_session=${session}`
+    const path = `/console/groups/${employees?.id ?? "missing"}`
+    const page = await SELF.fetch(`${ISSUER}${path}?view=access`, { headers: { cookie } })
+    expect(page.status).toBe(200)
+    const html = await page.text()
+    for (const value of [
+      "pangda_app",
+      "cloudflare_one",
+      "pangda_cli",
+      "hermes_dashboard",
+      "https://api.pangda.app",
+      "https://app.pangda.app",
+      "urn:pangda:cloudflare-one",
+      "urn:pangda:hermes-agent",
+    ]) {
+      expect(html).toContain(`value="${value}" checked`)
+    }
+    expect(html).not.toContain('value="svc_internal_worker"')
+    const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf")
+
+    const saved = await postForm(`${path}/access`, session, csrf, {
+      client_ids: ["pangda_app"],
+      resource_uris: ["https://api.pangda.app"],
+    })
+    expect(saved.status).toBe(302)
+    expect(saved.headers.get("location")).toContain("flash=group_access_updated")
+    const reloaded = await SELF.fetch(`${ISSUER}${path}?view=access&flash=group_access_updated`, {
+      headers: { cookie },
+    })
+    const reloadedHtml = await reloaded.text()
+    expect(reloadedHtml).toContain("Permission-group access updated.")
+    expect(reloadedHtml).toContain('value="pangda_app" checked')
+    expect(reloadedHtml).toContain('value="https://api.pangda.app" checked')
+    expect(reloadedHtml).not.toContain('value="pangda_cli" checked')
+
+    const invalid = await postForm(`${path}/access`, session, csrf, {
+      client_ids: ["pangda_app", "missing-client"],
+      resource_uris: ["https://api.pangda.app", "urn:missing"],
+    })
+    expect(invalid.status).toBe(400)
+    const invalidHtml = await invalid.text()
+    expect(invalidHtml).toContain("Choose only existing user applications and APIs.")
+    expect(invalidHtml).toContain('value="pangda_app" checked')
+    expect(invalidHtml).toContain('value="https://api.pangda.app" checked')
+    expect(invalidHtml).not.toContain("missing-client")
+    expect(invalidHtml).not.toContain("urn:missing")
+  })
+
   it("creates a group and a password user with that membership", async () => {
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
@@ -164,7 +293,9 @@ describe("console users", () => {
       alias: "consoleuser",
       name: "Console User",
       email_verified: "1",
+      setup_mode: "password",
       password: "console password 123",
+      password_confirm: "console password 123",
       group_ids: group?.id ?? "",
     })
     expect(createResponse.status).toBe(302)
@@ -218,11 +349,36 @@ describe("console users", () => {
     expect(await getGroupByName(env, "temporary-reviewers")).toBeNull()
   })
 
-  it("keeps the admins group protected from direct confirmation requests", async () => {
+  it("allows admins access management while keeping settings and deletion protected", async () => {
     const admins = await getGroupByName(env, "admins")
     expect(admins).not.toBeNull()
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
+    const detailPath = `/console/groups/${admins?.id ?? "missing"}`
+    const access = await SELF.fetch(`${ISSUER}${detailPath}`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    expect(access.status).toBe(200)
+    const accessHtml = await access.text()
+    expect(accessHtml).toContain(`action="${detailPath}/access"`)
+    expect(accessHtml).toContain('value="pangda_admin" checked')
+    expect(accessHtml).not.toContain(`href="${detailPath}/delete"`)
+    expect(accessHtml).not.toContain('name="name"')
+
+    const saved = await postForm(`${detailPath}/access`, session, csrf, {
+      client_ids: ["pangda_admin"],
+      resource_uris: ["https://admin.pangda.app"],
+    })
+    expect(saved.status).toBe(302)
+    expect(saved.headers.get("location")).toContain("flash=group_access_updated")
+
+    const settings = await SELF.fetch(`${ISSUER}${detailPath}?view=settings`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+      redirect: "manual",
+    })
+    expect(settings.status).toBe(302)
+    expect(settings.headers.get("location")).toContain("view=access")
+    expect(settings.headers.get("location")).toContain("flash=protected_group")
     const path = `/console/groups/${admins?.id ?? "missing"}/delete`
 
     const confirmation = await SELF.fetch(`${ISSUER}${path}`, {
@@ -245,8 +401,43 @@ describe("console users", () => {
     })
     expect(res.status).toBe(200)
     const page = await res.text()
-    expect(page).toContain("Leaving the password blank sends a secure one-hour invitation link")
+    expect(page).toContain('name="setup_mode" value="invite" checked')
+    expect(page).toContain("Send invitation")
+    expect(page).toContain("Set initial password")
     expect(page).not.toContain("/password/reset?token=")
+    expect(page).toContain(
+      ".form-grid{display:grid;width:100%;grid-template-columns:repeat(2,minmax(0,1fr))",
+    )
+    expect(page).toContain('data-draft-key="keyforge:form:user:new"')
+
+    const csrf = cookieValue(res.headers.getSetCookie(), "__Host-keyforge_csrf")
+    const invited = await postForm("/console/users", session, csrf, {
+      email: "invited.mode@example.test",
+      alias: "invitedmode",
+      setup_mode: "invite",
+      password: "ignored password value",
+      password_confirm: "does not match",
+    })
+    expect(invited.status).toBe(302)
+    expect(invited.headers.get("location")).toContain("view=login-methods")
+    expect(invited.headers.get("location")).toContain("flash=user_invited")
+    const invitedUser = await getUserByEmail(env, "invited.mode@example.test")
+    expect(invitedUser).not.toBeNull()
+    expect(await verifyUserPassword(env, invitedUser?.id ?? "", "ignored password value")).toBe(
+      false,
+    )
+
+    const unknown = await postForm("/console/users", session, csrf, {
+      email: "unknown.mode@example.test",
+      alias: "unknownmode",
+      setup_mode: "legacy",
+    })
+    expect(unknown.status).toBe(400)
+    expect(await unknown.text()).toContain("Choose how this user should set up their account")
+    expect(await getUserByEmail(env, "unknown.mode@example.test")).toBeNull()
+    expect(page).toContain(".form-grid--single{grid-template-columns:minmax(0,1fr)}")
+    expect(page).toContain('class="field-cluster field--wide"')
+    expect(page).toContain('class="form-actions"')
   })
 
   it("re-renders invalid user creation values but always clears the password", async () => {
@@ -263,6 +454,8 @@ describe("console users", () => {
       email_verified: "1",
       group_ids: group?.id ?? "",
       password,
+      setup_mode: "password",
+      password_confirm: password,
     })
     expect(res.status).toBe(400)
     const page = await res.text()
@@ -278,41 +471,127 @@ describe("console users", () => {
     expect(await getUserByEmail(env, "draft.user@example.com")).toBeNull()
   })
 
-  it("shows the stable id and lets an administrator rename and disable a user", async () => {
+  it("searches users literally and preserves the query through pagination", async () => {
+    const literal = await createUser(env, {
+      email: "literal.search@example.test",
+      alias: "literal_name",
+    })
+    await createUser(env, { email: "wildcard@example.test", alias: "literalxname" })
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const cookie = `__Host-keyforge_session=${session}`
+
+    const underscore = await SELF.fetch(`${ISSUER}/console/users?q=_&limit=50`, {
+      headers: { cookie },
+    })
+    const underscoreHtml = await underscore.text()
+    expect(underscoreHtml).toContain("literal_name")
+    expect(underscoreHtml).not.toContain("literalxname")
+    expect(underscoreHtml).toContain('name="q" value="_"')
+    expect(underscoreHtml).toContain("Search users")
+    expect(underscoreHtml).toContain('href="/console/users">Clear</a>')
+
+    const exactId = await SELF.fetch(
+      `${ISSUER}/console/users?q=${encodeURIComponent(literal.id)}`,
+      { headers: { cookie } },
+    )
+    expect(await exactId.text()).toContain("literal_name")
+
+    const paged = await SELF.fetch(`${ISSUER}/console/users?q=literal&limit=1`, {
+      headers: { cookie },
+    })
+    expect(await paged.text()).toContain("/console/users?q=literal&amp;limit=1&amp;offset=1")
+
+    const percent = await SELF.fetch(`${ISSUER}/console/users?q=%25`, {
+      headers: { cookie },
+    })
+    expect(await percent.text()).toContain("No users match this search.")
+  })
+
+  it("splits user details into tabs and reviews disable before mutation", async () => {
     const target = await createUser(env, { email: "target@pangda.app" })
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
-    const detail = await SELF.fetch(`${ISSUER}/console/users/${target.id}`, {
+    const detail = await SELF.fetch(`${ISSUER}/console/users/${target.id}?view=unknown`, {
       headers: { cookie: `__Host-keyforge_session=${session}` },
     })
     const detailHtml = await detail.text()
-    expect(detailHtml).toContain('name="user_id_display"')
+    expect(detailHtml).toContain('aria-label="User sections"')
     expect(detailHtml).toContain(target.id)
-    expect(detailHtml).toContain("exposed as sub in ID tokens")
-    expect(detailHtml).toContain("Changing a username can disrupt sign-in and integrations")
     expect(detailHtml).toContain('name="alias"')
-    const res = await postForm(`/console/users/${target.id}`, session, csrf, {
+    expect(detailHtml).not.toContain("Add password")
+    expect(detailHtml).toContain(`/console/users/${target.id}?view=login-methods`)
+
+    const saved = await postForm(`/console/users/${target.id}`, session, csrf, {
       alias: "renamedtarget",
-      disabled: "1",
+      name: "Renamed Target",
     })
-    expect(res.status).toBe(302)
-    expect((await getUserById(env, target.id))?.disabled).toBe(true)
+    expect(saved.status).toBe(302)
+    expect(saved.headers.get("location")).toContain("view=profile")
+    expect((await getUserById(env, target.id))?.disabled).toBe(false)
     expect((await getUserById(env, target.id))?.alias).toBe("renamedtarget")
-    expect((await getUserById(env, target.id))?.id).toBe(target.id)
+
+    const review = await SELF.fetch(`${ISSUER}/console/users/${target.id}/disable`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    expect(review.status).toBe(200)
+    const reviewHtml = await review.text()
+    expect(reviewHtml).toContain("immediately revokes every session and refresh token")
+    const reviewCsrf = cookieValue(review.headers.getSetCookie(), "__Host-keyforge_csrf")
+    const disabled = await postForm(`/console/users/${target.id}/disable`, session, reviewCsrf, {})
+    expect(disabled.status).toBe(302)
+    expect((await getUserById(env, target.id))?.disabled).toBe(true)
   })
 
-  it("revokes a user's sessions", async () => {
+  it("keeps typed user-detail values while clearing password secrets", async () => {
+    const target = await createUser(env, { email: "feedback@pangda.app", alias: "feedback" })
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const csrf = await consoleCsrf(session)
+    const profile = await postForm(`/console/users/${target.id}`, session, csrf, {
+      alias: "bad alias",
+      name: "Draft Name",
+    })
+    expect(profile.status).toBe(400)
+    const profileHtml = await profile.text()
+    expect(profileHtml).toContain('value="bad alias"')
+    expect(profileHtml).toContain('value="Draft Name"')
+    expect(profileHtml).toContain('aria-current="page">Profile</a>')
+
+    const password = await postForm(`/console/users/${target.id}/passwords`, session, csrf, {
+      name: "Temporary credential",
+      password: "first password value",
+      password_confirm: "different password value",
+    })
+    expect(password.status).toBe(400)
+    const passwordHtml = await password.text()
+    expect(passwordHtml).toContain('value="Temporary credential"')
+    expect(passwordHtml).toContain('type="password" name="password" value=""')
+    expect(passwordHtml).not.toContain("first password value")
+    expect(passwordHtml).not.toContain("different password value")
+    expect(passwordHtml).toContain('aria-current="page">Login methods</a>')
+  })
+
+  it("reviews and revokes a user's sessions", async () => {
     const target = await createUser(env, { email: "target2@pangda.app" })
     const { token } = await createSession(env, {
       userId: target.id,
       authMethod: "password",
       ttlSeconds: 3600,
     })
-    expect(await getSessionByToken(env, token)).not.toBeNull()
     const session = await loginAs("admin", "test-admin-password-2026")
-    const csrf = await consoleCsrf(session)
+    const tab = await SELF.fetch(`${ISSUER}/console/users/${target.id}?view=sessions`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    const tabHtml = await tab.text()
+    expect(tabHtml).toContain("Last active")
+    expect(tabHtml).toContain(`/console/users/${target.id}/revoke-sessions`)
+    const review = await SELF.fetch(`${ISSUER}/console/users/${target.id}/revoke-sessions`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    expect(review.status).toBe(200)
+    const csrf = cookieValue(review.headers.getSetCookie(), "__Host-keyforge_csrf")
     const res = await postForm(`/console/users/${target.id}/revoke-sessions`, session, csrf, {})
     expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toContain("view=sessions")
     expect(await getSessionByToken(env, token)).toBeNull()
   })
 
@@ -322,10 +601,11 @@ describe("console users", () => {
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
 
-    const disable = await postForm(`/console/users/${admin?.id}`, session, csrf, {
-      alias: admin?.alias ?? "admin",
-      disabled: "1",
+    const review = await SELF.fetch(`${ISSUER}/console/users/${admin?.id}/disable`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
     })
+    const disableCsrf = cookieValue(review.headers.getSetCookie(), "__Host-keyforge_csrf")
+    const disable = await postForm(`/console/users/${admin?.id}/disable`, session, disableCsrf, {})
     expect(disable.headers.get("location")).toContain("flash=last_admin")
     expect((await getUserById(env, admin?.id ?? ""))?.disabled).toBe(false)
 
@@ -351,6 +631,55 @@ describe("console clients", () => {
     expect(page).toContain("data-resource-scopes=")
     expect(page).toMatch(/name="allowed_resources"[^>]+ checked/)
     expect(page).toMatch(/name="default_resource" value="[^"]+"/)
+    expect(page).not.toMatch(/<form[^>]+data-wizard-ready/)
+    expect(page).toContain("data-wizard-next hidden")
+    expect(page).toMatch(/data-wizard-submit(?! hidden)/)
+    expect(page.match(/data-wizard-step="[0-3]"/g)).toHaveLength(4)
+  })
+
+  it("creates an API prerequisite and returns to the application wizard", async () => {
+    const session = await loginAs("admin", "test-admin-password-2026")
+    await env.DB.prepare("UPDATE oauth_resources SET enabled = 0").run()
+    try {
+      const prerequisite = await SELF.fetch(`${ISSUER}/console/clients/new`, {
+        headers: { cookie: `__Host-keyforge_session=${session}` },
+      })
+      const prerequisiteHtml = await prerequisite.text()
+      expect(prerequisiteHtml).not.toContain(
+        '<form method="post" action="/console/clients" data-console-wizard',
+      )
+      expect(prerequisiteHtml).toContain(
+        "/console/resources/new?return_to=%2Fconsole%2Fclients%2Fnew",
+      )
+      expect(prerequisiteHtml).toContain("Back to applications")
+
+      const resourceForm = await SELF.fetch(
+        `${ISSUER}/console/resources/new?return_to=%2Fconsole%2Fclients%2Fnew`,
+        { headers: { cookie: `__Host-keyforge_session=${session}` } },
+      )
+      const csrf = cookieValue(resourceForm.headers.getSetCookie(), "__Host-keyforge_csrf")
+      const created = await postForm("/console/resources", session, csrf, {
+        resource_uri: "https://api.prerequisite.example",
+        name: "Prerequisite API",
+        allowed_scopes: "openid\nprofile\nemail\noffline_access\napi.read",
+        return_to: "/console/clients/new",
+      })
+      expect(created.status).toBe(302)
+      const createdLocation = new URL(created.headers.get("location") ?? "", ISSUER)
+      expect(createdLocation.pathname).toBe("/console/clients/new")
+      expect(createdLocation.searchParams.get("flash")).toBe("resource_created")
+      expect(createdLocation.searchParams.get("clear_draft")).toBe("keyforge:form:resource:new")
+      const wizard = await SELF.fetch(
+        `${ISSUER}${createdLocation.pathname}${createdLocation.search}`,
+        { headers: { cookie: `__Host-keyforge_session=${session}` } },
+      )
+      const wizardHtml = await wizard.text()
+      expect(wizardHtml).toMatch(
+        /name="allowed_resources" value="https:\/\/api\.prerequisite\.example"[^>]+ checked/,
+      )
+    } finally {
+      await env.DB.prepare("UPDATE oauth_resources SET enabled = 1").run()
+    }
   })
 
   it("creates a confidential client and reveals the secret once", async () => {
@@ -369,7 +698,14 @@ describe("console clients", () => {
       require_pkce: "1",
     })
     expect(res.status).toBe(200)
-    expect(await res.text()).toContain("Client secret")
+    const secretPage = await res.text()
+    expect(secretPage).toContain("Client secret")
+    expect(secretPage).toContain("data-copy-source")
+    expect(secretPage).toContain("data-copy-value")
+    expect(secretPage).toContain('data-copy-success="Client secret copied."')
+    expect(secretPage).toContain("data-copy-value data-copy-success")
+    expect(secretPage).toContain(" hidden>Copy</button>")
+    expect(secretPage).toContain('data-draft-clear="keyforge:form:client:new"')
     const created = await getClientById(env, "cx_new")
     expect(created).not.toBeNull()
     expect(created?.clientSecretHash).not.toBeNull()
@@ -432,6 +768,8 @@ describe("console clients", () => {
     expect(page).toContain("openid\napi.read")
     expect(page).toContain("authorization_code")
     expect(page).toContain('name="default_resource" value="https://api.pangda.app"')
+    expect(page).toContain('data-initial-step="1"')
+    expect(page).toContain("data-error-summary")
     expect(await getClientById(env, "cx_draft_new")).toBeNull()
   })
 
@@ -455,10 +793,7 @@ describe("console clients", () => {
     )
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
-    const res = await postForm("/console/clients/cx_draft_edit", session, csrf, {
-      name: "Updated & Retained",
-      redirect_uris: "https://updated.example/callback",
-      post_logout_redirect_uris: "https://updated.example/logout",
+    const res = await postForm("/console/clients/cx_draft_edit/access", session, csrf, {
       allowed_scopes: "openid\napi.read",
       allowed_grant_types: "authorization_code",
       allowed_resources: "https://api.pangda.app",
@@ -470,15 +805,52 @@ describe("console clients", () => {
     expect(page).toContain(
       "Configuration error: default_resource must be one of allowed_resources.",
     )
-    expect(page).toContain('name="name" value="Updated &amp; Retained"')
-    expect(page).toContain("https://updated.example/callback")
-    expect(page).toContain("https://updated.example/logout")
+    expect(page).toContain('aria-label="Application sections"')
+    expect(page).toContain('aria-current="page">Access</a>')
+    expect(page).toContain("Original client")
     expect(page).toContain("openid\napi.read")
     expect(page).toContain('value="https://not-selected.example"')
     expect(await getClientById(env, "cx_draft_edit")).toMatchObject({
       name: "Original client",
+
       defaultResource: "https://api.pangda.app",
     })
+  })
+  it("shows only selected disabled APIs on the Access tab", async () => {
+    await createClient(
+      env,
+      {
+        clientId: "cx_disabled_resource",
+        name: "Disabled resource client",
+        type: "public",
+        clientKind: "application",
+        redirectUris: ["https://disabled.example/callback"],
+        allowedScopes: ["openid", "api.read"],
+        allowedGrantTypes: ["authorization_code"],
+        allowedResources: ["https://api.pangda.app"],
+        defaultResource: "https://api.pangda.app",
+        requirePkce: true,
+      },
+      null,
+    )
+    await env.DB.prepare("UPDATE oauth_resources SET enabled = 0 WHERE resource_uri IN (?, ?)")
+      .bind("https://api.pangda.app", "https://admin.pangda.app")
+      .run()
+    try {
+      const session = await loginAs("admin", "test-admin-password-2026")
+      const response = await SELF.fetch(
+        `${ISSUER}/console/clients/cx_disabled_resource?view=access`,
+        { headers: { cookie: `__Host-keyforge_session=${session}` } },
+      )
+      const html = await response.text()
+      expect(html).toContain('value="https://api.pangda.app"')
+      expect(html).toContain("Disabled")
+      expect(html).not.toContain('value="https://admin.pangda.app"')
+    } finally {
+      await env.DB.prepare("UPDATE oauth_resources SET enabled = 1 WHERE resource_uri IN (?, ?)")
+        .bind("https://api.pangda.app", "https://admin.pangda.app")
+        .run()
+    }
   })
 
   it("disables and deletes a client", async () => {
@@ -501,14 +873,22 @@ describe("console clients", () => {
     const session = await loginAs("admin", "test-admin-password-2026")
     const csrf = await consoleCsrf(session)
 
-    await postForm("/console/clients/cx_manage/disable", session, csrf, {})
+    const disableReview = await SELF.fetch(`${ISSUER}/console/clients/cx_manage/disable`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    expect(disableReview.status).toBe(200)
+    const disablePage = await disableReview.text()
+    expect(disablePage).toContain("Disable application?")
+    expect(disablePage).not.toContain('name="confirmation"')
+    const disableCsrf = cookieValue(disableReview.headers.getSetCookie(), "__Host-keyforge_csrf")
+    await postForm("/console/clients/cx_manage/disable", session, disableCsrf, {})
     expect((await getClientById(env, "cx_manage"))?.enabled).toBe(false)
 
     const confirmation = await SELF.fetch(`${ISSUER}/console/clients/cx_manage/delete`, {
       headers: { cookie: `__Host-keyforge_session=${session}` },
     })
     expect(confirmation.status).toBe(200)
-    expect(await confirmation.text()).toContain("Delete OAuth client?")
+    expect(await confirmation.text()).toContain("Delete application?")
 
     const mismatch = await postForm("/console/clients/cx_manage/delete", session, csrf, {
       confirmation: "wrong-client",
@@ -564,6 +944,74 @@ describe("console clients", () => {
     expect((await getClientById(env, "cx_rotate"))?.clientSecretHash).not.toBe(before)
   })
 
+  it("preserves typed API form errors", async () => {
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const csrf = await consoleCsrf(session)
+    const unsafe = await postForm("/console/resources", session, csrf, {
+      resource_uri: "javascript:alert(1)",
+      name: "Draft API",
+      allowed_scopes: "openid\napi.read",
+      return_to: "/console/clients/new",
+    })
+    expect(unsafe.status).toBe(400)
+    const unsafeHtml = await unsafe.text()
+    expect(unsafeHtml).toContain('value="javascript:alert(1)"')
+    expect(unsafeHtml).toContain('value="Draft API"')
+    expect(unsafeHtml).toContain('aria-invalid="true"')
+    expect(unsafeHtml).toContain('aria-describedby="resource_uri-error"')
+    expect(unsafeHtml).toContain('name="return_to" value="/console/clients/new"')
+
+    const edit = await postForm(
+      `/console/resources/${encodeURIComponent("https://api.pangda.app")}`,
+      session,
+      csrf,
+      { name: "", allowed_scopes: "openid", enabled: "1" },
+    )
+    expect(edit.status).toBe(400)
+    const editHtml = await edit.text()
+    expect(editHtml).toContain("API names cannot be empty")
+    expect(editHtml).toContain('aria-describedby="name-error"')
+  })
+
+  it("reviews a console device revocation before mutation", async () => {
+    const started = await SELF.fetch(`${ISSUER}/oauth/device_authorization`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: "pangda_cli",
+        scope: "openid api.read",
+        resource: "https://api.pangda.app",
+      }).toString(),
+    })
+    expect(started.status).toBe(200)
+    const row = await env.DB.prepare(
+      "SELECT id, status FROM device_authorization_sessions ORDER BY created_at DESC LIMIT 1",
+    ).first<{ id: string; status: string }>()
+    expect(row).not.toBeNull()
+    if (row === null) return
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const list = await SELF.fetch(`${ISSUER}/console/devices`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    const listHtml = await list.text()
+    expect(listHtml).toContain(`/console/devices/${row.id}/revoke`)
+    expect(listHtml).not.toContain(`action="/console/devices/${row.id}/revoke"`)
+    const review = await SELF.fetch(`${ISSUER}/console/devices/${row.id}/revoke`, {
+      headers: { cookie: `__Host-keyforge_session=${session}` },
+    })
+    expect(review.status).toBe(200)
+    const reviewHtml = await review.text()
+    expect(reviewHtml).toContain(`action="/console/devices/${row.id}/revoke"`)
+    expect(reviewHtml).toContain("api.read")
+    expect(
+      (
+        await env.DB.prepare("SELECT status FROM device_authorization_sessions WHERE id = ?")
+          .bind(row.id)
+          .first<{ status: string }>()
+      )?.status,
+    ).toBe("pending")
+  })
+
   it("ignores a mutation with an invalid CSRF token", async () => {
     await createClient(
       env,
@@ -609,6 +1057,54 @@ describe("console resources", () => {
     const created = await getResourceByUri(env, "https://api.console.test")
     expect(created?.name).toBe("Console API")
     expect(created?.allowedScopes).toEqual(["api.read", "api.write"])
+  })
+
+  it("requires the exact resource URI before deleting an API", async () => {
+    const resourceUri = "https://api.console.delete.test"
+    const session = await loginAs("admin", "test-admin-password-2026")
+    const csrf = await consoleCsrf(session)
+    expect(
+      (
+        await postForm("/console/resources", session, csrf, {
+          resource_uri: resourceUri,
+          name: "Console Delete API",
+          allowed_scopes: "api.read",
+        })
+      ).status,
+    ).toBe(302)
+    const encoded = encodeURIComponent(resourceUri)
+    const cookie = `__Host-keyforge_session=${session}`
+    const edit = await SELF.fetch(`${ISSUER}/console/resources/${encoded}`, {
+      headers: { cookie },
+    })
+    expect(edit.status).toBe(200)
+    expect(await edit.text()).toContain(`/console/resources/${encoded}/delete`)
+
+    const confirmation = await SELF.fetch(`${ISSUER}/console/resources/${encoded}/delete`, {
+      headers: { cookie },
+    })
+    expect(confirmation.status).toBe(200)
+    const confirmationHtml = await confirmation.text()
+    expect(confirmationHtml).toContain("Delete API?")
+    expect(confirmationHtml).toContain(`Type ${resourceUri} to confirm`)
+
+    const mismatch = await postForm(`/console/resources/${encoded}/delete`, session, csrf, {
+      confirmation: "https://wrong.example",
+    })
+    expect(mismatch.status).toBe(400)
+    expect(await mismatch.text()).toContain("The resource URI did not match. Nothing was deleted.")
+    expect(await getResourceByUri(env, resourceUri)).not.toBeNull()
+
+    const deleted = await postForm(`/console/resources/${encoded}/delete`, session, csrf, {
+      confirmation: resourceUri,
+    })
+    expect(deleted.status).toBe(302)
+    expect(deleted.headers.get("location")).toContain("flash=resource_deleted")
+    expect(await getResourceByUri(env, resourceUri)).toBeNull()
+    const list = await SELF.fetch(`${ISSUER}/console/resources?flash=resource_deleted`, {
+      headers: { cookie },
+    })
+    expect(await list.text()).toContain("Resource deleted.")
   })
 })
 

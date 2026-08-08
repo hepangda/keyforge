@@ -24,15 +24,17 @@ account.post("/account/sessions/revoke-others", async (c) => {
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.redirect("/?section=sessions&notice=invalid")
   }
-  await revokeOtherUserSessions(c.env, user.id, session.id)
-  await recordAudit(c.env, {
-    type: "user.logout",
-    userId: user.id,
-    requestId: c.get("requestId"),
-    success: true,
-    detail: "revoked other sessions",
-  })
-  return c.redirect("/?section=sessions&notice=sessions_revoked")
+  const revoked = await revokeOtherUserSessions(c.env, user.id, session.id)
+  if (revoked > 0) {
+    await recordAudit(c.env, {
+      type: "user.logout",
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      detail: "revoked other sessions",
+    })
+  }
+  return c.redirect(`/?section=sessions&notice=${revoked > 0 ? "sessions_revoked" : "not_found"}`)
 })
 
 account.post("/account/sessions/:id/revoke", async (c) => {
@@ -70,7 +72,8 @@ account.post("/account/apps/:clientId/revoke", async (c) => {
   const removed = await deleteConsent(c.env, user.id, clientId)
   const revokedFamilies = await revokeRefreshFamiliesByUserClient(c.env, user.id, clientId)
   const revokedGrants = await revokeAuthorizationGrantsByUserClient(c.env, user.id, clientId)
-  if (removed || revokedFamilies > 0 || revokedGrants > 0) {
+  const changed = removed || revokedFamilies > 0 || revokedGrants > 0
+  if (changed) {
     await recordAudit(c.env, {
       type: "oauth.token.revoked",
       userId: user.id,
@@ -80,7 +83,7 @@ account.post("/account/apps/:clientId/revoke", async (c) => {
       detail: "revoked app consent",
     })
   }
-  return c.redirect("/?section=apps&notice=app_revoked")
+  return c.redirect(`/?section=apps&notice=${changed ? "app_revoked" : "not_found"}`)
 })
 
 account.post("/account/devices/:familyId/revoke", async (c) => {
@@ -91,7 +94,8 @@ account.post("/account/devices/:familyId/revoke", async (c) => {
     return c.redirect("/?section=apps&notice=invalid")
   }
   const familyId = c.req.param("familyId")
-  if (await revokeDeviceRefreshFamily(c.env, familyId, user.id)) {
+  const revoked = await revokeDeviceRefreshFamily(c.env, familyId, user.id)
+  if (revoked) {
     await recordAudit(c.env, {
       type: "oauth.token.revoked",
       userId: user.id,
@@ -101,5 +105,5 @@ account.post("/account/devices/:familyId/revoke", async (c) => {
       metadata: { family_id: familyId },
     })
   }
-  return c.redirect("/?section=apps&notice=device_revoked")
+  return c.redirect(`/?section=apps&notice=${revoked ? "device_revoked" : "not_found"}`)
 })

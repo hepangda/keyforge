@@ -11,7 +11,7 @@ import { isExpired } from "../utils/time"
 import { consentCoversScopes } from "./consent"
 import { resolveResourceForScopes } from "./resources"
 import { parseScopeString } from "./scopes"
-import { userMayReceiveScopes } from "./user-scope-policy"
+import { evaluateUserTokenAccess } from "./user-token-policy"
 
 const INACTIVE = { active: false } as const
 
@@ -49,13 +49,19 @@ export async function handleIntrospect(
     getUserById(c.env, record.userId),
   ])
   const scopes = parseScopeString(record.scope)
-  if (
-    tokenClient === null ||
-    !tokenClient.enabled ||
-    user === null ||
-    user.disabled ||
-    !(await userMayReceiveScopes(c.env, record.userId, scopes))
-  ) {
+  if (scopes.includes("groups")) {
+    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+  }
+  if (tokenClient === null || !tokenClient.enabled || user === null || user.disabled) {
+    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+  }
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: tokenClient.clientId,
+    resourceUri: record.resource,
+    scopes,
+  })
+  if (!access.allowed) {
     return c.json(INACTIVE, 200, { "cache-control": "no-store" })
   }
   if (!(await consentCoversScopes(c.env, user.id, tokenClient.clientId, record.resource, scopes))) {
@@ -116,13 +122,19 @@ async function introspectAccessToken(
       parseScopeString(typeof payload["scope"] === "string" ? payload["scope"] : ""),
     )
     const scopes = parseScopeString(typeof payload["scope"] === "string" ? payload["scope"] : "")
+    if (scopes.includes("groups")) return null
     const isService = payload["actor_type"] === "service" || payload.sub?.startsWith("client:")
     if (!isService) {
       if (typeof payload.sub !== "string") return null
       const user = await getUserById(c.env, payload.sub)
-      if (user === null || user.disabled || !(await userMayReceiveScopes(c.env, user.id, scopes))) {
-        return null
-      }
+      if (user === null || user.disabled) return null
+      const access = await evaluateUserTokenAccess(c.env, {
+        userId: user.id,
+        clientId: tokenClient.clientId,
+        resourceUri: payload.aud,
+        scopes,
+      })
+      if (!access.allowed) return null
       if (!(await consentCoversScopes(c.env, user.id, tokenClient.clientId, payload.aud, scopes))) {
         return null
       }

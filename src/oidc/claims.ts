@@ -7,7 +7,6 @@ export type UserClaims = {
   readonly name?: string
   readonly preferred_username?: string
   readonly picture?: string
-  readonly groups?: readonly string[]
 }
 
 type MutableUserClaims = {
@@ -16,7 +15,6 @@ type MutableUserClaims = {
   name?: string
   preferred_username?: string
   picture?: string
-  groups?: string[]
 }
 
 /**
@@ -36,12 +34,7 @@ export function effectivePictureUrl(env: Env, user: User): string | null {
  * Assemble the OIDC claims a user is entitled to for the granted scopes.
  * Every optional claim is gated on the scope that authorizes its release.
  */
-export function buildUserClaims(
-  env: Env,
-  user: User,
-  groups: readonly string[],
-  scopes: readonly string[],
-): UserClaims {
+export function buildUserClaims(env: Env, user: User, scopes: readonly string[]): UserClaims {
   const scopeSet = new Set(scopes)
   const claims: MutableUserClaims = {}
   if (scopeSet.has("email")) {
@@ -57,9 +50,6 @@ export function buildUserClaims(
     if (picture !== null) {
       claims.picture = picture
     }
-  }
-  if (scopeSet.has("groups")) {
-    claims.groups = [...groups]
   }
   return claims
 }

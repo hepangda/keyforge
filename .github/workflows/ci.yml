@@ -4,9 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read
+
+env:
+  CI: true
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -15,57 +19,105 @@ concurrency:
 jobs:
   quality:
     name: Quality and tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run static checks
+        run: |
+          pnpm lint
+          node --check scripts/release.mjs
+          pnpm typecheck
       - name: Validate deployment configuration
         run: pnpm validate:deploy:dev && pnpm validate:deploy:production
-      - run: pnpm test:coverage
+      - name: Run tests with coverage
+        run: pnpm test:coverage
       - name: Validate dev bundle
-        run: pnpm exec wrangler deploy --dry-run --env dev
+        run: pnpm deploy:dry-run:dev
       - name: Validate production bundle
-        run: pnpm exec wrangler deploy --dry-run --env production
+        run: pnpm deploy:dry-run:production
       - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && hashFiles('coverage/**') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
           path: coverage/
           if-no-files-found: error
+          retention-days: 14
 
   supply-chain:
-    name: Dependency audit
-    runs-on: ubuntu-latest
+    name: Dependency and secret audit
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --audit-level moderate
-      - run: pnpm secrets:scan
+      - name: Audit application dependencies
+        run: pnpm audit --audit-level moderate
+      - name: Audit demo dependencies
+        run: pnpm --dir examples/demo-app audit --audit-level moderate
+      - name: Scan tracked files for secrets
+        run: pnpm secrets:scan
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          fail-on-scopes: runtime, development
+          comment-summary-in-pr: never
+          show-patched-versions: true
 
   demo:
     name: OIDC demo self-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm demo:selftest
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            examples/demo-app/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run OIDC demo self-test
+        run: pnpm demo:selftest

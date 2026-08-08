@@ -43,8 +43,9 @@ function groupChoices(
       meta: i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", {
         count: group.memberCount,
       }),
-      selected: selectedIds.has(group.id),
+      selected: group.name === "all" || selectedIds.has(group.id),
       recommended: index < 6,
+      disabled: group.name === "all",
     })),
   )
 }

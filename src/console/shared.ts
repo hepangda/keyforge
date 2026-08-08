@@ -43,7 +43,7 @@ const FLASH: Readonly<Record<string, ConsoleFlash>> = {
   },
   user_disabled: { kind: "warn", message: "Enable the user before generating a magic link." },
   duplicate_group: { kind: "warn", message: "A group with that name already exists." },
-  protected_group: { kind: "warn", message: "The admins group is protected." },
+  protected_group: { kind: "warn", message: "Built-in permission groups are protected." },
   invalid_groups: { kind: "warn", message: "Choose only groups that currently exist." },
   group_member_exists: { kind: "warn", message: "That user is already a member of this group." },
   group_member_limit: {

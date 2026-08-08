@@ -362,7 +362,9 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     if (!(await setUserGroupsPreservingActiveAdmin(c.env, id, groupIds))) {
       return c.json({ error: "last_active_admin" }, 409)
     }
-    const names = groups.filter((group) => groupIds.includes(group.id)).map((group) => group.name)
+    const names = groups
+      .filter((group) => group.name === "all" || groupIds.includes(group.id))
+      .map((group) => group.name)
     await recordAudit(c.env, {
       type: "admin.user.groups_updated",
       actorUserId: c.get("user")?.id ?? null,

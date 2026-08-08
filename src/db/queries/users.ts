@@ -147,7 +147,11 @@ export async function createUser(env: Env, input: CreateUserInput): Promise<User
 
 export async function getUserGroupNames(env: Env, userId: string): Promise<string[]> {
   const result = await env.DB.prepare(
-    "SELECT g.name AS name FROM user_groups ug JOIN groups g ON g.id = ug.group_id WHERE ug.user_id = ?",
+    `SELECT g.name AS name
+     FROM user_groups ug
+     JOIN groups g ON g.id = ug.group_id
+     WHERE ug.user_id = ?
+     ORDER BY g.name ASC`,
   )
     .bind(userId)
     .all()
@@ -483,6 +487,10 @@ export type GroupSummary = {
   readonly memberCount: number
 }
 
+export function isProtectedGroupName(name: string): boolean {
+  return name === "admins" || name === "all"
+}
+
 const groupRowSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -575,7 +583,7 @@ export async function updateGroup(
   const normalized = name.trim().toLowerCase()
   const current = (await listGroups(env)).find((group) => group.id === id)
   if (current === undefined) return "not_found"
-  if (current.name === "admins" && normalized !== "admins") return "protected"
+  if (isProtectedGroupName(current.name) && normalized !== current.name) return "protected"
   const result = await env.DB.prepare(
     `UPDATE groups SET name = ?, description = ?
      WHERE id = ? AND NOT EXISTS (SELECT 1 FROM groups other WHERE other.name = ? AND other.id != ?)`,
@@ -588,8 +596,10 @@ export async function updateGroup(
 export async function deleteGroup(env: Env, id: string): Promise<GroupMutationResult> {
   const current = (await listGroups(env)).find((group) => group.id === id)
   if (current === undefined) return "not_found"
-  if (current.name === "admins") return "protected"
-  const result = await env.DB.prepare("DELETE FROM groups WHERE id = ? AND name != 'admins'")
+  if (isProtectedGroupName(current.name)) return "protected"
+  const result = await env.DB.prepare(
+    "DELETE FROM groups WHERE id = ? AND name NOT IN ('admins', 'all')",
+  )
     .bind(id)
     .run()
   return result.meta.changes >= 1 ? "deleted" : "not_found"
@@ -614,7 +624,12 @@ export async function setUserGroups(
        )
        DELETE FROM user_groups
        WHERE user_id = ?
-         AND NOT EXISTS (SELECT 1 FROM desired WHERE desired.group_id = user_groups.group_id)`,
+         AND NOT EXISTS (SELECT 1 FROM desired WHERE desired.group_id = user_groups.group_id)
+         AND NOT EXISTS (
+           SELECT 1 FROM groups preserved_group
+           WHERE preserved_group.id = user_groups.group_id
+             AND preserved_group.name = 'all'
+         )`,
     ).bind(desired, userId),
     env.DB.prepare(
       `WITH desired(group_id) AS (
@@ -687,11 +702,21 @@ export async function setUserGroupsPreservingActiveAdmin(
        DELETE FROM user_groups
        WHERE user_id = ?
          AND NOT EXISTS (SELECT 1 FROM desired WHERE desired.group_id = user_groups.group_id)
+         AND NOT EXISTS (
+           SELECT 1 FROM groups preserved_group
+           WHERE preserved_group.id = user_groups.group_id
+             AND preserved_group.name = 'all'
+         )
          AND ${replacementIsSafe}`,
     ).bind(desired, userId, userId),
     ...promotionRevocations,
   ])
   await mirrorAdminPromotionRefreshRevocations(env, results[4]?.results)
-  const actual = await getUserGroupIds(env, userId)
-  return actual.length === unique.length && actual.every((id) => unique.includes(id))
+  const [actual, universalGroup] = await Promise.all([
+    getUserGroupIds(env, userId),
+    getGroupByName(env, "all"),
+  ])
+  const expected = new Set(unique)
+  if (universalGroup !== null) expected.add(universalGroup.id)
+  return actual.length === expected.size && actual.every((id) => expected.has(id))
 }

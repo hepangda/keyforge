@@ -1849,9 +1849,9 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "已存在同名权限组。",
     ja: "同じ名前のグループがすでに存在します。",
   },
-  "The admins group is protected.": {
-    "zh-CN": "admins 权限组受保护。",
-    ja: "adminsグループは保護されています。",
+  "Built-in permission groups are protected.": {
+    "zh-CN": "内置权限组受保护。",
+    ja: "組み込み権限グループは保護されています。",
   },
   "Choose only groups that currently exist.": {
     "zh-CN": "只能选择当前存在的权限组。",

@@ -463,8 +463,8 @@ export const FORMS_BROWSER_SCRIPT = `
       clear(selections);var selected=options.filter(function(option){return option.selected});
       selected.forEach(function(option){
         var item=document.createElement("div");item.className="search-picker__selection";item.appendChild(copy(option));
-        var remove=document.createElement("button");remove.type="button";remove.className="search-picker__remove";remove.textContent=root.dataset.removeLabel||"Remove";remove.setAttribute("aria-label",(root.dataset.removeLabel||"Remove")+" "+(option.dataset.title||option.textContent||option.value));
-        remove.addEventListener("click",function(){option.selected=false;emit();query.focus()});item.appendChild(remove);selections.appendChild(item);
+        if(!option.disabled){var remove=document.createElement("button");remove.type="button";remove.className="search-picker__remove";remove.textContent=root.dataset.removeLabel||"Remove";remove.setAttribute("aria-label",(root.dataset.removeLabel||"Remove")+" "+(option.dataset.title||option.textContent||option.value));
+        remove.addEventListener("click",function(){option.selected=false;emit();query.focus()});item.appendChild(remove)}selections.appendChild(item);
       });
       if(selectedEmpty)selectedEmpty.hidden=selected.length!==0;
       if(selectedCount)selectedCount.textContent=(root.dataset.countLabel||"{count} selected").replace("{count}",String(selected.length));
@@ -473,7 +473,7 @@ export const FORMS_BROWSER_SCRIPT = `
       clear(results);var term=normalize(query.value.trim());var available=options.filter(function(option){return !option.selected&&!option.disabled});
       var matches=term?available.filter(function(option){return normalize(option.dataset.search||option.textContent||option.value).includes(term)}):available.filter(function(option){return option.dataset.recommended==="1"});
       if(!term&&!matches.length)matches=available;
-      var shown=matches.slice(0,8);var selectedTotal=options.filter(function(option){return option.selected}).length;var capped=max>0&&selectedTotal>=max;
+      var shown=matches.slice(0,8);var selectedTotal=options.filter(function(option){return option.selected&&!option.disabled}).length;var capped=max>0&&selectedTotal>=max;
       shown.forEach(function(option){
         var button=document.createElement("button");button.type="button";button.className="search-picker__option";button.setAttribute("role","option");button.appendChild(copy(option));
         var verb=document.createElement("span");verb.className="search-picker__verb";verb.textContent=root.dataset.addLabel||"Add";button.appendChild(verb);button.disabled=capped;

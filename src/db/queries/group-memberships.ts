@@ -4,7 +4,7 @@ import {
   adminPromotionRevocationStatements,
   mirrorAdminPromotionRefreshRevocations,
 } from "./admin-promotion"
-import { MAX_USER_GROUPS } from "./users"
+import { isProtectedGroupName, MAX_USER_GROUPS } from "./users"
 
 export type PermissionGroupMembershipSummary = {
   readonly id: string
@@ -97,7 +97,7 @@ export async function requestPermissionGroupMembership(
     .first()
   if (row === null) return "not_found"
   const target = requestTargetSchema.parse(row)
-  if (target.name === "admins") return "protected"
+  if (isProtectedGroupName(target.name)) return "protected"
   if (target.is_member === 1) return "already_member"
   if (target.is_pending === 1) return "already_pending"
 
@@ -105,7 +105,7 @@ export async function requestPermissionGroupMembership(
     `INSERT OR IGNORE INTO group_membership_requests (user_id, group_id, requested_at)
      SELECT ?, g.id, unixepoch()
      FROM groups g
-     WHERE g.id = ? AND g.name != 'admins'
+     WHERE g.id = ? AND g.name NOT IN ('admins', 'all')
        AND NOT EXISTS (
          SELECT 1 FROM user_groups
          WHERE user_id = ? AND group_id = g.id
@@ -305,7 +305,13 @@ async function addGroupMember(
              WHERE request.user_id = u.id AND request.group_id = g.id
            )
          )
-         AND (SELECT COUNT(*) FROM user_groups WHERE user_id = u.id) < ?`,
+         AND (
+           SELECT COUNT(*)
+           FROM user_groups memberships
+           JOIN groups membership_group ON membership_group.id = memberships.group_id
+           WHERE memberships.user_id = u.id
+             AND membership_group.name != 'all'
+         ) < ?`,
     ).bind(now, userId, groupId, requireRequest ? 1 : 0, MAX_USER_GROUPS),
     ...revocations,
   ])
@@ -328,7 +334,13 @@ async function addGroupMember(
        EXISTS(
          SELECT 1 FROM group_membership_requests WHERE user_id = ? AND group_id = ?
        ) AS has_request,
-       (SELECT COUNT(*) FROM user_groups WHERE user_id = ?) AS group_count`,
+       (
+         SELECT COUNT(*)
+         FROM user_groups memberships
+         JOIN groups membership_group ON membership_group.id = memberships.group_id
+         WHERE memberships.user_id = ?
+           AND membership_group.name != 'all'
+       ) AS group_count`,
   )
     .bind(userId, groupId, userId, groupId, userId, groupId, userId)
     .first()
@@ -373,13 +385,18 @@ export async function rejectPermissionGroupMembershipRequest(
   return result.meta.changes === 1
 }
 
-export type RemoveGroupMemberResult = "removed" | "not_member" | "last_admin"
+export type RemoveGroupMemberResult = "removed" | "not_member" | "last_admin" | "protected"
 
 export async function removeUserFromPermissionGroup(
   env: Env,
   groupId: string,
   userId: string,
 ): Promise<RemoveGroupMemberResult> {
+  const target = await env.DB.prepare("SELECT name FROM groups WHERE id = ?")
+    .bind(groupId)
+    .first<{ name: string }>()
+  if (target?.name === "all") return "protected"
+
   const removed = await env.DB.prepare(
     `DELETE FROM user_groups
      WHERE user_id = ? AND group_id = ?

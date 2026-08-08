@@ -43,7 +43,7 @@ describe("initial administrator bootstrap", () => {
     expect(owner).not.toBeNull()
     if (owner === null) return
     expect(await getUserGroupNames(env, owner.id)).toEqual(
-      expect.arrayContaining(["admins", "employees"]),
+      expect.arrayContaining(["admins", "all", "employees"]),
     )
     expect(await verifyUserPassword(env, owner.id, "bootstrap password is long enough")).toBe(true)
   })

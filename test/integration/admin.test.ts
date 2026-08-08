@@ -147,7 +147,7 @@ describe("admin users", () => {
       credential_setup: string
     }>()
     expect(body.credential_setup).toBe("password_set")
-    expect(body.groups).toEqual(["employees"])
+    expect(body.groups).toEqual(["all", "employees"])
     expect(await verifyUserPassword(env, body.id, "a long initial password")).toBe(true)
     expect((await getUserByEmail(env, "new.user@pangda.app"))?.alias).toBe("new-user_1")
   })
@@ -234,7 +234,7 @@ describe("admin users", () => {
       group_ids: [group.id],
     })
     expect(assigned.status).toBe(200)
-    expect(await getUserGroupNames(env, regularUserId)).toEqual(["test-support"])
+    expect(await getUserGroupNames(env, regularUserId)).toEqual(["all", "test-support"])
 
     expect(
       (await req("PUT", `/admin/users/${regularUserId}/groups`, { group_ids: ["missing"] })).status,

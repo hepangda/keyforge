@@ -60,6 +60,24 @@ groups** in the administration console or through `PUT /admin/groups/:id/access`
 Service clients using `client_credentials` do not carry a user grant and are not
 subject to permission-group assignments.
 
+Signed-in users can review their current memberships under **Permission groups**
+and request any non-administrator group. Requests do not grant access until an
+administrator approves them. Administrators review the queue, search for users,
+and add or remove members directly from the group's **Members** tab. Approval or
+any other membership assignment clears the matching pending request. The
+`admins` group is never self-requestable, and every removal path preserves at
+least one active administrator.
+
+Granting `admins` membership is a security transition: KeyForge atomically
+revokes the user's existing sessions and refresh-token families and advances the
+account security version. The user must sign in again with a passkey or an
+administrator-eligible password before using administrative surfaces.
+
+Application, device, API, and group selectors use a bounded recommendation list
+plus local search instead of rendering the full catalog as visible checkbox
+grids. Only selected targets remain in the persistent selection tray; the
+original form field names and server-side validation remain unchanged.
+
 Migration `0018_permission_group_access.sql` seeds `employees` for `pangda_app`,
 `cloudflare_one`, `pangda_cli`, and `hermes_dashboard`, together with their four
 user-facing resources. It seeds `admins` only for `pangda_admin` and

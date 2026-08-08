@@ -1,6 +1,7 @@
 import type { I18n } from "../../i18n"
 import type { ClientKind, ClientType, OAuthClient, OAuthResource } from "../../types/domain"
 import { escapeHtml } from "../layout"
+import { searchPicker } from "../search-picker"
 import {
   csrfField,
   dataTable,
@@ -138,14 +139,26 @@ function resourceChoices(
   if (candidates.length === 0) {
     return `<div class="wizard-empty">${escapeHtml(i18n.t("No enabled APIs are available."))} <a href="/console/resources/new">${escapeHtml(i18n.t("Create an API first"))}</a>.</div>`
   }
-  return `<div class="group-choice-grid resource-choice-grid">${candidates
-    .map(
-      (resource) => `<label class="group-choice resource-choice">
-        <input type="checkbox" name="allowed_resources" value="${escapeHtml(resource.resourceUri)}" data-resource-scopes="${escapeHtml(resource.allowedScopes.join(" "))}"${selectedResources.has(resource.resourceUri) ? " checked" : ""}>
-        <span><b>${escapeHtml(resource.name)}${resource.enabled ? "" : ` <span class="badge badge--warn">${escapeHtml(i18n.t("Disabled"))}</span>`}</b><small class="mono">${escapeHtml(resource.resourceUri)}</small><small>${escapeHtml(resource.allowedScopes.join(", "))}</small></span>
-      </label>`,
-    )
-    .join("")}</div>`
+  return searchPicker(
+    i18n,
+    {
+      id: "client-resource-access",
+      name: "allowed_resources",
+      label: "APIs",
+      placeholder: "Search APIs by name or resource URI",
+      emptySelection: "No APIs selected.",
+      required: true,
+    },
+    candidates.map((resource, index) => ({
+      value: resource.resourceUri,
+      title: resource.name,
+      detail: `${resource.allowedScopes.join(", ")}${resource.enabled ? "" : ` · ${i18n.t("Disabled")}`}`,
+      meta: resource.resourceUri,
+      selected: selectedResources.has(resource.resourceUri),
+      recommended: resource.enabled && index < 6,
+      data: { "resource-scopes": resource.allowedScopes.join(" ") },
+    })),
+  )
 }
 
 function renderNewClientWizard(

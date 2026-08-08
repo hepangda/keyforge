@@ -16,6 +16,10 @@ const FLASH: Readonly<Record<string, ConsoleFlash>> = {
   group_updated: { kind: "ok", message: "Group updated." },
   group_deleted: { kind: "ok", message: "Group deleted." },
   group_access_updated: { kind: "ok", message: "Permission-group access updated." },
+  group_member_added: { kind: "ok", message: "Group member added." },
+  group_member_removed: { kind: "ok", message: "Group member removed." },
+  group_request_approved: { kind: "ok", message: "Membership request approved." },
+  group_request_rejected: { kind: "ok", message: "Membership request rejected." },
   sessions_revoked: { kind: "ok", message: "All of that user's sessions were revoked." },
   client_created: { kind: "ok", message: "Client created." },
   client_updated: { kind: "ok", message: "Client updated." },
@@ -41,6 +45,11 @@ const FLASH: Readonly<Record<string, ConsoleFlash>> = {
   duplicate_group: { kind: "warn", message: "A group with that name already exists." },
   protected_group: { kind: "warn", message: "The admins group is protected." },
   invalid_groups: { kind: "warn", message: "Choose only groups that currently exist." },
+  group_member_exists: { kind: "warn", message: "That user is already a member of this group." },
+  group_member_limit: {
+    kind: "warn",
+    message: "That user already belongs to the maximum number of groups.",
+  },
   last_admin: {
     kind: "warn",
     message: "Keep at least one active user in the admins group.",
@@ -66,6 +75,9 @@ function consoleDraftKey(c: Context<AppBindings>): string | undefined {
   if (section === "users" && id === "new") return "keyforge:form:user:new"
   if (section === "groups" && id !== undefined && parts[3] !== "delete") {
     if (id === "new") return "keyforge:form:group:new"
+    if (c.req.query("view") === "members" || parts[3] === "members" || parts[3] === "requests") {
+      return undefined
+    }
     const view = parts[3] === "access" || c.req.query("view") === "access" ? "access" : "settings"
     return `keyforge:form:group:${id}:${view}`
   }

@@ -50,6 +50,20 @@ function cookieValue(setCookies: readonly string[], name: string): string {
   return ""
 }
 
+function escapedPattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function expectSelectedOption(html: string, value: string): void {
+  expect(html).toMatch(new RegExp(`<option value="${escapedPattern(value)}"[^>]* selected>`))
+}
+
+function expectUnselectedOption(html: string, value: string): void {
+  expect(html).toMatch(
+    new RegExp(`<option value="${escapedPattern(value)}"(?![^>]* selected)[^>]*>`),
+  )
+}
+
 async function loginAs(email: string, password: string): Promise<string> {
   const page = await SELF.fetch(`${ISSUER}/login`)
   const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf")
@@ -244,8 +258,10 @@ describe("console users", () => {
       "urn:pangda:cloudflare-one",
       "urn:pangda:hermes-agent",
     ]) {
-      expect(html).toContain(`value="${value}" checked`)
+      expectSelectedOption(html, value)
     }
+    expect(html).toContain("data-search-picker")
+    expect(html).toContain('type="search"')
     expect(html).not.toContain('value="svc_internal_worker"')
     const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf")
 
@@ -260,9 +276,9 @@ describe("console users", () => {
     })
     const reloadedHtml = await reloaded.text()
     expect(reloadedHtml).toContain("Permission-group access updated.")
-    expect(reloadedHtml).toContain('value="pangda_app" checked')
-    expect(reloadedHtml).toContain('value="https://api.pangda.app" checked')
-    expect(reloadedHtml).not.toContain('value="pangda_cli" checked')
+    expectSelectedOption(reloadedHtml, "pangda_app")
+    expectSelectedOption(reloadedHtml, "https://api.pangda.app")
+    expectUnselectedOption(reloadedHtml, "pangda_cli")
 
     const invalid = await postForm(`${path}/access`, session, csrf, {
       client_ids: ["pangda_app", "missing-client"],
@@ -271,8 +287,8 @@ describe("console users", () => {
     expect(invalid.status).toBe(400)
     const invalidHtml = await invalid.text()
     expect(invalidHtml).toContain("Choose only existing user applications and APIs.")
-    expect(invalidHtml).toContain('value="pangda_app" checked')
-    expect(invalidHtml).toContain('value="https://api.pangda.app" checked')
+    expectSelectedOption(invalidHtml, "pangda_app")
+    expectSelectedOption(invalidHtml, "https://api.pangda.app")
     expect(invalidHtml).not.toContain("missing-client")
     expect(invalidHtml).not.toContain("urn:missing")
   })
@@ -361,7 +377,7 @@ describe("console users", () => {
     expect(access.status).toBe(200)
     const accessHtml = await access.text()
     expect(accessHtml).toContain(`action="${detailPath}/access"`)
-    expect(accessHtml).toContain('value="pangda_admin" checked')
+    expectSelectedOption(accessHtml, "pangda_admin")
     expect(accessHtml).not.toContain(`href="${detailPath}/delete"`)
     expect(accessHtml).not.toContain('name="name"')
 
@@ -465,7 +481,8 @@ describe("console users", () => {
     expect(page).toContain('value="DraftUser"')
     expect(page).toContain('value="Draft &amp; User"')
     expect(page).toContain('name="email_verified" value="1" checked')
-    expect(page).toContain(`name="group_ids" value="${group?.id ?? ""}" checked`)
+    expect(page).toContain('name="group_ids" multiple')
+    expectSelectedOption(page, group?.id ?? "")
     expect(page).toContain('type="password" name="password" value=""')
     expect(page).not.toContain(password)
     expect(await getUserByEmail(env, "draft.user@example.com")).toBeNull()
@@ -629,7 +646,7 @@ describe("console clients", () => {
     expect(page).toContain('name="redirect_uris" rows="3" required')
     expect(page).toContain('name="allowed_resources"')
     expect(page).toContain("data-resource-scopes=")
-    expect(page).toMatch(/name="allowed_resources"[^>]+ checked/)
+    expect(page).toMatch(/<option value="[^"]+"[^>]* selected>/)
     expect(page).toMatch(/name="default_resource" value="[^"]+"/)
     expect(page).not.toMatch(/<form[^>]+data-wizard-ready/)
     expect(page).toContain("data-wizard-next hidden")
@@ -674,9 +691,7 @@ describe("console clients", () => {
         { headers: { cookie: `__Host-keyforge_session=${session}` } },
       )
       const wizardHtml = await wizard.text()
-      expect(wizardHtml).toMatch(
-        /name="allowed_resources" value="https:\/\/api\.prerequisite\.example"[^>]+ checked/,
-      )
+      expectSelectedOption(wizardHtml, "https://api.prerequisite.example")
     } finally {
       await env.DB.prepare("UPDATE oauth_resources SET enabled = 1").run()
     }

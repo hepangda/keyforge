@@ -2,6 +2,15 @@ import type { Context, Hono } from "hono"
 import { z } from "zod"
 import { listClients } from "../db/queries/clients"
 import {
+  addUserToPermissionGroup,
+  approvePermissionGroupMembershipRequest,
+  listGroupMembers,
+  listPendingGroupMembershipRequests,
+  rejectPermissionGroupMembershipRequest,
+  removeUserFromPermissionGroup,
+  searchGroupMemberCandidates,
+} from "../db/queries/group-memberships"
+import {
   getPermissionGroupAccess,
   MAX_PERMISSION_GROUP_TARGETS,
   type PermissionGroupAccess,
@@ -20,6 +29,7 @@ import { recordAudit } from "../security/audit"
 import { issueCsrfToken } from "../security/csrf"
 import type { AppBindings } from "../types/app"
 import { readFormField } from "../utils/form"
+import { parsePagination } from "../utils/http"
 import {
   type GroupFormFeedback,
   type GroupFormValues,
@@ -155,13 +165,41 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     if (group.name === "admins" && requestedView === "settings") {
       return c.redirect(`/console/groups/${group.id}?view=access&flash=protected_group`)
     }
-    const view = group.name === "admins" || requestedView === "access" ? "access" : "settings"
+    const view =
+      requestedView === "members"
+        ? "members"
+        : group.name === "admins" || requestedView === "access"
+          ? "access"
+          : "settings"
     if (view === "settings") {
       return c.html(
         renderGroupDetail(chrome(c, "groups"), {
           group,
           view,
           csrfToken: issueCsrfToken(c),
+        }),
+      )
+    }
+    if (view === "members") {
+      const { limit, offset } = parsePagination(c)
+      const query = (c.req.query("q") ?? "").trim().slice(0, 120)
+      const [memberPage, requests, candidates] = await Promise.all([
+        listGroupMembers(c.env, group.id, limit + 1, offset),
+        listPendingGroupMembershipRequests(c.env, group.id, 50),
+        searchGroupMemberCandidates(c.env, group.id, query, 8),
+      ])
+      return c.html(
+        renderGroupDetail(chrome(c, "groups"), {
+          group,
+          view,
+          csrfToken: issueCsrfToken(c),
+          members: memberPage.slice(0, limit),
+          memberLimit: limit,
+          memberOffset: offset,
+          memberHasNext: memberPage.length > limit,
+          membershipRequests: requests,
+          memberCandidates: candidates,
+          memberQuery: query,
         }),
       )
     }
@@ -301,6 +339,111 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     )
   })
 
+  app.post("/console/groups/:id/members", async (c) => {
+    const id = c.req.param("id")
+    const group = await groupById(c.env, id)
+    if (group === undefined) return c.redirect("/console/groups?flash=not_found")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/groups/${id}?view=members&flash=invalid`)
+    const userId = readFormField(form, "user_id")
+    const result = await addUserToPermissionGroup(c.env, id, userId)
+    if (result === "added") {
+      await recordAudit(c.env, {
+        type: "admin.group.member_added",
+        actorUserId: c.get("user")?.id ?? null,
+        userId,
+        requestId: c.get("requestId"),
+        success: true,
+        metadata: { group_id: id },
+      })
+    }
+    const flash =
+      result === "added"
+        ? "group_member_added"
+        : result === "already_member"
+          ? "group_member_exists"
+          : result === "limit"
+            ? "group_member_limit"
+            : "not_found"
+    return c.redirect(`/console/groups/${id}?view=members&flash=${flash}`)
+  })
+
+  app.post("/console/groups/:id/members/:userId/remove", async (c) => {
+    const id = c.req.param("id")
+    const group = await groupById(c.env, id)
+    if (group === undefined) return c.redirect("/console/groups?flash=not_found")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/groups/${id}?view=members&flash=invalid`)
+    const userId = c.req.param("userId")
+    const result = await removeUserFromPermissionGroup(c.env, id, userId)
+    if (result === "removed") {
+      await recordAudit(c.env, {
+        type: "admin.group.member_removed",
+        actorUserId: c.get("user")?.id ?? null,
+        userId,
+        requestId: c.get("requestId"),
+        success: true,
+        metadata: { group_id: id },
+      })
+    }
+    const flash =
+      result === "removed"
+        ? "group_member_removed"
+        : result === "last_admin"
+          ? "last_admin"
+          : "not_found"
+    return c.redirect(`/console/groups/${id}?view=members&flash=${flash}`)
+  })
+
+  app.post("/console/groups/:id/requests/:userId/approve", async (c) => {
+    const id = c.req.param("id")
+    const group = await groupById(c.env, id)
+    if (group === undefined) return c.redirect("/console/groups?flash=not_found")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/groups/${id}?view=members&flash=invalid`)
+    const userId = c.req.param("userId")
+    const result = await approvePermissionGroupMembershipRequest(c.env, id, userId)
+    if (result === "added" || result === "already_member") {
+      await recordAudit(c.env, {
+        type: "admin.group.membership_request_approved",
+        actorUserId: c.get("user")?.id ?? null,
+        userId,
+        requestId: c.get("requestId"),
+        success: true,
+        metadata: { group_id: id },
+      })
+    }
+    const flash =
+      result === "added" || result === "already_member"
+        ? "group_request_approved"
+        : result === "limit"
+          ? "group_member_limit"
+          : "not_found"
+    return c.redirect(`/console/groups/${id}?view=members&flash=${flash}`)
+  })
+
+  app.post("/console/groups/:id/requests/:userId/reject", async (c) => {
+    const id = c.req.param("id")
+    const group = await groupById(c.env, id)
+    if (group === undefined) return c.redirect("/console/groups?flash=not_found")
+    const form = await readVerifiedForm(c)
+    if (form === null) return c.redirect(`/console/groups/${id}?view=members&flash=invalid`)
+    const userId = c.req.param("userId")
+    const rejected = await rejectPermissionGroupMembershipRequest(c.env, id, userId)
+    if (rejected) {
+      await recordAudit(c.env, {
+        type: "admin.group.membership_request_rejected",
+        actorUserId: c.get("user")?.id ?? null,
+        userId,
+        requestId: c.get("requestId"),
+        success: true,
+        metadata: { group_id: id },
+      })
+    }
+    return c.redirect(
+      `/console/groups/${id}?view=members&flash=${rejected ? "group_request_rejected" : "not_found"}`,
+    )
+  })
   app.get("/console/groups/:id/delete", async (c) => {
     const group = await groupById(c.env, c.req.param("id"))
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")

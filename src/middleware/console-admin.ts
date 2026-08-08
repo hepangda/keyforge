@@ -27,6 +27,9 @@ function fallbackConsoleReturnPath(pathname: string): string {
     if (parts[3] === "settings" || parts[3] === "access") {
       return `/console/groups/${id}?view=${parts[3]}`
     }
+    if (parts[3] === "members" || parts[3] === "requests") {
+      return `/console/groups/${id}?view=members`
+    }
     return `/console/groups/${id}`
   }
   if (section === "devices") {

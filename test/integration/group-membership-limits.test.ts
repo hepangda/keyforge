@@ -75,14 +75,14 @@ function instrumentDatabase(base: Env): {
 }
 
 describe("bounded user-group replacement", () => {
-  it("assigns 50 groups with two fixed statements", async () => {
+  it("assigns 50 groups with fixed-size membership and revocation statements", async () => {
     const { wrapped, metrics } = instrumentDatabase(env)
 
     await setUserGroups(wrapped, userId, groupIds.slice(0, 50))
 
     expect(await getUserGroupIds(env, userId)).toHaveLength(50)
-    expect(metrics.prepareCount).toBe(2)
-    expect(metrics.maxBindings).toBe(3)
+    expect(metrics.prepareCount).toBe(5)
+    expect(metrics.maxBindings).toBe(4)
   })
 
   it("atomically assigns the full 100-group limit with fixed-size bindings", async () => {
@@ -91,7 +91,7 @@ describe("bounded user-group replacement", () => {
     expect(await setUserGroupsPreservingActiveAdmin(wrapped, userId, groupIds)).toBe(true)
 
     expect(await getUserGroupIds(env, userId)).toEqual(groupIds)
-    expect(metrics.prepareCount).toBe(3)
+    expect(metrics.prepareCount).toBe(6)
     expect(metrics.maxBindings).toBe(4)
   })
 

@@ -99,20 +99,9 @@ const CONSOLE_STYLES = `
 .username-impact span{color:var(--ink-2)}
 .field-cluster{margin:0;padding:0;border:0;min-width:0}
 .field-cluster legend{margin-bottom:.55rem;color:var(--ink-2);font-size:.78rem;font-weight:600}
-.group-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
-.group-choice{display:flex;align-items:flex-start;gap:.6rem;padding:.72rem .8rem;border:1px solid var(--line);border-radius:var(--r-field);background:var(--surface-2);cursor:pointer;transition:border-color .16s ease,background .16s ease,box-shadow .16s ease}
-.group-choice:hover{border-color:var(--line-brass)}
-.group-choice:focus-within{border-color:var(--brass-line);box-shadow:var(--focus)}
-.group-choice:has(input:checked){border-color:var(--brass-line);background:var(--brass-soft);box-shadow:var(--focus)}
-.group-choice input{width:auto;margin:.18rem 0 0;accent-color:var(--brass)}
-.group-choice span{display:grid;gap:.1rem;min-width:0}
-.group-choice b{color:var(--ink);font:600 .8rem var(--font-mono)}
-.group-choice small{color:var(--ink-3);font-size:.75rem;line-height:1.35}
 .copy-value{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.65rem}
 .copy-value__text{min-width:0;margin:0;user-select:text;overflow-wrap:anywhere}
 .copy-value__status{grid-column:1/-1;color:var(--ok);font-size:.78rem}
-.resource-choice small{overflow-wrap:anywhere}
-.resource-choice small.mono{font-size:.68rem}
 .wizard-empty{padding:1rem;color:var(--ink-2);background:var(--surface-2);border:1px dashed var(--line-2);border-radius:var(--r-field);font-size:.84rem}
 
 .audit-filters{display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:1.2rem}
@@ -195,7 +184,7 @@ const CONSOLE_STYLES = `
 }
 @media(max-width:720px){
   .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .form-grid,.group-choice-grid,.wizard-grid,.choice-cards{grid-template-columns:1fr}
+  .form-grid,.wizard-grid,.choice-cards{grid-template-columns:1fr}
   .field--wide,.form-hint--wide,.form-actions{grid-column:auto}
   .ctable-wrap{overflow:visible}
   .ctable{display:block;min-width:0}

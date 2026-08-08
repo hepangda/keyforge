@@ -1292,6 +1292,94 @@ export const MESSAGE_CATALOG = {
     ja: "ユーザーが見つかりません。最初のアカウントを追加してください。",
   },
   "Permission groups": { "zh-CN": "权限组", ja: "権限グループ" },
+  Selected: { "zh-CN": "已选择", ja: "選択済み" },
+  Recommended: { "zh-CN": "推荐", ja: "おすすめ" },
+  "Search results": { "zh-CN": "搜索结果", ja: "検索結果" },
+  "Nothing selected yet.": { "zh-CN": "尚未选择任何项目。", ja: "まだ何も選択されていません。" },
+  "No matches found.": { "zh-CN": "未找到匹配项。", ja: "一致する項目がありません。" },
+  "Choose at least one item.": {
+    "zh-CN": "请至少选择一项。",
+    ja: "少なくとも1つ選択してください。",
+  },
+  Add: { "zh-CN": "添加", ja: "追加" },
+  "{count} selected": { "zh-CN": "已选择 {count} 项", ja: "{count}件選択" },
+  "{count} member": { "zh-CN": "{count} 名成员", ja: "{count}人のメンバー" },
+  "{count} members": { "zh-CN": "{count} 名成员", ja: "{count}人のメンバー" },
+  "Search applications by name or client ID": {
+    "zh-CN": "按名称或客户端 ID 搜索应用",
+    ja: "名前またはクライアントIDでアプリを検索",
+  },
+  "No applications or devices selected.": {
+    "zh-CN": "尚未选择应用或设备。",
+    ja: "アプリケーションまたはデバイスが選択されていません。",
+  },
+  "Search APIs by name or resource URI": {
+    "zh-CN": "按名称或资源 URI 搜索 API",
+    ja: "名前またはリソースURIでAPIを検索",
+  },
+  "No APIs selected.": { "zh-CN": "尚未选择 API。", ja: "APIが選択されていません。" },
+  "Search permission groups": { "zh-CN": "搜索权限组", ja: "権限グループを検索" },
+  "No permission groups selected.": {
+    "zh-CN": "尚未选择权限组。",
+    ja: "権限グループが選択されていません。",
+  },
+  Member: { "zh-CN": "成员", ja: "メンバー" },
+  "Pending review": { "zh-CN": "等待审核", ja: "承認待ち" },
+  "Cancel request": { "zh-CN": "取消申请", ja: "申請を取り消す" },
+  "No other permission groups are available to request.": {
+    "zh-CN": "目前没有其他可申请的权限组。",
+    ja: "現在申請できる他の権限グループはありません。",
+  },
+  "Find a permission group": { "zh-CN": "查找权限组", ja: "権限グループを探す" },
+  "Search groups by name or description": {
+    "zh-CN": "按名称或描述搜索权限组",
+    ja: "名前または説明でグループを検索",
+  },
+  "Group to request": { "zh-CN": "要申请的权限组", ja: "申請するグループ" },
+  "Choose a group from the recommendations or search results.": {
+    "zh-CN": "请从推荐或搜索结果中选择一个权限组。",
+    ja: "おすすめまたは検索結果からグループを選択してください。",
+  },
+  "Request to join": { "zh-CN": "申请加入", ja: "参加を申請" },
+  "Your permission groups": { "zh-CN": "您的权限组", ja: "あなたの権限グループ" },
+  "Membership controls which applications and APIs can issue tokens for your account.": {
+    "zh-CN": "成员身份决定哪些应用和 API 可以为您的账户签发令牌。",
+    ja: "メンバーシップにより、アカウントのトークンを発行できるアプリケーションとAPIが決まります。",
+  },
+  "You are not a member of any permission group.": {
+    "zh-CN": "您尚未加入任何权限组。",
+    ja: "どの権限グループにも参加していません。",
+  },
+  "Pending requests": { "zh-CN": "待审核申请", ja: "承認待ちの申請" },
+  "An administrator must approve these requests before access changes.": {
+    "zh-CN": "管理员批准后，访问权限才会变更。",
+    ja: "アクセスが変更される前に、管理者の承認が必要です。",
+  },
+  "Request another group": { "zh-CN": "申请其他权限组", ja: "別のグループを申請" },
+  "Search the directory, choose one group, and send it for review.": {
+    "zh-CN": "搜索目录，选择一个权限组并提交审核。",
+    ja: "ディレクトリを検索し、グループを1つ選んで審査に送信します。",
+  },
+  "Permission-group request submitted.": {
+    "zh-CN": "权限组申请已提交。",
+    ja: "権限グループへの申請を送信しました。",
+  },
+  "That permission-group request is already pending.": {
+    "zh-CN": "该权限组申请已在等待审核。",
+    ja: "その権限グループへの申請はすでに承認待ちです。",
+  },
+  "Permission-group request cancelled.": {
+    "zh-CN": "权限组申请已取消。",
+    ja: "権限グループへの申請を取り消しました。",
+  },
+  "You already belong to that permission group.": {
+    "zh-CN": "您已是该权限组的成员。",
+    ja: "すでにその権限グループのメンバーです。",
+  },
+  "That permission group is not available to request.": {
+    "zh-CN": "该权限组不可申请。",
+    ja: "その権限グループは申請できません。",
+  },
   "Group sections": { "zh-CN": "权限组部分", ja: "権限グループのセクション" },
   "Name and description for this permission group.": {
     "zh-CN": "此权限组的名称和描述。",
@@ -1309,6 +1397,59 @@ export const MESSAGE_CATALOG = {
   "No APIs are registered.": { "zh-CN": "尚未注册 API。", ja: "APIが登録されていません。" },
   Group: { "zh-CN": "权限组", ja: "グループ" },
   Members: { "zh-CN": "成员", ja: "メンバー" },
+  Requested: { "zh-CN": "申请时间", ja: "申請日時" },
+  Joined: { "zh-CN": "加入时间", ja: "参加日時" },
+  Approve: { "zh-CN": "批准", ja: "承認" },
+  Reject: { "zh-CN": "拒绝", ja: "却下" },
+  "Add member": { "zh-CN": "添加成员", ja: "メンバーを追加" },
+  "Search users to add": { "zh-CN": "搜索要添加的用户", ja: "追加するユーザーを検索" },
+  "Email, username, display name, or user ID": {
+    "zh-CN": "电子邮箱、登录名、显示名称或用户 ID",
+    ja: "メール、ユーザー名、表示名、またはユーザーID",
+  },
+  "Approve a request to add the user immediately, or reject it without changing membership.": {
+    "zh-CN": "批准申请会立即添加该用户；拒绝申请不会更改成员身份。",
+    ja: "申請を承認するとユーザーがすぐに追加され、却下してもメンバーシップは変更されません。",
+  },
+  "No pending requests.": { "zh-CN": "没有待审核申请。", ja: "承認待ちの申請はありません。" },
+  "People who currently receive this group's application and API access.": {
+    "zh-CN": "当前拥有此权限组应用和 API 访问权限的人员。",
+    ja: "現在このグループのアプリケーションとAPIへのアクセスを持つユーザーです。",
+  },
+  "This group has no members.": {
+    "zh-CN": "此权限组没有成员。",
+    ja: "このグループにはメンバーがいません。",
+  },
+  "Add people": { "zh-CN": "添加人员", ja: "ユーザーを追加" },
+  "Search for an account, or choose from recently created recommendations.": {
+    "zh-CN": "搜索账户，或从最近创建的推荐账户中选择。",
+    ja: "アカウントを検索するか、最近作成されたおすすめから選択します。",
+  },
+  "No more people are available to add.": {
+    "zh-CN": "没有其他可添加的人员。",
+    ja: "追加できるユーザーはほかにいません。",
+  },
+  "Group member added.": { "zh-CN": "权限组成员已添加。", ja: "グループメンバーを追加しました。" },
+  "Group member removed.": {
+    "zh-CN": "权限组成员已移除。",
+    ja: "グループメンバーを削除しました。",
+  },
+  "Membership request approved.": {
+    "zh-CN": "成员申请已批准。",
+    ja: "メンバーシップ申請を承認しました。",
+  },
+  "Membership request rejected.": {
+    "zh-CN": "成员申请已拒绝。",
+    ja: "メンバーシップ申請を却下しました。",
+  },
+  "That user is already a member of this group.": {
+    "zh-CN": "该用户已是此权限组的成员。",
+    ja: "そのユーザーはすでにこのグループのメンバーです。",
+  },
+  "That user already belongs to the maximum number of groups.": {
+    "zh-CN": "该用户已达到可加入权限组数量上限。",
+    ja: "そのユーザーは参加できるグループ数の上限に達しています。",
+  },
   "No groups found. Create one below.": {
     "zh-CN": "未找到权限组。请在下方创建一个。",
     ja: "グループが見つかりません。下から作成してください。",

@@ -2,6 +2,10 @@ import { Hono } from "hono"
 import { revokeOtherUserSessions, revokeSessionById } from "../auth/session"
 import { deleteConsent } from "../db/queries/consents"
 import { revokeAuthorizationGrantsByUserClient } from "../db/queries/grants"
+import {
+  cancelPermissionGroupMembershipRequest,
+  requestPermissionGroupMembership,
+} from "../db/queries/group-memberships"
 import { revokeDeviceRefreshFamily } from "../db/queries/tokens"
 import { requireAuth } from "../middleware/session"
 import { recordAudit } from "../security/audit"
@@ -13,6 +17,60 @@ import { readFormField } from "../utils/form"
 export const account = new Hono<AppBindings>()
 
 account.use("/account/*", requireAuth)
+
+account.post("/account/groups/request", async (c) => {
+  const user = c.get("user")
+  if (user === undefined) return c.redirect("/?section=groups")
+  const form = await c.req.raw.formData()
+  if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
+    return c.redirect("/?section=groups&notice=invalid")
+  }
+  const groupId = readFormField(form, "group_id")
+  const result = await requestPermissionGroupMembership(c.env, user.id, groupId)
+  if (result === "requested") {
+    await recordAudit(c.env, {
+      type: "user.group_membership.requested",
+      actorUserId: user.id,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      metadata: { group_id: groupId },
+    })
+  }
+  const notice =
+    result === "requested"
+      ? "group_request_submitted"
+      : result === "already_pending"
+        ? "group_request_pending"
+        : result === "already_member"
+          ? "group_already_joined"
+          : "group_request_unavailable"
+  return c.redirect(`/?section=groups&notice=${notice}`)
+})
+
+account.post("/account/groups/requests/:groupId/cancel", async (c) => {
+  const user = c.get("user")
+  if (user === undefined) return c.redirect("/?section=groups")
+  const form = await c.req.raw.formData()
+  if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
+    return c.redirect("/?section=groups&notice=invalid")
+  }
+  const groupId = c.req.param("groupId")
+  const cancelled = await cancelPermissionGroupMembershipRequest(c.env, user.id, groupId)
+  if (cancelled) {
+    await recordAudit(c.env, {
+      type: "user.group_membership.request_cancelled",
+      actorUserId: user.id,
+      userId: user.id,
+      requestId: c.get("requestId"),
+      success: true,
+      metadata: { group_id: groupId },
+    })
+  }
+  return c.redirect(
+    `/?section=groups&notice=${cancelled ? "group_request_cancelled" : "not_found"}`,
+  )
+})
 
 account.post("/account/sessions/revoke-others", async (c) => {
   const user = c.get("user")

@@ -3,6 +3,7 @@ import { listPasswordCredentials, minimumPasswordLength } from "../auth/password
 import { listSessionsByUser } from "../auth/session"
 import { getClientById } from "../db/queries/clients"
 import { listConsentsByUser } from "../db/queries/consents"
+import { listPermissionGroupsForUser } from "../db/queries/group-memberships"
 import { listDeviceRefreshFamiliesForUser } from "../db/queries/tokens"
 import { getUserGroupNames } from "../db/queries/users"
 import { listCredentialSummaries } from "../db/queries/webauthn"
@@ -80,8 +81,9 @@ home.get("/", async (c) => {
   if (user === undefined || session === undefined) {
     return c.redirect("/login")
   }
-  const [groups, passwords, passkeys] = await Promise.all([
+  const [groups, permissionGroups, passwords, passkeys] = await Promise.all([
     getUserGroupNames(c.env, user.id),
+    listPermissionGroupsForUser(c.env, user.id),
     listPasswordCredentials(c.env, user.id),
     listCredentialSummaries(c.env, user.id),
   ])
@@ -149,6 +151,7 @@ home.get("/", async (c) => {
     csrfToken: issueCsrfToken(c),
     user,
     groups,
+    permissionGroups,
     isAdmin,
     sessions: sessions.map((entry) => ({
       id: entry.id,

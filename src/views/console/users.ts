@@ -5,6 +5,7 @@ import type { CredentialSummary } from "../../db/queries/webauthn"
 import type { I18n } from "../../i18n"
 import type { User } from "../../types/domain"
 import { escapeHtml } from "../layout"
+import { searchPicker } from "../search-picker"
 import {
   checkboxField,
   csrfField,
@@ -25,14 +26,27 @@ function groupChoices(
   if (groups.length === 0) {
     return `<p class="form-hint"><a href="/console/groups/new">${escapeHtml(i18n.t("Create a group first"))}</a></p>`
   }
-  return `<div class="group-choice-grid">${groups
-    .map(
-      (group) => `<label class="group-choice">
-        <input type="checkbox" name="group_ids" value="${escapeHtml(group.id)}"${selectedIds.has(group.id) ? " checked" : ""}>
-        <span><b>${escapeHtml(group.name)}</b><small>${escapeHtml(group.description ?? i18n.t("No description"))}</small></span>
-      </label>`,
-    )
-    .join("")}</div>`
+  return searchPicker(
+    i18n,
+    {
+      id: "user-group-access",
+      name: "group_ids",
+      label: "Groups",
+      placeholder: "Search permission groups",
+      emptySelection: "No permission groups selected.",
+      maxSelections: 100,
+    },
+    groups.map((group, index) => ({
+      value: group.id,
+      title: group.name,
+      detail: group.description ?? i18n.t("No description"),
+      meta: i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", {
+        count: group.memberCount,
+      }),
+      selected: selectedIds.has(group.id),
+      recommended: index < 6,
+    })),
+  )
 }
 
 export function renderUsersList(

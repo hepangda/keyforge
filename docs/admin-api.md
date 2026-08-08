@@ -1,40 +1,44 @@
 # Administrator API
 
 The JSON administrator API is served under `/admin`. It is intended for the
-first-party console and trusted operational tooling, not for public OAuth
-clients.
+Pangda administrator application and trusted operational tooling. The built-in
+HTML console is a separate, session-authenticated surface.
 
-## Authentication and mutation protection
+## Authentication
 
-Every endpoint requires a valid KeyForge session whose user belongs to the
-`admins` group. A missing session returns `401`; a non-admin session returns
-`403`.
+Every endpoint requires a user access token with audience
+`https://admin.pangda.app`. Cookie sessions are not accepted. `GET` and `HEAD`
+requests require `admin.read`; mutations require `admin.write`.
 
-Cookie-authenticated mutations also require request-integrity validation.
-Same-origin browser requests pass the Origin/Fetch Metadata check. Scripts and
-other non-browser clients must first call `GET /admin/csrf` with the session
-cookie, then echo the returned `csrf_token` in the `x-keyforge-csrf` header while
-retaining the CSRF and session cookies.
+The seeded `pangda_admin` authorization-code client is available through the
+built-in `all` group, while the Admin API resource is assigned to `admins`.
+Consequently, only an administrator can obtain a usable Admin API token. Each
+request rechecks the active user, client, resource, and permission-group policy,
+so disabling or demoting the user invalidates an already-issued token
+immediately.
+
+Set `ADMIN_AUTHORIZATION` to the bearer authorization scheme followed by the
+access token, then call the API:
 
 ```bash
-curl -c cookies.txt -b cookies.txt https://auth.pangda.app/admin/csrf
-curl -c cookies.txt -b cookies.txt \
+curl https://auth.pangda.app/admin/users \
+  -H "Authorization: $ADMIN_AUTHORIZATION"
+
+curl https://auth.pangda.app/admin/users/usr_example \
+  -H "Authorization: $ADMIN_AUTHORIZATION" \
   -H 'content-type: application/json' \
-  -H "x-keyforge-csrf: $CSRF_TOKEN" \
-  -X PATCH https://auth.pangda.app/admin/users/usr_example \
+  -X PATCH \
   --data '{"disabled":true}'
 ```
+
+A missing, expired, wrong-audience, service, or no-longer-authorized token
+returns `401 {"error":"invalid_token"}`. A valid token missing the method's
+required scope returns `403 {"error":"insufficient_scope",...}`. Browser callers
+may use CORS with the `Authorization` and `Content-Type` headers.
 
 JSON validation failures return `400 {"error":"invalid_request"}`. Missing
 objects return `404 {"error":"not_found"}`. Pagination uses `limit` and
 `offset`; the server bounds values to its safe limits.
-
-## CSRF token
-
-### `GET /admin/csrf`
-
-Returns `{ "csrf_token": "..." }` and sets the double-submit cookie used by
-non-browser mutation requests.
 
 ## Users
 
@@ -65,7 +69,8 @@ one-time account invitation through the configured email provider.
 
 The response reports `credential_setup` as `password_set` or
 `invitation_sent`. Duplicate email or alias returns `409`; invalid group IDs
-return `400`. The optional `group_ids` array accepts at most 100 entries.
+return `400`. The optional `group_ids` array accepts at most 100 entries. The
+protected `all` membership is implicit and is returned even when omitted.
 
 ### `GET /admin/users/:id`
 
@@ -200,16 +205,16 @@ assignments even though its name cannot change.
 
 ### `PATCH /admin/groups/:id`
 
-Updates `name` and/or `description`. The built-in `admins` group cannot be
-renamed, and group names remain globally unique.
+Updates `name` and/or `description`. The built-in `all` and `admins` groups
+cannot be renamed, and group names remain globally unique.
 
 ### `DELETE /admin/groups/:id`
 
 Deletes a non-protected permission group and cascades its memberships plus its
 application and API assignments. Deleting a group, client, or resource cannot
 grant access: cascaded assignments leave the affected target default-denied
-when no matching assignment remains. The built-in `admins` group cannot be
-deleted.
+when no matching assignment remains. The built-in `all` and `admins` groups
+cannot be deleted.
 
 ## OAuth clients
 

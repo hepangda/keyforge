@@ -1,11 +1,17 @@
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
+import { ADMIN_API } from "../../src/config"
 import { listAuditLogs } from "../../src/db/queries/audit"
 import { createUser, getUserByEmail } from "../../src/db/queries/users"
 import worker from "../../src/index"
 import { insertAuditBatch } from "../../src/security/audit"
+import { issueUserAccessToken } from "../../src/tokens/access-token"
 
 const ISSUER = "https://auth.pangda.app"
+
+function authorization(token: string): string {
+  return ["Bearer", token].join(" ")
+}
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -86,6 +92,19 @@ async function loginAdmin(): Promise<string> {
   )
 }
 
+async function adminApiToken(): Promise<string> {
+  const admin = await getUserByEmail(env, "admin")
+  if (admin === null) throw new Error("seed administrator missing")
+  return (
+    await issueUserAccessToken(env, {
+      userId: admin.id,
+      clientId: "pangda_admin",
+      resource: ADMIN_API.audience,
+      scope: `${ADMIN_API.readScope} ${ADMIN_API.writeScope}`,
+    })
+  ).token
+}
+
 describe("queryable audit actors", () => {
   it("stores and filters user and client actors with dedicated indexes", async () => {
     const { adminId } = await seedActorLogs()
@@ -141,7 +160,7 @@ describe("queryable audit actors", () => {
     const sessionCookie = await loginAdmin()
     const api = await SELF.fetch(
       `${ISSUER}/admin/audit-logs?actor_user_id=${encodeURIComponent(adminId)}`,
-      { headers: { cookie: sessionCookie } },
+      { headers: { authorization: authorization(await adminApiToken()) } },
     )
     expect(api.status).toBe(200)
     const logs = await api.json<{
@@ -195,9 +214,7 @@ describe("queryable audit actors", () => {
       new Request(`${ISSUER}/admin/users/${target.id}`, {
         method: "PATCH",
         headers: {
-          cookie: await loginAdmin(),
-          origin: ISSUER,
-          "sec-fetch-site": "same-origin",
+          authorization: authorization(await adminApiToken()),
           "content-type": "application/json",
         },
         body: JSON.stringify({ name: "Updated by actor" }),

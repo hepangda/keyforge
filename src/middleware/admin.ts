@@ -1,61 +1,90 @@
+import type { Context } from "hono"
 import { createMiddleware } from "hono/factory"
-import { getUserGroupNames } from "../db/queries/users"
+import { ADMIN_API } from "../config"
+import { getClientById } from "../db/queries/clients"
+import { getUserById } from "../db/queries/users"
+import { extractBearerToken } from "../oauth/bearer"
+import { resolveResourceForScopes } from "../oauth/resources"
+import { parseScopeString } from "../oauth/scopes"
+import { evaluateUserTokenAccess } from "../oauth/user-token-policy"
 import { isYoloEnabled } from "../operations/yolo"
-import { verifyCsrfToken } from "../security/csrf"
+import { isPlausibleCompactJwt } from "../security/ingress"
+import { verifyAccessToken } from "../tokens/jwt"
 import type { AppBindings } from "../types/app"
-import { nowSeconds } from "../utils/time"
 
-const ADMIN_GROUP = "admins"
-const ADMIN_RECENT_AUTH_SECONDS = 10 * 60
+const READ_METHODS = new Set(["GET", "HEAD"])
+const BEARER_SCHEME = "Bearer"
 
-export const requireAdmin = createMiddleware<AppBindings>(async (c, next) => {
-  const user = c.get("user")
-  if (user === undefined) {
-    return c.json({ error: "unauthorized" }, 401)
-  }
-  const groups = await getUserGroupNames(c.env, user.id)
-  // YOLO mode grants administrator authority to any authenticated user. A
-  // session is still required so `c.get("user")` stays defined downstream.
-  if (!groups.includes(ADMIN_GROUP) && !isYoloEnabled(c.env)) {
-    return c.json({ error: "forbidden" }, 403)
-  }
-  await next()
-})
+function invalidToken(c: Context<AppBindings>): Response {
+  c.header("www-authenticate", `${BEARER_SCHEME} realm="admin", error="invalid_token"`)
+  return c.json({ error: "invalid_token" }, 401)
+}
 
-const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+function insufficientScope(c: Context<AppBindings>, requiredScope: string): Response {
+  c.header(
+    "www-authenticate",
+    `${BEARER_SCHEME} realm="admin", error="insufficient_scope", scope="${requiredScope}"`,
+  )
+  return c.json({ error: "insufficient_scope", required_scope: requiredScope }, 403)
+}
 
-/**
- * Protect cookie-authenticated Admin API mutations from same-site, cross-origin
- * CSRF. SameSite cookies deliberately treat sibling subdomains as the same
- * site, so they are not a sufficient boundary for an identity provider.
- *
- * Browser callers on the issuer origin pass the Origin check. Non-browser
- * tooling can fetch GET /admin/csrf and echo the returned token in the
- * x-keyforge-csrf header (double-submit cookie verification).
- */
-export const requireAdminMutationIntegrity = createMiddleware<AppBindings>(async (c, next) => {
-  if (SAFE_METHODS.has(c.req.method.toUpperCase())) {
+export const requireAdminApiToken = createMiddleware<AppBindings>(async (c, next) => {
+  const sessionUser = c.get("user")
+  if (sessionUser !== undefined && isYoloEnabled(c.env)) {
     await next()
     return
   }
 
-  const expectedOrigin = new URL(c.env.ISSUER).origin
-  const origin = c.req.header("origin")
-  const fetchSite = c.req.header("sec-fetch-site")
-  const sameOriginBrowser =
-    origin === expectedOrigin && (fetchSite === undefined || fetchSite === "same-origin")
-  const validDoubleSubmit = verifyCsrfToken(c, c.req.header("x-keyforge-csrf"))
+  const token = extractBearerToken(c)
+  if (token === null || !isPlausibleCompactJwt(token)) return invalidToken(c)
 
-  if (!sameOriginBrowser && !validDoubleSubmit) {
-    return c.json({ error: "csrf_validation_failed" }, 403)
+  let payload: Awaited<ReturnType<typeof verifyAccessToken>>
+  try {
+    payload = await verifyAccessToken(c.env, token, {
+      audience: ADMIN_API.audience,
+      actor: "user",
+    })
+  } catch (error) {
+    if (error instanceof Error) return invalidToken(c)
+    throw error
   }
-
-  const session = c.get("session")
   if (
-    !isYoloEnabled(c.env) &&
-    (session === undefined || nowSeconds() - session.authTime > ADMIN_RECENT_AUTH_SECONDS)
+    payload.aud !== ADMIN_API.audience ||
+    typeof payload.sub !== "string" ||
+    typeof payload["client_id"] !== "string"
   ) {
-    return c.json({ error: "reauthentication_required" }, 403)
+    return invalidToken(c)
   }
+
+  const scopes = parseScopeString(
+    typeof payload["scope"] === "string" ? payload["scope"] : undefined,
+  )
+  const requiredScope = READ_METHODS.has(c.req.method.toUpperCase())
+    ? ADMIN_API.readScope
+    : ADMIN_API.writeScope
+  if (!scopes.includes(requiredScope)) return insufficientScope(c, requiredScope)
+
+  const [user, client] = await Promise.all([
+    getUserById(c.env, payload.sub),
+    getClientById(c.env, payload["client_id"]),
+  ])
+  if (user === null || user.disabled || client === null || !client.enabled) {
+    return invalidToken(c)
+  }
+  try {
+    await resolveResourceForScopes(c.env, client, ADMIN_API.audience, scopes)
+  } catch (error) {
+    if (error instanceof Error) return invalidToken(c)
+    throw error
+  }
+  const access = await evaluateUserTokenAccess(c.env, {
+    userId: user.id,
+    clientId: client.clientId,
+    resourceUri: ADMIN_API.audience,
+    scopes,
+  })
+  if (!access.allowed) return invalidToken(c)
+
+  c.set("user", user)
   await next()
 })

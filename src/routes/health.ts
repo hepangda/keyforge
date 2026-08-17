@@ -169,8 +169,7 @@ async function checkDatabaseSchema(db: D1Database): Promise<void> {
                   AND name = 'prune_permission_rules_after_resource_scope_update') AS rule_scope_prune_trigger,
          EXISTS(SELECT 1 FROM groups WHERE name = 'admins') AS admin_group,
          EXISTS(SELECT 1 FROM oauth_resources
-                WHERE resource_uri = 'https://admin.pangda.app') AS admin_resource,
-         EXISTS(SELECT 1 FROM oauth_clients WHERE client_id = 'pangda_admin') AS admin_client`,
+                WHERE resource_uri = 'https://admin.pangda.app') AS admin_resource`,
     )
     .first<Record<string, number>>()
   if (invariants === null || Object.values(invariants).some((value) => value !== 1)) {

@@ -8,10 +8,9 @@ import {
 } from "../auth/password"
 import { revokeAllUserSessions } from "../auth/session"
 import {
-  getPermissionGroupAccess,
-  MAX_PERMISSION_GROUP_TARGETS,
-  replacePermissionGroupAccess,
-} from "../db/queries/permission-group-access"
+  getPermissionGroupPolicy,
+  replacePermissionGroupRules,
+} from "../db/queries/permission-group-rules"
 import {
   ALIAS_PATTERN,
   createGroup,
@@ -34,6 +33,10 @@ import {
 } from "../db/queries/webauthn"
 import { MAX_AVATAR_BYTES } from "../media/avatar"
 import { readAvatarUpload, removeUserAvatar, storeUserAvatar } from "../media/avatar-service"
+import {
+  PERMISSION_GROUP_PRIORITIES,
+  permissionGroupRulesInputSchema,
+} from "../oauth/permission-rules"
 import { effectivePictureUrl } from "../oidc/claims"
 import { recordAudit } from "../security/audit"
 import type { AppBindings } from "../types/app"
@@ -76,17 +79,49 @@ const createGroupSchema = z.object({
     .max(64)
     .regex(/^[a-z0-9][a-z0-9._:-]*$/),
   description: z.string().trim().max(500).nullable().optional(),
+  is_public: z.boolean().default(true),
+  priority: z
+    .number()
+    .int()
+    .min(PERMISSION_GROUP_PRIORITIES.minimum)
+    .max(PERMISSION_GROUP_PRIORITIES.maximum)
+    .default(0),
 })
-const patchGroupSchema = createGroupSchema
-  .partial()
-  .refine((value) => Object.keys(value).length > 0)
-
-const permissionGroupAccessSchema = z
+const patchGroupSchema = z
   .object({
-    client_ids: z.array(z.string().min(1)).max(MAX_PERMISSION_GROUP_TARGETS),
-    resource_uris: z.array(z.string().min(1)).max(MAX_PERMISSION_GROUP_TARGETS),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9][a-z0-9._:-]*$/)
+      .optional(),
+    description: z.string().trim().max(500).nullable().optional(),
+    is_public: z.boolean().optional(),
+    priority: z
+      .number()
+      .int()
+      .min(PERMISSION_GROUP_PRIORITIES.minimum)
+      .max(PERMISSION_GROUP_PRIORITIES.maximum)
+      .optional(),
   })
   .strict()
+  .refine((value) => Object.keys(value).length > 0)
+
+const permissionGroupPolicySchema = z
+  .object({
+    rules: permissionGroupRulesInputSchema,
+  })
+  .strict()
+
+function serializePermissionGroupPolicy(
+  policy: NonNullable<Awaited<ReturnType<typeof getPermissionGroupPolicy>>>,
+): Record<string, unknown> {
+  return {
+    priority: policy.priority,
+    rules: policy.rules,
+  }
+}
 
 /** Read an admin avatar upload from either a multipart field or a raw body. */
 async function readAdminAvatarBody(
@@ -184,7 +219,13 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
     if ((await getGroupByName(c.env, parsed.data.name)) !== null) {
       return c.json({ error: "duplicate_group" }, 409)
     }
-    const group = await createGroup(c.env, parsed.data.name, parsed.data.description ?? null)
+    const group = await createGroup(
+      c.env,
+      parsed.data.name,
+      parsed.data.description ?? null,
+      parsed.data.is_public,
+      parsed.data.priority,
+    )
     await recordAudit(c.env, {
       type: "admin.group.created",
       actorUserId: c.get("user")?.id ?? null,
@@ -202,24 +243,32 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
   })
 
   app.get("/admin/groups/:id/access", async (c) => {
-    const access = await getPermissionGroupAccess(c.env, c.req.param("id"))
-    return access === null
+    const policy = await getPermissionGroupPolicy(c.env, c.req.param("id"))
+    return policy === null
       ? c.json({ error: "not_found" }, 404)
-      : c.json({ client_ids: access.clientIds, resource_uris: access.resourceUris })
+      : c.json(serializePermissionGroupPolicy(policy))
   })
 
   app.put("/admin/groups/:id/access", async (c) => {
-    const parsed = permissionGroupAccessSchema.safeParse(await readJsonBody(c))
+    const parsed = permissionGroupPolicySchema.safeParse(await readJsonBody(c))
     if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
     const id = c.req.param("id")
-    const result = await replacePermissionGroupAccess(c.env, id, {
-      clientIds: parsed.data.client_ids,
-      resourceUris: parsed.data.resource_uris,
-    })
+    const result = await replacePermissionGroupRules(c.env, id, parsed.data.rules)
     if (result === "not_found") return c.json({ error: "not_found" }, 404)
-    if (result !== "updated") return c.json({ error: "invalid_access_target" }, 400)
-    const access = await getPermissionGroupAccess(c.env, id)
-    if (access === null) return c.json({ error: "not_found" }, 404)
+    if (result !== "updated") {
+      return c.json(
+        {
+          error:
+            result === "standard_scope"
+              ? "standard_scope_not_configurable"
+              : "invalid_permission_rule",
+          reason: result,
+        },
+        400,
+      )
+    }
+    const policy = await getPermissionGroupPolicy(c.env, id)
+    if (policy === null) return c.json({ error: "not_found" }, 404)
     await recordAudit(c.env, {
       type: "admin.group.access_updated",
       actorUserId: c.get("user")?.id ?? null,
@@ -227,11 +276,11 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       success: true,
       metadata: {
         group_id: id,
-        client_ids: access.clientIds,
-        resource_uris: access.resourceUris,
+        priority: policy.priority,
+        rules: policy.rules,
       },
     })
-    return c.json({ client_ids: access.clientIds, resource_uris: access.resourceUris })
+    return c.json(serializePermissionGroupPolicy(policy))
   })
 
   app.patch("/admin/groups/:id", async (c) => {
@@ -245,6 +294,8 @@ export function registerAdminUsers(app: Hono<AppBindings>): void {
       id,
       parsed.data.name ?? current.name,
       parsed.data.description === undefined ? current.description : parsed.data.description,
+      parsed.data.is_public ?? current.isPublic,
+      parsed.data.priority ?? current.priority,
     )
     if (result !== "updated") {
       return c.json({ error: result === "protected" ? "protected_group" : "duplicate_group" }, 409)

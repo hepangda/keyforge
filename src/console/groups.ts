@@ -11,11 +11,9 @@ import {
   searchGroupMemberCandidates,
 } from "../db/queries/group-memberships"
 import {
-  getPermissionGroupAccess,
-  MAX_PERMISSION_GROUP_TARGETS,
-  type PermissionGroupAccess,
-  replacePermissionGroupAccess,
-} from "../db/queries/permission-group-access"
+  getPermissionGroupPolicy,
+  replacePermissionGroupRules,
+} from "../db/queries/permission-group-rules"
 import { listResources } from "../db/queries/resources"
 import {
   createGroup,
@@ -26,6 +24,7 @@ import {
   listGroups,
   updateGroup,
 } from "../db/queries/users"
+import { PERMISSION_GROUP_PRIORITIES } from "../oauth/permission-rules"
 import { recordAudit } from "../security/audit"
 import { issueCsrfToken } from "../security/csrf"
 import type { AppBindings } from "../types/app"
@@ -49,48 +48,33 @@ const groupSchema = z.object({
     .max(64)
     .regex(/^[a-z0-9][a-z0-9._:-]*$/),
   description: z.string().trim().max(500),
+  priority: z.coerce
+    .number()
+    .int()
+    .min(PERMISSION_GROUP_PRIORITIES.minimum)
+    .max(PERMISSION_GROUP_PRIORITIES.maximum),
 })
 
 async function groupById(env: Env, id: string): Promise<GroupSummary | undefined> {
   return (await listGroups(env)).find((candidate) => candidate.id === id)
 }
 
-function submittedAccess(form: FormData): PermissionGroupAccess {
-  const clientIds = form
-    .getAll("client_ids")
-    .flatMap((value) => (typeof value === "string" && value !== "" ? [value] : []))
-  const resourceUris = form
-    .getAll("resource_uris")
-    .flatMap((value) => (typeof value === "string" && value !== "" ? [value] : []))
-  return {
-    clientIds: [...new Set(clientIds)],
-    resourceUris: [...new Set(resourceUris)],
-  }
-}
-
 async function renderAccessError(
   c: Context<AppBindings>,
   group: GroupSummary,
-  submitted: PermissionGroupAccess,
+  rulesJson: string,
+  error = "Enter a valid rule document using existing applications, APIs, and scopes.",
 ): Promise<Response> {
   const [clients, resources] = await Promise.all([listClients(c.env), listResources(c.env)])
-  const userClients = clients.filter((client) => client.clientKind !== "service")
-  const validClientIds = new Set<string>(userClients.map((client) => client.clientId))
-  const validResourceUris = new Set<string>(resources.map((resource) => resource.resourceUri))
   return c.html(
     renderGroupDetail(chrome(c, "groups"), {
       group,
       view: "access",
       csrfToken: issueCsrfToken(c),
-      clients: userClients,
+      clients: clients.filter((client) => client.clientKind !== "service"),
       resources,
-      selectedClientIds: new Set(
-        submitted.clientIds.filter((clientId) => validClientIds.has(clientId)),
-      ),
-      selectedResourceUris: new Set(
-        submitted.resourceUris.filter((resourceUri) => validResourceUris.has(resourceUri)),
-      ),
-      accessError: "Choose only existing user applications and APIs.",
+      rulesJson,
+      accessError: error,
     }),
     400,
   )
@@ -111,20 +95,31 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     const formValues: GroupFormValues = {
       name: readFormField(form, "name"),
       description: readFormField(form, "description"),
+      visibility: readFormField(form, "visibility") === "hidden" ? "hidden" : "public",
+      priority: readFormField(form, "priority"),
     }
     const parsed = groupSchema.safeParse({
       name: formValues.name.trim().toLowerCase(),
       description: formValues.description.trim(),
+      priority: formValues.priority,
     })
     if (!parsed.success) {
-      const field = parsed.error.issues[0]?.path[0] === "description" ? "description" : "name"
+      const issueField = parsed.error.issues[0]?.path[0]
+      const field =
+        issueField === "description"
+          ? "description"
+          : issueField === "priority"
+            ? "priority"
+            : "name"
       const feedback: GroupFormFeedback = {
         values: formValues,
         field,
         error:
           field === "description"
             ? "Descriptions must contain at most 500 characters."
-            : "Enter a valid group name of at most 64 characters.",
+            : field === "priority"
+              ? "Priority must be a whole number from 0 to 1000000."
+              : "Enter a valid group name of at most 64 characters.",
       }
       return c.html(renderGroupCreateForm(chrome(c, "groups"), issueCsrfToken(c), feedback), 400)
     }
@@ -142,6 +137,8 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
       c.env,
       parsed.data.name,
       parsed.data.description === "" ? null : parsed.data.description,
+      formValues.visibility === "public",
+      parsed.data.priority,
     )
     await recordAudit(c.env, {
       type: "admin.group.created",
@@ -149,7 +146,7 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
       requestId: c.get("requestId"),
       success: true,
       detail: `console created group ${group.name}`,
-      metadata: { group_id: group.id },
+      metadata: { group_id: group.id, is_public: group.isPublic },
     })
     return c.redirect(
       withClearedDraft(
@@ -163,15 +160,14 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     const group = await groupById(c.env, c.req.param("id"))
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
     const requestedView = c.req.query("view")
-    if (isProtectedGroupName(group.name) && requestedView === "settings") {
-      return c.redirect(`/console/groups/${group.id}?view=access&flash=protected_group`)
-    }
     const view =
       requestedView === "members"
         ? "members"
-        : isProtectedGroupName(group.name) || requestedView === "access"
-          ? "access"
-          : "settings"
+        : requestedView === "settings"
+          ? "settings"
+          : isProtectedGroupName(group.name) || requestedView === "access"
+            ? "access"
+            : "settings"
     if (view === "settings") {
       return c.html(
         renderGroupDetail(chrome(c, "groups"), {
@@ -204,12 +200,12 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
         }),
       )
     }
-    const [access, clients, resources] = await Promise.all([
-      getPermissionGroupAccess(c.env, group.id),
+    const [policy, clients, resources] = await Promise.all([
+      getPermissionGroupPolicy(c.env, group.id),
       listClients(c.env),
       listResources(c.env),
     ])
-    if (access === null) return c.redirect("/console/groups?flash=not_found")
+    if (policy === null) return c.redirect("/console/groups?flash=not_found")
     return c.html(
       renderGroupDetail(chrome(c, "groups"), {
         group,
@@ -217,8 +213,7 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
         csrfToken: issueCsrfToken(c),
         clients: clients.filter((client) => client.clientKind !== "service"),
         resources,
-        selectedClientIds: new Set(access.clientIds),
-        selectedResourceUris: new Set(access.resourceUris),
+        rules: policy.rules,
       }),
     )
   })
@@ -227,9 +222,6 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     const id = c.req.param("id")
     const group = await groupById(c.env, id)
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
-    if (isProtectedGroupName(group.name)) {
-      return c.redirect(`/console/groups/${id}?view=access&flash=protected_group`)
-    }
     const form = await readVerifiedForm(c)
     if (form === null) {
       return c.redirect(`/console/groups/${id}?view=settings&flash=invalid`)
@@ -237,13 +229,22 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     const formValues: GroupFormValues = {
       name: readFormField(form, "name"),
       description: readFormField(form, "description"),
+      visibility: readFormField(form, "visibility") === "hidden" ? "hidden" : "public",
+      priority: readFormField(form, "priority"),
     }
     const parsed = groupSchema.safeParse({
       name: formValues.name.trim().toLowerCase(),
       description: formValues.description.trim(),
+      priority: formValues.priority,
     })
     if (!parsed.success) {
-      const field = parsed.error.issues[0]?.path[0] === "description" ? "description" : "name"
+      const issueField = parsed.error.issues[0]?.path[0]
+      const field =
+        issueField === "description"
+          ? "description"
+          : issueField === "priority"
+            ? "priority"
+            : "name"
       return c.html(
         renderGroupDetail(chrome(c, "groups"), {
           group,
@@ -255,7 +256,9 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
             error:
               field === "description"
                 ? "Descriptions must contain at most 500 characters."
-                : "Enter a valid group name of at most 64 characters.",
+                : field === "priority"
+                  ? "Priority must be a whole number from 0 to 1000000."
+                  : "Enter a valid group name of at most 64 characters.",
           },
         }),
         400,
@@ -282,6 +285,8 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
       id,
       parsed.data.name,
       parsed.data.description === "" ? null : parsed.data.description,
+      formValues.visibility === "public",
+      parsed.data.priority,
     )
     if (result !== "updated") {
       return c.redirect(
@@ -293,7 +298,7 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
       actorUserId: c.get("user")?.id ?? null,
       requestId: c.get("requestId"),
       success: true,
-      metadata: { group_id: id },
+      metadata: { group_id: id, is_public: formValues.visibility === "public" },
     })
     return c.redirect(
       withClearedDraft(
@@ -309,18 +314,27 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
     if (group === undefined) return c.redirect("/console/groups?flash=not_found")
     const form = await readVerifiedForm(c)
     if (form === null) return c.redirect(`/console/groups/${id}?view=access&flash=invalid`)
-    const submitted = submittedAccess(form)
-    if (
-      submitted.clientIds.length > MAX_PERMISSION_GROUP_TARGETS ||
-      submitted.resourceUris.length > MAX_PERMISSION_GROUP_TARGETS
-    ) {
-      return renderAccessError(c, group, submitted)
+    const rulesJson = readFormField(form, "rules_json")
+    let submitted: unknown
+    try {
+      submitted = JSON.parse(rulesJson)
+    } catch {
+      return renderAccessError(c, group, rulesJson, "Rule document must be valid JSON.")
     }
-    const result = await replacePermissionGroupAccess(c.env, id, submitted)
+    const result = await replacePermissionGroupRules(c.env, id, submitted)
     if (result === "not_found") return c.redirect("/console/groups?flash=not_found")
-    if (result !== "updated") return renderAccessError(c, group, submitted)
-    const access = await getPermissionGroupAccess(c.env, id)
-    if (access === null) return c.redirect("/console/groups?flash=not_found")
+    if (result !== "updated") {
+      return renderAccessError(
+        c,
+        group,
+        rulesJson,
+        result === "standard_scope"
+          ? "openid, profile, email, and offline_access cannot be configured in scope rules."
+          : "Enter valid rules using existing applications, APIs, and configurable scopes.",
+      )
+    }
+    const policy = await getPermissionGroupPolicy(c.env, id)
+    if (policy === null) return c.redirect("/console/groups?flash=not_found")
     await recordAudit(c.env, {
       type: "admin.group.access_updated",
       actorUserId: c.get("user")?.id ?? null,
@@ -328,8 +342,8 @@ export function registerConsoleGroups(app: Hono<AppBindings>): void {
       success: true,
       metadata: {
         group_id: id,
-        client_ids: access.clientIds,
-        resource_uris: access.resourceUris,
+        priority: policy.priority,
+        rules: policy.rules,
       },
     })
     return c.redirect(

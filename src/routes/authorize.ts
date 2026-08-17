@@ -1,15 +1,19 @@
 import type { Context } from "hono"
 import { Hono } from "hono"
-import { saveConsent } from "../db/queries/consents"
+import { getConsent, saveConsent } from "../db/queries/consents"
+import { getResourceByUri } from "../db/queries/resources"
 import type { AuthorizeParams, AuthorizeValidation } from "../oauth/authorize"
 import { issueAuthorizationCode, validateAuthorizeRequest } from "../oauth/authorize"
+import { parseClientIdentifierUrl } from "../oauth/client-identifier"
 import { consentCoversScopes } from "../oauth/consent"
 import { buildRedirectUrl, formActionSource } from "../oauth/redirect"
 import { validateOAuthParameterSet } from "../oauth/request-limits"
-import { serializeScopes } from "../oauth/scopes"
+import { parseScopeString, serializeScopes } from "../oauth/scopes"
 import { evaluateUserTokenAccess } from "../oauth/user-token-policy"
 import { recordAudit } from "../security/audit"
 import { issueCsrfToken, verifyCsrfToken } from "../security/csrf"
+import { checkIpRateLimit } from "../security/ingress"
+import { shouldAuditRateLimit } from "../security/rate-limit"
 import { consumeReauthContinuation } from "../security/reauth-continuation"
 import type { AppBindings } from "../types/app"
 import type { SessionRecord, User } from "../types/domain"
@@ -37,8 +41,19 @@ const AUTHORIZE_PARAM_KEYS = [
 type ConsentContext = { readonly user: User; readonly session: SessionRecord }
 type HiddenFields = Readonly<Record<string, string>>
 
+const METADATA_AUTHORIZE_RATE_LIMIT = 120
+const METADATA_AUTHORIZE_RATE_WINDOW_SECONDS = 5 * 60
+
 function withState(params: Record<string, string>, state: string | null): Record<string, string> {
   return state === null ? params : { ...params, state }
+}
+
+function authorizationResponseParams(
+  c: Context<AppBindings>,
+  params: Record<string, string>,
+  state: string | null,
+): Record<string, string> {
+  return withState({ ...params, iss: c.env.ISSUER }, state)
 }
 
 authorize.get("/oauth/authorize", async (c) => {
@@ -54,6 +69,8 @@ authorize.get("/oauth/authorize", async (c) => {
       400,
     )
   }
+  const rateLimited = await enforceMetadataAuthorizeRate(c, requestUrl.searchParams)
+  if (rateLimited !== null) return rateLimited
   const url = await consumeReauthContinuation(c.env, c.get("session")?.id, requestUrl)
   const validation = await validateAuthorizeRequest(c.env, url.searchParams)
   return dispatchValidation(c, validation, collectHiddenFields(url.searchParams))
@@ -94,6 +111,8 @@ authorize.post("/oauth/authorize/decision", async (c) => {
       403,
     )
   }
+  const rateLimited = await enforceMetadataAuthorizeRate(c, query)
+  if (rateLimited !== null) return rateLimited
   const validation = await validateAuthorizeRequest(c.env, query)
   if (validation.kind !== "ok") {
     return dispatchValidation(c, validation, hiddenFields)
@@ -126,14 +145,65 @@ authorize.post("/oauth/authorize/decision", async (c) => {
   if (readFormField(form, "decision") !== "approve") {
     return denyAuthorization(c, params, { user, session })
   }
+  if (
+    params.scopes.includes("mcp.tools.execute") &&
+    readFormField(form, "confirm_elevated") !== "yes"
+  ) {
+    return interactionError(
+      c,
+      params,
+      "access_denied",
+      "Elevated MCP execution permission was not explicitly confirmed.",
+    )
+  }
   await saveConsent(c.env, {
     userId: user.id,
     clientId: params.clientId,
     scope: serializeScopes(params.scopes),
     resource: params.resource,
+    metadataFingerprint: params.client.metadataFingerprint,
   })
   return completeAuthorization(c, params, { user, session })
 })
+
+async function enforceMetadataAuthorizeRate(
+  c: Context<AppBindings>,
+  query: URLSearchParams,
+): Promise<Response | null> {
+  if (query.getAll("client_id").length !== 1) return null
+  const clientId = query.get("client_id")
+  if (clientId === null || parseClientIdentifierUrl(clientId) === null) return null
+  const rate = await checkIpRateLimit(
+    c,
+    "oauth:authorize-metadata",
+    METADATA_AUTHORIZE_RATE_LIMIT,
+    METADATA_AUTHORIZE_RATE_WINDOW_SECONDS,
+  )
+  if (rate.allowed) return null
+  c.header("retry-after", String(rate.retryAfterSeconds))
+  if (shouldAuditRateLimit(rate)) {
+    await recordAudit(c.env, {
+      type: "security.rate_limited",
+      clientId,
+      requestId: c.get("requestId"),
+      success: false,
+      detail: "Client ID Metadata authorization rate limit exceeded",
+      metadata: {
+        limit: METADATA_AUTHORIZE_RATE_LIMIT,
+        window_seconds: METADATA_AUTHORIZE_RATE_WINDOW_SECONDS,
+      },
+    })
+  }
+  return c.html(
+    renderErrorPage(
+      c.get("i18n"),
+      "Too many authorization requests. Please wait and try again.",
+      "/",
+      "Back to your account",
+    ),
+    429,
+  )
+}
 
 async function dispatchValidation(
   c: Context<AppBindings>,
@@ -178,7 +248,8 @@ async function errorRedirect(
     success: false,
     detail: `${validation.error}: ${validation.description}`,
   })
-  const params = withState(
+  const params = authorizationResponseParams(
+    c,
     { error: validation.error, error_description: validation.description },
     validation.state,
   )
@@ -232,13 +303,30 @@ async function handleAuthorized(
     requestId: c.get("requestId"),
     success: true,
   })
-  const hasConsent = await consentCoversScopes(
-    c.env,
-    user.id,
-    params.clientId,
-    params.resource,
-    params.scopes,
-  )
+  const [hasConsent, priorConsent, resource] = await Promise.all([
+    consentCoversScopes(
+      c.env,
+      user.id,
+      params.clientId,
+      params.resource,
+      params.scopes,
+      params.client.metadataFingerprint,
+    ),
+    getConsent(c.env, user.id, params.clientId, params.resource),
+    getResourceByUri(c.env, params.resource),
+  ])
+  const sameMetadata =
+    priorConsent !== null && priorConsent.metadataFingerprint === params.client.metadataFingerprint
+  const priorScopes = new Set(sameMetadata ? parseScopeString(priorConsent.scope) : [])
+  const elevatedScopes = params.scopes.filter((scope) => !priorScopes.has(scope))
+  const consentMode =
+    priorConsent === null
+      ? "first"
+      : !sameMetadata
+        ? "metadata_changed"
+        : hasConsent
+          ? "forced"
+          : "step_up"
   if (hasConsent && !params.prompts.includes("consent")) {
     return completeAuthorization(c, params, { user, session })
   }
@@ -252,7 +340,13 @@ async function handleAuthorized(
       i18n: c.get("i18n"),
       csrfToken: issueCsrfToken(c),
       clientName: params.client.name,
+      clientId: params.clientId,
+      metadataClient: params.client.registrationType === "client_id_metadata",
+      redirectUri: params.redirectUri,
       scopes: params.scopes,
+      resourceName: resource?.name ?? params.resource,
+      consentMode,
+      elevatedScopes,
       resource: params.resource,
       user,
       authorizationReturnTo: authorizationReturnTo(hiddenFields),
@@ -305,7 +399,7 @@ async function interactionError(
   return c.redirect(
     buildRedirectUrl(
       params.redirectUri,
-      withState({ error, error_description: description }, params.state),
+      authorizationResponseParams(c, { error, error_description: description }, params.state),
     ),
   )
 }
@@ -329,7 +423,9 @@ async function completeAuthorization(
     requestId: c.get("requestId"),
     success: true,
   })
-  return c.redirect(buildRedirectUrl(params.redirectUri, withState({ code }, params.state)))
+  return c.redirect(
+    buildRedirectUrl(params.redirectUri, authorizationResponseParams(c, { code }, params.state)),
+  )
 }
 
 async function denyAuthorization(
@@ -348,7 +444,8 @@ async function denyAuthorization(
   return c.redirect(
     buildRedirectUrl(
       params.redirectUri,
-      withState(
+      authorizationResponseParams(
+        c,
         { error: "access_denied", error_description: "The user denied the request" },
         params.state,
       ),

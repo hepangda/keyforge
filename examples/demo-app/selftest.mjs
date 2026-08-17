@@ -9,6 +9,9 @@
 //   node selftest.mjs      (or: pnpm selftest)
 
 import { spawn, spawnSync } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { createServer } from "node:net"
+import os from "node:os"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
@@ -18,11 +21,45 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url))
 const WRANGLER = path.join(ROOT, "node_modules", ".bin", "wrangler")
 const SEED = path.join(DEMO_DIR, "seed-demo-client.sql")
 const TEST_ADMIN_SEED = path.join(DEMO_DIR, "seed-test-admin.sql")
+const LOCAL_STATE = mkdtempSync(path.join(os.tmpdir(), "keyforge-demo-selftest-"))
+process.once("exit", () => {
+  rmSync(LOCAL_STATE, { recursive: true, force: true })
+})
 
-const AUTH_PORT = 17001
-const DEMO_PORT = 8788
+async function allocateLoopbackPorts(count) {
+  const servers = await Promise.all(
+    Array.from({ length: count }, () =>
+      new Promise((resolve, reject) => {
+        const server = createServer()
+        server.once("error", reject)
+        server.listen(0, "127.0.0.1", () => resolve(server))
+      }),
+    ),
+  )
+  const ports = servers.map((server) => {
+    const address = server.address()
+    if (address === null || typeof address === "string") throw new Error("failed to reserve a port")
+    return address.port
+  })
+  await Promise.all(
+    servers.map(
+      (server) =>
+        new Promise((resolve, reject) =>
+          server.close((error) => (error === undefined ? resolve() : reject(error))),
+        ),
+    ),
+  )
+  return ports
+}
+
+const [AUTH_PORT, DEMO_PORT] = await allocateLoopbackPorts(2)
 const AUTH_BASE = `http://localhost:${AUTH_PORT}`
 const DEMO_BASE = `http://localhost:${DEMO_PORT}`
+const LOCAL_DEMO_CLIENT_SEED = path.join(LOCAL_STATE, "seed-demo-client.sql")
+writeFileSync(
+  LOCAL_DEMO_CLIENT_SEED,
+  readFileSync(SEED, "utf8").replaceAll("http://localhost:8788", `${DEMO_BASE}`),
+)
 
 function assert(condition, message) {
   if (!condition) {
@@ -40,6 +77,10 @@ function runSync(args, label) {
   if (result.status !== 0) {
     throw new Error(`\`wrangler ${args.join(" ")}\` failed:\n${result.stdout ?? ""}${result.stderr ?? ""}`)
   }
+}
+
+function localWranglerArgs(args) {
+  return [...args, "--persist-to", LOCAL_STATE]
 }
 
 function absorb(jar, res) {
@@ -161,17 +202,43 @@ async function driveLoginFlow() {
 }
 
 async function main() {
-  runSync(["d1", "migrations", "apply", "keyforge", "--local"], "apply local D1 migrations")
   runSync(
-    ["d1", "execute", "keyforge", "--local", `--file=${TEST_ADMIN_SEED}`],
+    localWranglerArgs(["d1", "migrations", "apply", "keyforge", "--local"]),
+    "apply isolated local D1 migrations",
+  )
+  runSync(
+    localWranglerArgs([
+      "d1",
+      "execute",
+      "keyforge",
+      "--local",
+      `--file=${TEST_ADMIN_SEED}`,
+    ]),
     "register the local demo administrator",
   )
-  runSync(["d1", "execute", "keyforge", "--local", `--file=${SEED}`], "register the demo client")
+  runSync(
+    localWranglerArgs([
+      "d1",
+      "execute",
+      "keyforge",
+      "--local",
+      `--file=${LOCAL_DEMO_CLIENT_SEED}`,
+    ]),
+    "register the demo client",
+  )
 
   step(`start the auth server: wrangler dev on ${AUTH_BASE} (issuer overridden to localhost)`)
   const auth = spawn(
     WRANGLER,
-    ["dev", "--var", `ISSUER:${AUTH_BASE}`, "--port", String(AUTH_PORT), "--ip", "127.0.0.1"],
+    localWranglerArgs([
+      "dev",
+      "--var",
+      `ISSUER:${AUTH_BASE}`,
+      "--port",
+      String(AUTH_PORT),
+      "--ip",
+      "127.0.0.1",
+    ]),
     { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
   )
 

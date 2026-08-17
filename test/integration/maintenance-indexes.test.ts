@@ -134,9 +134,19 @@ const cases: readonly PlanCase[] = [
           WHERE consumed_at IS NOT NULL ORDER BY consumed_at, token_hash LIMIT ?`,
     bindings: [100],
   },
+  {
+    name: "metadata client expiry",
+    table: "oauth_clients",
+    index: "idx_oauth_clients_metadata_expiry",
+    sql: `SELECT client_id FROM oauth_clients
+          WHERE registration_type = 'client_id_metadata' AND enabled = 1
+            AND metadata_expires_at IS NOT NULL AND metadata_expires_at < ?
+          ORDER BY metadata_expires_at, client_id LIMIT ?`,
+    bindings: [CUTOFF, 100],
+  },
 ]
 
-describe("migration 0011 cleanup indexes", () => {
+describe("bounded cleanup indexes", () => {
   for (const planCase of cases) {
     it(`uses ${planCase.name} index`, async () => {
       const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${planCase.sql}`)

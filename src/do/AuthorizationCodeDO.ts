@@ -11,12 +11,15 @@ export class AuthorizationCodeDO extends OneTimeConsumeDO<AuthorizationCodePaylo
    * transaction. Invalid guesses never burn a legitimate authorization code.
    */
   async consumeIf(input: {
+    readonly issuer: string
     readonly clientId: string
     readonly redirectUri: string
+    readonly resource: string | null
+    readonly metadataFingerprint: string | null
     readonly codeVerifier: string
   }): Promise<
     | { readonly found: true; readonly value: AuthorizationCodePayload }
-    | { readonly found: false; readonly reason: "not_found" | "binding" | "pkce" }
+    | { readonly found: false; readonly reason: "not_found" | "binding" | "resource" | "pkce" }
   > {
     // YOLO mode skips the client/redirect binding and the PKCE proof, but the
     // code must still exist, be unexpired, and be consumed exactly once — those
@@ -39,8 +42,21 @@ export class AuthorizationCodeDO extends OneTimeConsumeDO<AuthorizationCodePaylo
       ) {
         return { found: false as const, reason: "not_found" as const }
       }
-      if (!yolo && (value.clientId !== input.clientId || value.redirectUri !== input.redirectUri)) {
+      if (
+        !yolo &&
+        (value.issuer !== input.issuer ||
+          value.clientId !== input.clientId ||
+          value.redirectUri !== input.redirectUri ||
+          value.metadataFingerprint !== input.metadataFingerprint)
+      ) {
         return { found: false as const, reason: "binding" as const }
+      }
+      if (
+        !yolo &&
+        ((value.resourceRequired && input.resource === null) ||
+          (input.resource !== null && value.resource !== input.resource))
+      ) {
+        return { found: false as const, reason: "resource" as const }
       }
       if (
         !yolo &&

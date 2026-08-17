@@ -29,6 +29,27 @@ beforeEach(async () => {
   )
     .bind(RESOURCE)
     .run()
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM permission_group_rules WHERE group_id = 'grp_seed_employees'"),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_device_base', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"application","operator":"equals","value":"pangda_cli"},{"field":"api","operator":"equals","value":"https://api.pangda.app"}]}',
+         0, unixepoch(), unixepoch()
+       )`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_device_read', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+         1, unixepoch(), unixepoch()
+       )`,
+    ),
+  ])
   const user = await createUser(env, {
     email: "cli@pangda.app",
     name: "CLI User",

@@ -443,6 +443,8 @@ const SCOPE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   offline_access: "Stay signed in while you're away",
   address: "Your postal address",
   phone: "Your phone number",
+  "mcp.tools.read": "View tools and data exposed by this MCP server",
+  "mcp.tools.execute": "Run actions through this MCP server",
 }
 
 export function permissionList(i18n: I18n, scopes: readonly string[]): string {
@@ -501,6 +503,9 @@ export function htmlLayout(
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a0b0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f3f1ea" media="(prefers-color-scheme: light)">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
 <title>${escapeHtml(title)}</title>
 <style>${BASE_STYLES}</style>${extra}
 </head>

@@ -272,7 +272,11 @@ describe("POST /oauth/introspect", () => {
       rememberMe: false,
     })
     await env.DB.prepare(
-      "UPDATE oauth_clients SET type = 'confidential', client_secret_hash = ? WHERE client_id = ?",
+      `UPDATE oauth_clients
+       SET type = 'confidential', client_secret_hash = ?,
+           token_endpoint_auth_methods_json = '["client_secret_basic","client_secret_post"]',
+           introspection_allowed = 1
+       WHERE client_id = ?`,
     )
       .bind(await hashClientSecret(APP_SECRET), CLIENT)
       .run()
@@ -290,7 +294,10 @@ describe("POST /oauth/introspect", () => {
       expect(other.active).toBe(false)
     } finally {
       await env.DB.prepare(
-        "UPDATE oauth_clients SET type = 'public', client_secret_hash = NULL WHERE client_id = ?",
+        `UPDATE oauth_clients
+         SET type = 'public', client_secret_hash = NULL,
+             token_endpoint_auth_methods_json = '["none"]', introspection_allowed = 0
+         WHERE client_id = ?`,
       )
         .bind(CLIENT)
         .run()

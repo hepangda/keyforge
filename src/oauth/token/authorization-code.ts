@@ -30,9 +30,13 @@ export async function handleAuthorizationCode(
     })
   }
 
+  const presentedResource = form.get("resource")
   const consumed = await env.AUTHORIZATION_CODE.getByName(await hashOpaqueToken(code)).consumeIf({
+    issuer: env.ISSUER,
     clientId: client.clientId,
     redirectUri,
+    resource: presentedResource,
+    metadataFingerprint: client.metadataFingerprint,
     codeVerifier,
   })
   if (!consumed.found) {
@@ -43,6 +47,12 @@ export async function handleAuthorizationCode(
         requestId,
         success: false,
         detail: "code_verifier did not match code_challenge",
+      })
+    }
+    if (consumed.reason === "resource" && presentedResource === null) {
+      throw new OAuthError("invalid_request", {
+        description: "The resource parameter is required for this authorization code",
+        detail: "token exchange omitted the resource bound to the authorization code",
       })
     }
     throw new OAuthError("invalid_grant", {
@@ -59,7 +69,14 @@ export async function handleAuthorizationCode(
   const [user, sourceSession, consentCovered, access, resource] = await Promise.all([
     getUserById(env, grant.userId),
     getSessionById(env, grant.sessionId),
-    consentCoversScopes(env, grant.userId, client.clientId, grant.resource, scopes),
+    consentCoversScopes(
+      env,
+      grant.userId,
+      client.clientId,
+      grant.resource,
+      scopes,
+      client.metadataFingerprint,
+    ),
     evaluateUserTokenAccess(env, {
       userId: grant.userId,
       clientId: client.clientId,

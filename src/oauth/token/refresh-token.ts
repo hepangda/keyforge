@@ -1,5 +1,6 @@
 import type { Context } from "hono"
 import { getSessionById } from "../../auth/session"
+import { getResourceByUri } from "../../db/queries/resources"
 import {
   getRefreshTokenByFamilyId,
   getRefreshTokenByHash,
@@ -58,6 +59,19 @@ export async function handleRefreshToken(
       "refresh token unknown, expired, revoked, or belongs to another client",
     )
   }
+  const presentedResource = form.get("resource")
+  const registeredResource = await getResourceByUri(env, record.resource)
+  if (registeredResource?.mcpEnabled === true && presentedResource === null) {
+    throw new OAuthError("invalid_request", {
+      description: "The resource parameter is required for this protected resource",
+      detail: `MCP refresh request omitted resource ${record.resource}`,
+    })
+  }
+  if (presentedResource !== null && presentedResource !== record.resource) {
+    throw invalidRefreshToken(
+      `refresh resource ${presentedResource} did not match token resource ${record.resource}`,
+    )
+  }
 
   const originalScopes = parseScopeString(record.scope)
   const requestedScope = form.get("scope")
@@ -83,7 +97,14 @@ export async function handleRefreshToken(
       resourceUri: record.resource,
       scopes,
     }),
-    consentCoversScopes(env, record.userId, client.clientId, record.resource, scopes),
+    consentCoversScopes(
+      env,
+      record.userId,
+      client.clientId,
+      record.resource,
+      scopes,
+      client.metadataFingerprint,
+    ),
     resourceCheck,
   ])
   if (user === null || user.disabled) {

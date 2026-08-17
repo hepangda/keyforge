@@ -28,6 +28,17 @@ export type ClientType = (typeof CLIENT_TYPES)[number]
 export const CLIENT_KINDS = ["application", "device", "service"] as const
 export type ClientKind = (typeof CLIENT_KINDS)[number]
 
+export const TOKEN_ENDPOINT_AUTH_METHODS = [
+  "client_secret_basic",
+  "client_secret_post",
+  "none",
+  "private_key_jwt",
+] as const
+export type TokenEndpointAuthMethod = (typeof TOKEN_ENDPOINT_AUTH_METHODS)[number]
+
+export const METADATA_CLIENT_POLICIES = ["disabled", "consent_required", "admin_approved"] as const
+export type MetadataClientPolicy = (typeof METADATA_CLIENT_POLICIES)[number]
+
 /** Lifecycle of a device authorization session. */
 export const DEVICE_STATUSES = ["pending", "approved", "denied", "expired", "consumed"] as const
 export type DeviceStatus = (typeof DEVICE_STATUSES)[number]
@@ -78,6 +89,17 @@ export type OAuthClient = {
   readonly defaultResource: string | null
   readonly requirePkce: boolean
   readonly enabled: boolean
+  /** Token endpoint authentication methods this registration may present. */
+  readonly tokenEndpointAuthMethods: readonly TokenEndpointAuthMethod[]
+  /** Permit this confidential identity to call token introspection. */
+  readonly introspectionAllowed: boolean
+  /** How this client registration was established. */
+  readonly registrationType: "static" | "client_id_metadata"
+  /** Fingerprint and cache expiry of the normalized external metadata document. */
+  readonly metadataFingerprint: string | null
+  readonly metadataExpiresAt: number | null
+  /** Public JWKS endpoint for metadata clients using private_key_jwt. */
+  readonly metadataJwksUri: string | null
 }
 
 /** A registered protected resource (audience). */
@@ -86,4 +108,8 @@ export type OAuthResource = {
   readonly name: string
   readonly allowedScopes: readonly string[]
   readonly enabled: boolean
+  /** Enforce MCP's stricter resource-indicator behavior for this audience. */
+  readonly mcpEnabled: boolean
+  /** Admission policy for unknown Client ID Metadata Document clients. */
+  readonly metadataClientPolicy: MetadataClientPolicy
 }

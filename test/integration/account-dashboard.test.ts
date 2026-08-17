@@ -258,6 +258,39 @@ describe("account dashboard", () => {
 })
 
 describe("browser assets", () => {
+  it("declares and serves the branded browser icons", async () => {
+    const page = await SELF.fetch(`${ISSUER}/login`)
+    const html = await page.text()
+    expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">')
+    expect(html).toContain('<link rel="icon" href="/favicon.svg" type="image/svg+xml">')
+    expect(html).toContain(
+      '<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">',
+    )
+
+    const svg = await SELF.fetch(`${ISSUER}/favicon.svg`)
+    expect(svg.status).toBe(200)
+    expect(svg.headers.get("content-type")).toContain("image/svg+xml")
+    expect(svg.headers.get("cache-control")).toContain("public")
+    const svgBody = await svg.text()
+    expect(svgBody).toContain("#e7b667")
+    expect(svgBody).not.toContain("<rect")
+
+    const favicon = await SELF.fetch(`${ISSUER}/favicon.ico`)
+    expect(favicon.status).toBe(200)
+    expect(favicon.headers.get("content-type")).toContain("image/x-icon")
+    expect(favicon.headers.get("cache-control")).not.toContain("no-store")
+    expect(Array.from(new Uint8Array(await favicon.arrayBuffer()).slice(0, 6))).toEqual([
+      0, 0, 1, 0, 3, 0,
+    ])
+
+    const appleIcon = await SELF.fetch(`${ISSUER}/apple-touch-icon.png`)
+    expect(appleIcon.status).toBe(200)
+    expect(appleIcon.headers.get("content-type")).toContain("image/png")
+    const appleIconBytes = new Uint8Array(await appleIcon.arrayBuffer())
+    expect(Array.from(appleIconBytes.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+    expect(String.fromCharCode(...appleIconBytes)).toContain("tRNS")
+  })
+
   it("revalidates unchanged scripts with an ETag", async () => {
     const initial = await SELF.fetch(`${ISSUER}/assets/forms.js`)
     const etag = initial.headers.get("etag")

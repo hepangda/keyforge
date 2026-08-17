@@ -137,7 +137,14 @@ async function issueDeviceTokens(
   const [user, sourceSession, consentCovered, access, resource] = await Promise.all([
     getUserById(env, userId),
     getSessionById(env, browserSessionId),
-    consentCoversScopes(env, userId, client.clientId, resourceUri, scopes),
+    consentCoversScopes(
+      env,
+      userId,
+      client.clientId,
+      resourceUri,
+      scopes,
+      client.metadataFingerprint,
+    ),
     evaluateUserTokenAccess(env, {
       userId,
       clientId: client.clientId,
@@ -187,7 +194,14 @@ async function issueDeviceTokens(
   })
   const [sessionAfterIssue, consentAfterIssue] = await Promise.all([
     getSessionById(env, browserSessionId),
-    consentCoversScopes(env, user.id, client.clientId, resourceUri, scopes),
+    consentCoversScopes(
+      env,
+      user.id,
+      client.clientId,
+      resourceUri,
+      scopes,
+      client.metadataFingerprint,
+    ),
   ])
   if (sessionAfterIssue === null || sessionAfterIssue.userId !== user.id || !consentAfterIssue) {
     const familyId = response.refresh_token?.split(".")[0]

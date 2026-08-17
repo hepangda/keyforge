@@ -4,6 +4,8 @@ import { deleteConsent } from "../db/queries/consents"
 import { revokeAuthorizationGrantsByUserClient } from "../db/queries/grants"
 import {
   cancelPermissionGroupMembershipRequest,
+  findPublicPermissionGroupIdByExactName,
+  requestHiddenPermissionGroupMembership,
   requestPermissionGroupMembership,
 } from "../db/queries/group-memberships"
 import { revokeDeviceRefreshFamily } from "../db/queries/tokens"
@@ -24,6 +26,36 @@ account.post("/account/groups/request", async (c) => {
   const form = await c.req.raw.formData()
   if (!verifyCsrfToken(c, readFormField(form, "csrf_token") || undefined)) {
     return c.redirect("/?section=groups&notice=invalid")
+  }
+  if (form.has("group_name")) {
+    const groupName = readFormField(form, "group_name")
+    const publicGroupId = await findPublicPermissionGroupIdByExactName(c.env, groupName)
+    if (publicGroupId !== null) {
+      const result = await requestPermissionGroupMembership(c.env, user.id, publicGroupId)
+      if (result === "requested") {
+        await recordAudit(c.env, {
+          type: "user.group_membership.requested",
+          actorUserId: user.id,
+          userId: user.id,
+          requestId: c.get("requestId"),
+          success: true,
+          metadata: { group_id: publicGroupId, discovery: "exact_name" },
+        })
+      }
+      return c.redirect("/?section=groups&notice=group_name_request_received")
+    }
+    const groupId = await requestHiddenPermissionGroupMembership(c.env, user.id, groupName)
+    if (groupId !== null) {
+      await recordAudit(c.env, {
+        type: "user.group_membership.requested",
+        actorUserId: user.id,
+        userId: user.id,
+        requestId: c.get("requestId"),
+        success: true,
+        metadata: { group_id: groupId, discovery: "exact_hidden_name" },
+      })
+    }
+    return c.redirect("/?section=groups&notice=group_name_request_received")
   }
   const groupId = readFormField(form, "group_id")
   const result = await requestPermissionGroupMembership(c.env, user.id, groupId)

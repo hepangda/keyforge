@@ -40,6 +40,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM authorization_grants"),
     env.DB.prepare("DELETE FROM sessions"),
     env.DB.prepare("DELETE FROM user_groups"),
+    env.DB.prepare("DELETE FROM oauth_scope_permission_groups"),
     env.DB.prepare("DELETE FROM consents"),
     env.DB.prepare("DELETE FROM users"),
     env.DB.prepare(
@@ -53,6 +54,25 @@ beforeEach(async () => {
     env.DB.prepare(
       "UPDATE oauth_resources SET allowed_scopes_json = ?, enabled = 1 WHERE resource_uri = ?",
     ).bind(RESOURCE_SCOPES, RESOURCE),
+    env.DB.prepare("DELETE FROM permission_group_rules WHERE group_id = 'grp_seed_employees'"),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_refresh_base', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"application","operator":"equals","value":"pangda_app"},{"field":"api","operator":"equals","value":"https://api.pangda.app"}]}',
+         0, unixepoch(), unixepoch()
+       )`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_refresh_read', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+         1, unixepoch(), unixepoch()
+       )`,
+    ),
   ])
 })
 
@@ -152,6 +172,28 @@ describe("refresh token current-policy enforcement", () => {
     expect((await refreshRequest(refresh.token)).status).toBe(200)
   })
 
+  it("denies a current scope rule before rotation and accepts the restored token", async () => {
+    const { refresh } = await seedRefreshFamily()
+    await env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_refresh_deny', 'grp_seed_employees', 'deny',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+         (SELECT MAX(position) + 1 FROM permission_group_rules WHERE group_id = 'grp_seed_employees'),
+         unixepoch(), unixepoch()
+       )`,
+    ).run()
+
+    await expectInvalidGrant(await refreshRequest(refresh.token))
+    await expectGeneration(refresh.familyId, 0)
+
+    await env.DB.prepare(
+      "DELETE FROM permission_group_rules WHERE id = 'prule_test_refresh_deny'",
+    ).run()
+    expect((await refreshRequest(refresh.token)).status).toBe(200)
+  })
+
   it("rejects scopes removed from the client's current policy", async () => {
     const { refresh } = await seedRefreshFamily()
     await env.DB.prepare(
@@ -204,6 +246,19 @@ describe("refresh token current-policy enforcement", () => {
     )
       .bind(RESOURCE_SCOPES, RESOURCE)
       .run()
+    // Retiring a scope deletes its complete rule. Re-adding the catalog entry
+    // alone must not silently reactivate the previous grant.
+    await expectInvalidGrant(await refreshRequest(refresh.token))
+    await env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_refresh_read_restored', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+         (SELECT MAX(position) + 1 FROM permission_group_rules WHERE group_id = 'grp_seed_employees'),
+         unixepoch(), unixepoch()
+       )`,
+    ).run()
     expect((await refreshRequest(refresh.token)).status).toBe(200)
   })
 })

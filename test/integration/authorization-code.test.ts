@@ -24,6 +24,8 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM consents"),
     env.DB.prepare("DELETE FROM refresh_tokens"),
     env.DB.prepare("DELETE FROM authorization_grants"),
+    env.DB.prepare("DELETE FROM oauth_scope_permission_groups"),
+    env.DB.prepare("DELETE FROM oauth_resources WHERE resource_uri = 'urn:test:scope-other'"),
     env.DB.prepare("DELETE FROM user_groups"),
     env.DB.prepare("DELETE FROM users"),
     env.DB.prepare("DELETE FROM groups WHERE id LIKE 'grp_test_%'"),
@@ -36,6 +38,34 @@ beforeEach(async () => {
     .bind(RESOURCE)
     .run()
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM permission_group_rules WHERE group_id = 'grp_seed_employees'"),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_employee_base', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"application","operator":"equals","value":"pangda_app"},{"operator":"or","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"api","operator":"equals","value":"https://app.pangda.app"}]}]}',
+         0, unixepoch(), unixepoch()
+       )`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_employee_read', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+         1, unixepoch(), unixepoch()
+       )`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_employee_write', 'grp_seed_employees', 'allow',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.write"}]}',
+         2, unixepoch(), unixepoch()
+       )`,
+    ),
     env.DB.prepare(
       `INSERT OR IGNORE INTO oauth_client_permission_groups (client_id, group_id, created_at)
        VALUES (?, 'grp_seed_employees', unixepoch())`,
@@ -199,10 +229,8 @@ describe("authorization_code + PKCE flow", () => {
 
   it("denies when no current membership matches the application", async () => {
     await env.DB.prepare(
-      "DELETE FROM oauth_client_permission_groups WHERE client_id = ? AND group_id = 'grp_seed_employees'",
-    )
-      .bind(CLIENT)
-      .run()
+      "DELETE FROM permission_group_rules WHERE id = 'prule_test_employee_base'",
+    ).run()
 
     const res = await authedFetch(authorizeUrl({ state: "policy-state" }))
     const redirect = new URL(res.headers.get("location") ?? "")
@@ -215,10 +243,8 @@ describe("authorization_code + PKCE flow", () => {
 
   it("denies when membership matches the application but not the API", async () => {
     await env.DB.prepare(
-      "DELETE FROM oauth_resource_permission_groups WHERE resource_uri = ? AND group_id = 'grp_seed_employees'",
-    )
-      .bind(RESOURCE)
-      .run()
+      "DELETE FROM permission_group_rules WHERE id = 'prule_test_employee_base'",
+    ).run()
 
     const res = await authedFetch(authorizeUrl())
     expect(new URL(res.headers.get("location") ?? "").searchParams.get("error")).toBe(
@@ -226,7 +252,7 @@ describe("authorization_code + PKCE flow", () => {
     )
   })
 
-  it("allows different memberships to satisfy application and API assignments", async () => {
+  it("does not compose partial legacy targets across different memberships", async () => {
     await env.DB.batch([
       env.DB.prepare(
         "INSERT INTO groups (id, name, description, created_at) VALUES ('grp_test_resource', 'test-resource', NULL, unixepoch())",
@@ -240,8 +266,108 @@ describe("authorization_code + PKCE flow", () => {
       env.DB.prepare(
         "INSERT INTO oauth_resource_permission_groups (resource_uri, group_id, created_at) VALUES (?, 'grp_test_resource', unixepoch())",
       ).bind(RESOURCE),
+      env.DB.prepare("DELETE FROM permission_group_rules WHERE id = 'prule_test_employee_base'"),
     ])
 
+    const denied = await authedFetch(authorizeUrl())
+    expect(new URL(denied.headers.get("location") ?? "").searchParams.get("error")).toBe(
+      "access_denied",
+    )
+  })
+
+  it("requires an allowing membership when a requested scope has allow rules", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO oauth_resources
+           (resource_uri, name, allowed_scopes_json, enabled, created_at, updated_at)
+         VALUES ('urn:test:scope-other', 'Other scope resource', '["api.read"]', 1,
+                 unixepoch(), unixepoch())`,
+      ),
+      env.DB.prepare(
+        "INSERT INTO groups (id, name, description, created_at) VALUES ('grp_test_scope_allow', 'test-scope-allow', NULL, unixepoch())",
+      ),
+      env.DB.prepare(
+        `INSERT INTO permission_group_rules
+           (id, group_id, effect, condition_json, position, created_at, updated_at)
+         VALUES (
+           'prule_test_other_scope', 'grp_test_scope_allow', 'allow',
+           '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"urn:test:scope-other"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+           0, unixepoch(), unixepoch()
+         )`,
+      ),
+    ])
+
+    // The same vocabulary on a different resource must not affect this token audience.
+    expect((await exchange(await obtainCode())).status).toBe(200)
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `DELETE FROM permission_group_rules
+         WHERE group_id = 'grp_seed_employees'
+           AND EXISTS (
+             SELECT 1
+             FROM json_tree(condition_json) AS scope_value
+             JOIN json_tree(condition_json) AS scope_field
+               ON scope_field.parent = scope_value.parent
+             WHERE scope_value.key = 'value'
+               AND scope_value.value = 'api.read'
+               AND scope_field.key = 'field'
+               AND scope_field.value = 'scope'
+           )`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO permission_group_rules
+           (id, group_id, effect, condition_json, position, created_at, updated_at)
+         VALUES (
+           'prule_test_current_scope', 'grp_test_scope_allow', 'allow',
+           '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+           1, unixepoch(), unixepoch()
+         )`,
+      ),
+    ])
+
+    const denied = await authedFetch(authorizeUrl({ state: "scope-allow-state" }))
+    const deniedRedirect = new URL(denied.headers.get("location") ?? "")
+    expect(deniedRedirect.searchParams.get("error")).toBe("access_denied")
+    expect(deniedRedirect.searchParams.get("state")).toBe("scope-allow-state")
+
+    await env.DB.prepare(
+      "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_test_scope_allow', unixepoch())",
+    )
+      .bind(userId)
+      .run()
+    expect((await exchange(await obtainCode())).status).toBe(200)
+  })
+
+  it("applies a scope deny after code creation and lets deny override allow", async () => {
+    const code = await obtainCode()
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO groups (id, name, description, created_at) VALUES ('grp_test_scope_deny', 'test-scope-deny', NULL, unixepoch())",
+      ),
+      env.DB.prepare(
+        `INSERT INTO permission_group_rules
+           (id, group_id, effect, condition_json, position, created_at, updated_at)
+         VALUES (
+           'prule_test_scope_deny', 'grp_test_scope_deny', 'deny',
+           '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"https://api.pangda.app"},{"field":"scope","operator":"equals","value":"api.read"}]}',
+           0, unixepoch(), unixepoch()
+         )`,
+      ),
+      env.DB.prepare(
+        "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, 'grp_test_scope_deny', unixepoch())",
+      ).bind(userId),
+    ])
+
+    const denied = await exchange(code)
+    expect(denied.status).toBe(400)
+    expect(await denied.json()).toMatchObject({ error: "invalid_grant" })
+
+    await env.DB.prepare(
+      "DELETE FROM user_groups WHERE user_id = ? AND group_id = 'grp_test_scope_deny'",
+    )
+      .bind(userId)
+      .run()
     expect((await exchange(await obtainCode())).status).toBe(200)
   })
 
@@ -383,7 +509,7 @@ describe("authorization_code + PKCE flow", () => {
       .run()
     const res = await exchange(code)
     expect(res.status).toBe(400)
-    expect((await res.json<{ error: string }>()).error).toBe("invalid_scope")
+    expect((await res.json<{ error: string }>()).error).toBe("invalid_grant")
   })
 
   it("redirects unauthenticated authorize requests to login", async () => {

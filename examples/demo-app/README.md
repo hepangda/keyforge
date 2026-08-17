@@ -37,17 +37,19 @@ pnpm selftest
 
 This single command:
 
-1. applies the local D1 migrations and registers the `demo_local` client;
-2. starts the auth server (`wrangler dev` on `:17001`, with `ISSUER` overridden to
-   `http://localhost:17001` so discovery/JWKS/tokens all point at localhost);
-3. starts this demo app on `:8788`;
+1. creates an isolated temporary D1 state, applies every migration, and
+   registers the `demo_local` client without changing your normal local data;
+2. allocates two free loopback ports and starts the auth server with its
+   `ISSUER` overridden to the selected local URL;
+3. starts this demo app on the other selected port;
 4. drives the **entire** flow over HTTP — `/login` → authorize → sign in as the
    local demo-only **`demo-admin` / `demo-admin-2026`** account → approve consent → callback with the code →
    token exchange → **id_token verified against the JWKS** — and asserts the user
    is authenticated;
 5. tears both servers down.
 
-Expect `✅ SELF-TEST PASSED`. Ports `17001` and `8788` must be free.
+Expect `✅ SELF-TEST PASSED`. Both servers and the temporary state are removed
+after the run, so an existing local KeyForge process can remain online.
 
 ## Try it in a browser
 
@@ -67,8 +69,8 @@ cd examples/demo-app && pnpm install && pnpm start
 ```
 
 Open <http://localhost:8788>, click **Sign in with KeyForge**, log in with
-`demo-admin` / `admin`, approve consent, and you'll land back on the demo showing your
-verified `id_token` claims.
+`demo-admin` / `demo-admin-2026`, approve consent, and you'll land back on the
+demo showing your verified `id_token` claims.
 
 ## Configuration
 

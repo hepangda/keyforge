@@ -3,7 +3,9 @@
 KeyForge is a single-tenant OpenID Connect and OAuth 2.1 authorization server
 for Cloudflare Workers. It provides browser SSO, CLI device authorization,
 machine-to-machine credentials, account recovery, passwords, passkeys, and
-an administrator console/API.
+an administrator console/API. It can also authorize independently deployed
+MCP servers, including resource-specific scopes, Client ID Metadata Documents,
+audience-bound tokens, and live policy validation through introspection.
 
 The browser UI and transactional emails support English, Simplified Chinese,
 and Japanese. A saved language choice takes precedence; without one, KeyForge
@@ -33,6 +35,9 @@ The Worker publishes standard discovery metadata at
 refresh token rotation, device code, and client credentials grants. Interactive
 authorization supports OIDC `prompt=none|login|consent` and `max_age`; relying
 parties can discover `/oauth/end_session` for validated RP-Initiated Logout.
+OAuth Authorization Server metadata is also available at
+`/.well-known/oauth-authorization-server`. MCP protected resources publish
+their own RFC 9728 metadata and use KeyForge as their authorization server.
 
 ## Local development
 
@@ -135,6 +140,7 @@ one-time `/setup/bootstrap` flow described in the operations runbook.
 | Path | Purpose |
 | --- | --- |
 | `src/oauth`, `src/oidc`, `src/tokens` | OAuth/OIDC protocol and token handling |
+| `src/mcp` | Reusable MCP protected-resource metadata and introspection adapter |
 | `src/auth`, `src/routes` | Authentication and HTTP routes |
 | `src/i18n` | Locale negotiation and English/Chinese/Japanese message catalog |
 | `src/media` | Avatar validation and R2-backed storage |
@@ -143,11 +149,13 @@ one-time `/setup/bootstrap` flow described in the operations runbook.
 | `migrations` | Ordered D1 schema and seed catalog |
 | `test` | Workerd-backed unit and integration tests |
 | `examples/demo-app` | Local OIDC relying-party self-test |
+| `examples/mcp-server` | Standalone protected MCP Worker example |
 
 ## Documentation
 
 - [Operations, release, backup, and recovery](docs/operations.md)
 - [Administrator API](docs/admin-api.md)
+- [MCP authorization and integration](docs/mcp.md)
 - [Avatars](docs/avatars.md)
 - [Local demo relying party](examples/demo-app/README.md)
 

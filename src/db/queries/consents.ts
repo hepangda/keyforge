@@ -5,6 +5,7 @@ import { nowSeconds } from "../../utils/time"
 export type ConsentRecord = {
   readonly scope: string
   readonly resource: string | null
+  readonly metadataFingerprint: string | null
 }
 
 export async function getConsent(
@@ -16,20 +17,30 @@ export async function getConsent(
   const statement =
     resource === undefined
       ? env.DB.prepare(
-          "SELECT scope, resource FROM consents WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC LIMIT 1",
+          "SELECT scope, resource, metadata_fingerprint FROM consents WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC LIMIT 1",
         ).bind(userId, clientId)
       : env.DB.prepare(
-          "SELECT scope, resource FROM consents WHERE user_id = ? AND client_id = ? AND resource = ?",
+          "SELECT scope, resource, metadata_fingerprint FROM consents WHERE user_id = ? AND client_id = ? AND resource = ?",
         ).bind(userId, clientId, resource ?? "")
   const row = await statement.first()
   if (row === null) {
     return null
   }
-  const parsed = z.object({ scope: z.string(), resource: z.string().nullable() }).safeParse(row)
+  const parsed = z
+    .object({
+      scope: z.string(),
+      resource: z.string().nullable(),
+      metadata_fingerprint: z.string().nullable(),
+    })
+    .safeParse(row)
   if (!parsed.success) {
     return null
   }
-  return { scope: parsed.data.scope, resource: parsed.data.resource || null }
+  return {
+    scope: parsed.data.scope,
+    resource: parsed.data.resource || null,
+    metadataFingerprint: parsed.data.metadata_fingerprint,
+  }
 }
 
 export type SaveConsentInput = {
@@ -37,31 +48,37 @@ export type SaveConsentInput = {
   readonly clientId: string
   readonly scope: string
   readonly resource: string | null
+  readonly metadataFingerprint?: string | null
 }
 
 export async function saveConsent(env: Env, input: SaveConsentInput): Promise<void> {
   const now = nowSeconds()
   await env.DB.prepare(
-    `INSERT INTO consents (id, user_id, client_id, scope, resource, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO consents
+       (id, user_id, client_id, scope, resource, metadata_fingerprint, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, client_id, resource)
        DO UPDATE SET
-         scope = (
-           SELECT group_concat(value, ' ')
-           FROM (
-             SELECT value, MIN(source) AS source, MIN(position) AS position
-             FROM (
-               SELECT value, 0 AS source, key AS position
-               FROM json_each('["' || replace(consents.scope, ' ', '","') || '"]')
-               UNION ALL
-               SELECT value, 1 AS source, key AS position
-               FROM json_each('["' || replace(excluded.scope, ' ', '","') || '"]')
-             )
-             GROUP BY value
-             ORDER BY source, position
-           )
-         ),
-         updated_at = excluded.updated_at`,
+        scope = CASE
+          WHEN consents.metadata_fingerprint IS excluded.metadata_fingerprint THEN (
+            SELECT group_concat(value, ' ')
+            FROM (
+              SELECT value, MIN(source) AS source, MIN(position) AS position
+              FROM (
+                SELECT value, 0 AS source, key AS position
+                FROM json_each('["' || replace(consents.scope, ' ', '","') || '"]')
+                UNION ALL
+                SELECT value, 1 AS source, key AS position
+                FROM json_each('["' || replace(excluded.scope, ' ', '","') || '"]')
+              )
+              GROUP BY value
+              ORDER BY source, position
+            )
+          )
+          ELSE excluded.scope
+        END,
+        metadata_fingerprint = excluded.metadata_fingerprint,
+        updated_at = excluded.updated_at`,
   )
     .bind(
       generateId(ID_PREFIX.consent),
@@ -69,6 +86,7 @@ export async function saveConsent(env: Env, input: SaveConsentInput): Promise<vo
       input.clientId,
       input.scope,
       input.resource ?? "",
+      input.metadataFingerprint ?? null,
       now,
       now,
     )

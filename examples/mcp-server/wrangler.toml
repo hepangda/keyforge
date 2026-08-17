@@ -1,0 +1,16 @@
+# Standalone protected MCP Worker using KeyForge for authorization.
+name = "keyforge-mcp-example"
+main = "src/index.ts"
+compatibility_date = "2026-08-11"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+KEYFORGE_ISSUER = "http://localhost:17001"
+MCP_RESOURCE = "http://localhost:17002/mcp"
+MCP_INTROSPECTION_CLIENT_ID = "mcp_example_resource_server"
+
+[dev]
+port = 17002
+
+# Set MCP_INTROSPECTION_CLIENT_SECRET with:
+# pnpm exec wrangler secret put MCP_INTROSPECTION_CLIENT_SECRET --config examples/mcp-server/wrangler.toml

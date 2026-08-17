@@ -3,6 +3,7 @@ import { getSessionById } from "../auth/session"
 import { getClientById } from "../db/queries/clients"
 import { getRefreshTokenByHash } from "../db/queries/tokens"
 import { getUserById } from "../db/queries/users"
+import { recordAudit } from "../security/audit"
 import { verifyAccessToken } from "../tokens/jwt"
 import { hashOpaqueToken } from "../tokens/token-hash"
 import type { AppBindings } from "../types/app"
@@ -15,6 +16,33 @@ import { evaluateUserTokenAccess } from "./user-token-policy"
 
 const INACTIVE = { active: false } as const
 
+async function introspectionResponse(
+  c: Context<AppBindings>,
+  introspector: OAuthClient,
+  result: Readonly<Record<string, unknown>>,
+  status: 200 | 400 = 200,
+  target: { readonly clientId?: string; readonly resourceUri?: string } = {},
+): Promise<Response> {
+  const active = result["active"] === true
+  const clientId = typeof result["client_id"] === "string" ? result["client_id"] : target.clientId
+  const resourceUri = typeof result["aud"] === "string" ? result["aud"] : target.resourceUri
+  await recordAudit(c.env, {
+    type: "oauth.introspection.completed",
+    actorClientId: introspector.clientId,
+    clientId: clientId ?? null,
+    resourceUri: resourceUri ?? null,
+    requestId: c.get("requestId"),
+    success: active,
+    detail: active
+      ? "token active"
+      : status === 400
+        ? "invalid introspection request"
+        : "token inactive",
+    metadata: { active },
+  })
+  return c.json(result, status, { "cache-control": "no-store" })
+}
+
 export async function handleIntrospect(
   c: Context<AppBindings>,
   form: URLSearchParams,
@@ -22,27 +50,36 @@ export async function handleIntrospect(
 ): Promise<Response> {
   const token = form.get("token")
   if (token === null) {
-    return c.json({ error: "invalid_request", error_description: "Missing token" }, 400)
+    return introspectionResponse(
+      c,
+      introspector,
+      { error: "invalid_request", error_description: "Missing token" },
+      400,
+    )
   }
 
   const jwtResult = await introspectAccessToken(c, token, introspector)
   if (jwtResult !== null) {
-    return c.json(jwtResult, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, jwtResult)
   }
 
   const record = await getRefreshTokenByHash(c.env, await hashOpaqueToken(token))
-  if (record === null || record.revokedAt !== null || isExpired(record.expiresAt)) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+  if (record === null) {
+    return introspectionResponse(c, introspector, INACTIVE)
+  }
+  const target = { clientId: record.clientId, resourceUri: record.resource }
+  if (record.revokedAt !== null || isExpired(record.expiresAt)) {
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   const familyState = await c.env.REFRESH_TOKEN_FAMILY.getByName(record.familyId).getState()
   if (familyState === null || familyState.revoked) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   if (!mayInspectClientTokens(introspector, record.clientId)) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   if (!introspector.allowedResources.includes(record.resource)) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   const [tokenClient, user] = await Promise.all([
     getClientById(c.env, record.clientId),
@@ -50,10 +87,10 @@ export async function handleIntrospect(
   ])
   const scopes = parseScopeString(record.scope)
   if (scopes.includes("groups")) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   if (tokenClient === null || !tokenClient.enabled || user === null || user.disabled) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   const access = await evaluateUserTokenAccess(c.env, {
     userId: user.id,
@@ -62,35 +99,40 @@ export async function handleIntrospect(
     scopes,
   })
   if (!access.allowed) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
-  if (!(await consentCoversScopes(c.env, user.id, tokenClient.clientId, record.resource, scopes))) {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+  if (
+    !(await consentCoversScopes(
+      c.env,
+      user.id,
+      tokenClient.clientId,
+      record.resource,
+      scopes,
+      tokenClient.metadataFingerprint,
+    ))
+  ) {
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
   if (record.sessionId !== null) {
     const sourceSession = await getSessionById(c.env, record.sessionId)
     if (sourceSession === null || sourceSession.userId !== user.id) {
-      return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+      return introspectionResponse(c, introspector, INACTIVE, 200, target)
     }
   }
   try {
     await resolveResourceForScopes(c.env, tokenClient, record.resource, scopes)
   } catch {
-    return c.json(INACTIVE, 200, { "cache-control": "no-store" })
+    return introspectionResponse(c, introspector, INACTIVE, 200, target)
   }
-  return c.json(
-    {
-      active: true,
-      sub: record.userId,
-      client_id: record.clientId,
-      scope: record.scope,
-      aud: record.resource,
-      exp: record.expiresAt,
-      token_type: "refresh_token",
-    },
-    200,
-    { "cache-control": "no-store" },
-  )
+  return introspectionResponse(c, introspector, {
+    active: true,
+    sub: record.userId,
+    client_id: record.clientId,
+    scope: record.scope,
+    aud: record.resource,
+    exp: record.expiresAt,
+    token_type: "refresh_token",
+  })
 }
 
 async function introspectAccessToken(
@@ -135,7 +177,16 @@ async function introspectAccessToken(
         scopes,
       })
       if (!access.allowed) return null
-      if (!(await consentCoversScopes(c.env, user.id, tokenClient.clientId, payload.aud, scopes))) {
+      if (
+        !(await consentCoversScopes(
+          c.env,
+          user.id,
+          tokenClient.clientId,
+          payload.aud,
+          scopes,
+          tokenClient.metadataFingerprint,
+        ))
+      ) {
         return null
       }
     }

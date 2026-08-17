@@ -6,11 +6,14 @@
 
 /** Data bound to a single-use authorization code (Phase 7). */
 export type AuthorizationCodePayload = {
+  readonly issuer: string
   readonly clientId: string
   readonly userId: string
   readonly redirectUri: string
   readonly scope: string
   readonly resource: string
+  readonly resourceRequired: boolean
+  readonly metadataFingerprint: string | null
   readonly codeChallenge: string
   readonly codeChallengeMethod: "S256"
   readonly nonce: string | null

@@ -10,6 +10,7 @@ export const ID_PREFIX = {
   password: "pwd",
   session: "sess",
   group: "grp",
+  permissionRule: "prule",
   consent: "cnst",
   accessToken: "atk",
   refreshTokenFamily: "rtf",

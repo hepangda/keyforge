@@ -437,6 +437,17 @@ export const FORMS_BROWSER_SCRIPT = `
   document.querySelectorAll("[data-draft-clear]").forEach(function(marker){if(storage)try{storage.removeItem(marker.dataset.draftClear)}catch(error){}});
   document.querySelectorAll("[data-draft-form]").forEach(function(container){var form=container.matches("form")?container:container.querySelector("form");var key=container.dataset.draftKey;if(!form||!key||!storage)return;if(new URLSearchParams(window.location.search).get("draft")==="1")try{var saved=JSON.parse(storage.getItem(key)||"null");if(saved)restore(form,saved)}catch(error){};var save=function(){try{storage.setItem(key,JSON.stringify(serialize(form)))}catch(error){}};form.addEventListener("input",save);form.addEventListener("change",save);var passwordMode=form.querySelector('[name="setup_mode"][value="password"]:checked');var note=form.querySelector("[data-password-draft-note]");if(passwordMode&&note)note.hidden=false;container.querySelectorAll("a[href]").forEach(function(link){link.dataset.draftCancel=key})});
   document.querySelectorAll("[data-draft-cancel]").forEach(function(link){link.addEventListener("click",function(){if(storage)try{storage.removeItem(link.dataset.draftCancel)}catch(error){}})});
+  document.querySelectorAll("[data-group-request-form]").forEach(function(form){
+    var input=form.querySelector("[data-group-request-input]");
+    var suggestions=Array.from(form.querySelectorAll("[data-group-request-suggestion]"));
+    var empty=form.querySelector("[data-group-request-empty]");
+    var count=form.querySelector("[data-group-request-count]");
+    if(!input)return;
+    var normalize=function(value){try{return (value||"").normalize("NFKD").toLowerCase()}catch(error){return (value||"").toLowerCase()}};
+    var render=function(){var term=normalize(input.value.trim());var shown=0;suggestions.forEach(function(suggestion){var groupName=suggestion.dataset.groupName||"";var match=!term||normalize(suggestion.dataset.search||groupName).includes(term);suggestion.hidden=!match;if(match)shown+=1;suggestion.setAttribute("aria-pressed",input.value===groupName?"true":"false")});if(empty)empty.hidden=shown!==0;if(count)count.textContent=String(shown)};
+    suggestions.forEach(function(suggestion){suggestion.addEventListener("click",function(){input.value=suggestion.dataset.groupName||"";input.dispatchEvent(new Event("input",{bubbles:true}));input.dispatchEvent(new Event("change",{bubbles:true}));input.focus()})});
+    input.addEventListener("input",render);render();
+  });
   document.querySelectorAll("[data-search-picker]").forEach(function(root){
     var select=root.querySelector("[data-search-picker-select],select.search-picker__native");
     var query=root.querySelector("[data-search-picker-query]");
@@ -603,5 +614,174 @@ export const CONSOLE_BROWSER_SCRIPT = `
     var selectedKind=form.querySelector('[name="client_kind"]:checked');
     syncKindRequirements(selectedKind?selectedKind.value:"application");syncResourceRequirement();
     form.dataset.wizardReady="1";show(initial);updateReview();var summary=form.querySelector("[data-error-summary]");if(summary)summary.focus();
+  });
+  document.querySelectorAll("[data-permission-rule-editor]").forEach(function(root){
+    var list=root.querySelector("[data-permission-rule-list]");
+    var area=root.querySelector("[data-permission-rule-json]");
+    var addRule=root.querySelector("[data-permission-rule-add]");
+    var applyJson=root.querySelector("[data-permission-rule-apply-json]");
+    if(!list||!area||!addRule||!applyJson)return;
+    var catalog;try{catalog=JSON.parse(root.dataset.catalog||"{}")}catch(error){return}
+    var rules;try{rules=JSON.parse(area.value||"[]")}catch(error){return}
+    if(!Array.isArray(rules))return;
+    var label=function(name,fallback){return root.dataset[name]||fallback};
+    var firstField=function(){return ["application","api","scope"].find(function(field){return Array.isArray(catalog[field])&&catalog[field].length})||"application"};
+    var firstValue=function(field){var items=Array.isArray(catalog[field])?catalog[field]:[];return items[0]?items[0].value:""};
+    var freshLeaf=function(){var field=firstField();return {field:field,operator:"equals",value:firstValue(field)}};
+    var freshGroup=function(operator){return {operator:operator,conditions:[freshLeaf()]}};
+    var operatorItems=[{value:"equals",label:"="},{value:"not_equals",label:"!="},{value:"in",label:"IN"},{value:"not_in",label:"NOT IN"}];
+    var isSetOperator=function(operator){return operator==="in"||operator==="not_in"};
+    var button=function(text,className){var item=document.createElement("button");item.type="button";item.className=className||"btn btn--ghost btn--tiny btn--auto";item.textContent=text;return item};
+    var select=function(items,value){var field=document.createElement("select");field.className="input input--compact";items.forEach(function(item){var option=document.createElement("option");option.value=item.value;option.textContent=item.label;option.selected=item.value===value;field.appendChild(option)});return field};
+    var normalize=function(value){try{return (value||"").normalize("NFKD").toLowerCase()}catch(error){return (value||"").toLowerCase()}};
+    var comboSequence=0;
+    var searchableValue=function(items,value,field,onSelect){
+      comboSequence+=1;
+      var combo=document.createElement("div");combo.className="permission-rule-combobox";combo.dataset.permissionRuleCombobox="";
+      var input=document.createElement("input");input.type="search";input.className="input";input.autocomplete="off";input.spellcheck=false;input.setAttribute("role","combobox");input.setAttribute("aria-autocomplete","list");input.setAttribute("aria-expanded","false");
+      var listbox=document.createElement("div");listbox.className="permission-rule-combobox__menu";listbox.id="permission-rule-options-"+String(comboSequence);listbox.setAttribute("role","listbox");listbox.hidden=true;input.setAttribute("aria-controls",listbox.id);
+      var placeholder=field==="application"?label("searchApplicationLabel","Search applications by name or client ID"):field==="api"?label("searchApiLabel","Search APIs by name or resource URI"):label("searchScopeLabel","Search scopes");
+      input.placeholder=placeholder;input.setAttribute("aria-label",placeholder);
+      var selected=items.find(function(item){return item.value===value})||null;var dirty=false;
+      var itemText=function(item){return item.detail?item.label+" — "+item.detail:item.label===item.value?item.value:item.label+" — "+item.value};
+      var restore=function(){input.value=selected?itemText(selected):value||"";dirty=false};restore();
+      var shown=[];var active=-1;
+      var setActive=function(index){
+        var options=Array.from(listbox.querySelectorAll("[data-permission-rule-combobox-option]"));
+        active=shown.length?Math.max(0,Math.min(index,shown.length-1)):-1;
+        options.forEach(function(option,optionIndex){var current=optionIndex===active;option.classList.toggle("is-active",current);option.setAttribute("aria-selected",current?"true":"false")});
+        var activeOption=options[active];if(activeOption){input.setAttribute("aria-activedescendant",activeOption.id);var optionTop=activeOption.offsetTop;var optionBottom=optionTop+activeOption.offsetHeight;var viewportTop=listbox.scrollTop;var viewportBottom=viewportTop+listbox.clientHeight;if(optionTop<viewportTop)listbox.scrollTop=optionTop;else if(optionBottom>viewportBottom)listbox.scrollTop=Math.max(0,optionBottom-listbox.clientHeight)}else input.removeAttribute("aria-activedescendant");
+      };
+      var choose=function(item){selected=item;input.value=itemText(item);dirty=false;onSelect(item.value);close(false)};
+      var renderResults=function(term){
+        while(listbox.firstChild)listbox.removeChild(listbox.firstChild);
+        var query=normalize(term.trim());var matches=items.filter(function(item){return !query||normalize(item.label+" "+item.value+" "+(item.detail||"")).includes(query)});shown=matches.slice(0,40);active=-1;
+        var count=document.createElement("div");count.className="permission-rule-combobox__count";count.setAttribute("role","status");count.setAttribute("aria-live","polite");count.textContent=(matches.length>40?label("limitedMatchesLabel","Showing first {shown} of {count} matches"):label("matchesLabel","{count} matches")).replace("{shown}",String(shown.length)).replace("{count}",String(matches.length));listbox.appendChild(count);
+        shown.forEach(function(item,index){
+          var option=document.createElement("button");option.type="button";option.className="permission-rule-combobox__option";option.id=listbox.id+"-"+String(index);option.dataset.permissionRuleComboboxOption="";option.setAttribute("role","option");option.setAttribute("aria-selected","false");
+          var title=document.createElement("strong");title.textContent=item.label;option.appendChild(title);
+          if(item.detail){var detail=document.createElement("small");detail.textContent=item.detail;option.appendChild(detail)}
+          if(item.label!==item.value){var meta=document.createElement("small");meta.className="mono";meta.textContent=item.value;option.appendChild(meta)}
+          option.addEventListener("mouseenter",function(){setActive(index)});option.addEventListener("mousedown",function(event){event.preventDefault()});option.addEventListener("click",function(){choose(item)});listbox.appendChild(option);
+        });
+        if(!shown.length){var empty=document.createElement("p");empty.className="permission-rule-combobox__empty";empty.textContent=label("noMatchesLabel","No matches found.");listbox.appendChild(empty)}
+      };
+      var open=function(term){combo.dataset.open="";listbox.hidden=false;input.setAttribute("aria-expanded","true");renderResults(term)};
+      var close=function(shouldRestore){delete combo.dataset.open;listbox.hidden=true;input.setAttribute("aria-expanded","false");input.removeAttribute("aria-activedescendant");active=-1;if(shouldRestore)restore()};
+      input.addEventListener("focus",function(){input.select();open("")});
+      input.addEventListener("click",function(){if(!combo.hasAttribute("data-open")){input.select();open("")}});
+      input.addEventListener("input",function(){dirty=true;open(input.value)});
+      input.addEventListener("keydown",function(event){
+        if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();if(!combo.hasAttribute("data-open"))open("");setActive(active<0?(event.key==="ArrowDown"?0:shown.length-1):active+(event.key==="ArrowDown"?1:-1));return}
+        if(event.key==="Enter"&&combo.hasAttribute("data-open")){event.preventDefault();var item=shown[active>=0?active:dirty?0:-1];if(item)choose(item);else close(true);return}
+        if(event.key==="Escape"&&combo.hasAttribute("data-open")){event.preventDefault();close(true);input.select()}
+      });
+      combo.addEventListener("focusout",function(){setTimeout(function(){if(!combo.contains(document.activeElement))close(true)},0)});
+      if(!items.length){input.disabled=true;input.value=""}
+      combo.appendChild(input);combo.appendChild(listbox);return combo;
+    };
+    var searchableValues=function(items,values,field,onSelect){
+      comboSequence+=1;
+      var selected=Array.from(new Set(Array.isArray(values)?values:[]));
+      var combo=document.createElement("div");combo.className="permission-rule-combobox permission-rule-multiselect";combo.dataset.permissionRuleCombobox="";combo.dataset.permissionRuleMultiselect="";
+      var control=document.createElement("div");control.className="input permission-rule-multiselect__control";
+      var chips=document.createElement("div");chips.className="permission-rule-multiselect__chips";control.appendChild(chips);
+      var input=document.createElement("input");input.type="search";input.className="permission-rule-multiselect__search";input.autocomplete="off";input.spellcheck=false;input.setAttribute("role","combobox");input.setAttribute("aria-autocomplete","list");input.setAttribute("aria-expanded","false");
+      var listbox=document.createElement("div");listbox.className="permission-rule-combobox__menu";listbox.id="permission-rule-options-"+String(comboSequence);listbox.setAttribute("role","listbox");listbox.setAttribute("aria-multiselectable","true");listbox.hidden=true;input.setAttribute("aria-controls",listbox.id);
+      var placeholder=field==="application"?label("searchApplicationLabel","Search applications by name or client ID"):field==="api"?label("searchApiLabel","Search APIs by name or resource URI"):label("searchScopeLabel","Search scopes");
+      input.placeholder=placeholder;input.setAttribute("aria-label",placeholder);
+      var itemText=function(item){return item.detail?item.label+" — "+item.detail:item.label===item.value?item.value:item.label+" — "+item.value};
+      var shown=[];var active=-1;
+      var emit=function(){onSelect(selected.slice())};
+      var renderChips=function(){
+        while(chips.firstChild)chips.removeChild(chips.firstChild);
+        selected.forEach(function(value){
+          var item=items.find(function(candidate){return candidate.value===value})||{value:value,label:value+" (unavailable)"};
+          var chip=button(itemText(item),"permission-rule-multiselect__chip");chip.setAttribute("aria-label",label("removeLabel","Remove")+" "+itemText(item));chip.disabled=selected.length===1;
+          var mark=document.createElement("span");mark.setAttribute("aria-hidden","true");mark.textContent="×";chip.appendChild(mark);
+          chip.addEventListener("click",function(){if(selected.length===1)return;selected=selected.filter(function(current){return current!==value});renderChips();emit();if(document.activeElement===input)open(input.value)});chips.appendChild(chip);
+        });
+      };
+      var setActive=function(index){
+        var options=Array.from(listbox.querySelectorAll("[data-permission-rule-combobox-option]"));active=shown.length?Math.max(0,Math.min(index,shown.length-1)):-1;
+        options.forEach(function(option,optionIndex){var current=optionIndex===active;option.classList.toggle("is-active",current);option.setAttribute("aria-selected",current?"true":"false")});
+        var activeOption=options[active];if(activeOption){input.setAttribute("aria-activedescendant",activeOption.id);var optionTop=activeOption.offsetTop;var optionBottom=optionTop+activeOption.offsetHeight;var viewportTop=listbox.scrollTop;var viewportBottom=viewportTop+listbox.clientHeight;if(optionTop<viewportTop)listbox.scrollTop=optionTop;else if(optionBottom>viewportBottom)listbox.scrollTop=Math.max(0,optionBottom-listbox.clientHeight)}else input.removeAttribute("aria-activedescendant");
+      };
+      var choose=function(item){if(selected.indexOf(item.value)<0&&selected.length<64){selected.push(item.value);renderChips();emit()}input.value="";open("");input.focus()};
+      var renderResults=function(term){
+        while(listbox.firstChild)listbox.removeChild(listbox.firstChild);
+        var query=normalize(term.trim());var matches=items.filter(function(item){return selected.indexOf(item.value)<0&&(!query||normalize(item.label+" "+item.value+" "+(item.detail||"")).includes(query))});shown=matches.slice(0,40);active=-1;
+        var count=document.createElement("div");count.className="permission-rule-combobox__count";count.setAttribute("role","status");count.setAttribute("aria-live","polite");count.textContent=(matches.length>40?label("limitedMatchesLabel","Showing first {shown} of {count} matches"):label("matchesLabel","{count} matches")).replace("{shown}",String(shown.length)).replace("{count}",String(matches.length));listbox.appendChild(count);
+        shown.forEach(function(item,index){var option=document.createElement("button");option.type="button";option.className="permission-rule-combobox__option";option.id=listbox.id+"-"+String(index);option.dataset.permissionRuleComboboxOption="";option.setAttribute("role","option");option.setAttribute("aria-selected","false");var title=document.createElement("strong");title.textContent=item.label;option.appendChild(title);if(item.detail){var detail=document.createElement("small");detail.textContent=item.detail;option.appendChild(detail)}if(item.label!==item.value){var meta=document.createElement("small");meta.className="mono";meta.textContent=item.value;option.appendChild(meta)}option.addEventListener("mouseenter",function(){setActive(index)});option.addEventListener("mousedown",function(event){event.preventDefault()});option.addEventListener("click",function(){choose(item)});listbox.appendChild(option)});
+        if(!shown.length){var empty=document.createElement("p");empty.className="permission-rule-combobox__empty";empty.textContent=label("noMatchesLabel","No matches found.");listbox.appendChild(empty)}
+      };
+      var open=function(term){combo.dataset.open="";listbox.hidden=false;input.setAttribute("aria-expanded","true");renderResults(term)};
+      var close=function(){delete combo.dataset.open;listbox.hidden=true;input.setAttribute("aria-expanded","false");input.removeAttribute("aria-activedescendant");active=-1};
+      input.addEventListener("focus",function(){open(input.value)});input.addEventListener("click",function(){if(!combo.hasAttribute("data-open"))open(input.value)});input.addEventListener("input",function(){open(input.value)});
+      input.addEventListener("keydown",function(event){if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();if(!combo.hasAttribute("data-open"))open(input.value);setActive(active<0?(event.key==="ArrowDown"?0:shown.length-1):active+(event.key==="ArrowDown"?1:-1));return}if(event.key==="Enter"&&combo.hasAttribute("data-open")){event.preventDefault();var item=shown[active>=0?active:0];if(item)choose(item);return}if(event.key==="Escape"&&combo.hasAttribute("data-open")){event.preventDefault();close();input.select();return}if(event.key==="Backspace"&&!input.value&&selected.length>1){selected.pop();renderChips();emit()}});
+      combo.addEventListener("focusout",function(){setTimeout(function(){if(!combo.contains(document.activeElement))close()},0)});
+      if(!items.length){input.disabled=true}renderChips();control.appendChild(input);combo.appendChild(control);combo.appendChild(listbox);return combo;
+    };
+    var sync=function(){area.value=JSON.stringify(rules,null,2);area.setCustomValidity("");area.dispatchEvent(new Event("input",{bubbles:true}))};
+    var render=function(){
+      while(list.firstChild)list.removeChild(list.firstChild);
+      var renderCondition=function(condition,replace,remove){
+        var node=document.createElement("div");
+        var isLeaf=condition&&typeof condition==="object"&&typeof condition.field==="string";
+        node.className="permission-rule-node permission-rule-node--"+(isLeaf?"leaf":"group");
+        var kind=isLeaf?"condition":condition&&condition.operator==="or"?"or":"and";
+        var kindSelect=select([{value:"condition",label:label("conditionLabel","Condition")},{value:"and",label:"AND"},{value:"or",label:"OR"}],kind);
+        kindSelect.classList.add("permission-rule-node__kind");
+        kindSelect.setAttribute("aria-label",label("conditionLabel","Condition"));
+        kindSelect.addEventListener("change",function(){replace(kindSelect.value==="condition"?freshLeaf():freshGroup(kindSelect.value));sync();render()});
+        node.appendChild(kindSelect);
+        if(isLeaf){
+          var fieldSelect=select([{value:"application",label:"application"},{value:"api",label:"api"},{value:"scope",label:"scope"}],condition.field);
+          fieldSelect.classList.add("permission-rule-node__field");node.appendChild(fieldSelect);
+          if(!operatorItems.some(function(item){return item.value===condition.operator}))condition.operator="equals";
+          var operatorSelect=select(operatorItems,condition.operator);operatorSelect.classList.add("permission-rule-node__operator");operatorSelect.setAttribute("aria-label","Operator");
+          node.appendChild(operatorSelect);
+          var valueSlot=document.createElement("div");valueSlot.className="permission-rule-node__value";node.appendChild(valueSlot);
+          var renderLeafValue=function(){
+            while(valueSlot.firstChild)valueSlot.removeChild(valueSlot.firstChild);
+            var values=Array.isArray(catalog[condition.field])?catalog[condition.field].slice():[];
+            if(isSetOperator(condition.operator)){
+              var selectedValues=Array.isArray(condition.values)?condition.values.slice():[];
+              selectedValues.slice().reverse().forEach(function(value){if(!values.some(function(item){return item.value===value})&&value)values.unshift({value:value,label:value+" (unavailable)"})});
+              valueSlot.appendChild(searchableValues(values,selectedValues,condition.field,function(next){condition.values=next;sync()}));
+            }else{
+              var selectedValue=typeof condition.value==="string"?condition.value:firstValue(condition.field);condition.value=selectedValue;
+              if(!values.some(function(item){return item.value===selectedValue})&&selectedValue){values.unshift({value:selectedValue,label:selectedValue+" (unavailable)"})}
+              valueSlot.appendChild(searchableValue(values,selectedValue,condition.field,function(next){condition.value=next;sync()}));
+            }
+          };
+          fieldSelect.addEventListener("change",function(){condition.field=fieldSelect.value;var initial=firstValue(condition.field);if(isSetOperator(condition.operator)){condition.values=initial?[initial]:[];delete condition.value}else{condition.value=initial;delete condition.values}sync();renderLeafValue()});
+          operatorSelect.addEventListener("change",function(){var next=operatorSelect.value;if(isSetOperator(next)){var selectedValues=Array.isArray(condition.values)?condition.values.slice():condition.value?[condition.value]:[];condition.operator=next;condition.values=Array.from(new Set(selectedValues));delete condition.value}else{var selectedValue=typeof condition.value==="string"?condition.value:Array.isArray(condition.values)&&condition.values.length?condition.values[0]:firstValue(condition.field);condition.operator=next;condition.value=selectedValue;delete condition.values}sync();renderLeafValue()});
+          renderLeafValue();
+        }else{
+          var children=document.createElement("div");children.className="permission-rule-node__children";
+          var conditionList=Array.isArray(condition.conditions)?condition.conditions:[];
+          condition.conditions=conditionList;
+          conditionList.forEach(function(child,index){children.appendChild(renderCondition(child,function(next){conditionList[index]=next},conditionList.length>1?function(){conditionList.splice(index,1);sync();render()}:null))});
+          var add=button(label("addConditionLabel","Add condition"));add.addEventListener("click",function(){conditionList.push(freshLeaf());sync();render()});children.appendChild(add);node.appendChild(children);
+        }
+        if(remove){var removeButton=button(label("removeLabel","Remove"));removeButton.classList.add("permission-rule-node__remove");removeButton.addEventListener("click",function(){remove();sync();render()});node.appendChild(removeButton)}
+        return node;
+      };
+      rules.forEach(function(rule,index){
+        var card=document.createElement("section");card.className="permission-rule-card";
+        var head=document.createElement("div");head.className="permission-rule-card__head";
+        var title=document.createElement("strong");title.textContent=label("ruleLabel","Rule")+" "+String(index+1);head.appendChild(title);
+        var effect=select([{value:"allow",label:"allow"},{value:"deny",label:"deny"}],rule.effect==="deny"?"deny":"allow");effect.addEventListener("change",function(){rule.effect=effect.value;sync()});head.appendChild(effect);
+        var removeRule=button(label("removeLabel","Remove"),"btn btn--danger btn--tiny btn--auto");removeRule.addEventListener("click",function(){rules.splice(index,1);sync();render()});head.appendChild(removeRule);card.appendChild(head);
+        if(!rule.condition)rule.condition=freshGroup("and");
+        card.appendChild(renderCondition(rule.condition,function(next){rule.condition=next;sync();render()},null));list.appendChild(card);
+      });
+      if(!rules.length){var empty=document.createElement("p");empty.className="wizard-empty";empty.textContent=label("emptyLabel","No rules configured. Access is denied by default.");list.appendChild(empty)}
+    };
+    addRule.addEventListener("click",function(){rules.push({effect:"allow",condition:freshGroup("and")});sync();render()});
+    applyJson.addEventListener("click",function(){try{var parsed=JSON.parse(area.value||"[]");if(!Array.isArray(parsed))throw new Error("rules must be an array");rules=parsed;area.setCustomValidity("");render()}catch(error){area.setCustomValidity("Invalid rule JSON");area.reportValidity()}});
+    area.addEventListener("input",function(){area.setCustomValidity("")});
+    root.dataset.ruleEditorReady="1";render();
   });
 })();`

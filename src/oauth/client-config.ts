@@ -1,6 +1,7 @@
-import { DEVICE_CODE_GRANT, GRANT_TYPES, SUPPORTED_SCOPES, USER_ONLY_SCOPES } from "../config"
+import { DEVICE_CODE_GRANT, GRANT_TYPES, USER_ONLY_SCOPES } from "../config"
 import { listResources } from "../db/queries/resources"
 import type { ClientKind, ClientType } from "../types/domain"
+import { validateScopeCatalog } from "./scopes"
 
 export type ClientConfiguration = {
   readonly clientId: string
@@ -13,6 +14,7 @@ export type ClientConfiguration = {
   readonly allowedGrantTypes: readonly string[]
   readonly allowedResources: readonly string[]
   readonly defaultResource: string | null
+  readonly introspectionAllowed?: boolean
 }
 
 export type ClientConfigurationValidation =
@@ -44,15 +46,18 @@ export async function validateClientConfiguration(
   if (lists.some(hasDuplicates)) {
     return { ok: false, reason: "configuration lists must not contain duplicates" }
   }
-  if (
-    config.allowedScopes.length === 0 ||
-    config.allowedScopes.some((scope) => !(SUPPORTED_SCOPES as readonly string[]).includes(scope))
-  ) {
-    return { ok: false, reason: "allowed_scopes contains an unknown scope or is empty" }
+  const introspectionOnly =
+    config.introspectionAllowed === true &&
+    config.clientKind === "service" &&
+    config.allowedScopes.length === 0 &&
+    config.allowedGrantTypes.length === 0
+  if (!introspectionOnly && !validateScopeCatalog(config.allowedScopes).ok) {
+    return { ok: false, reason: "allowed_scopes is duplicated, malformed, or too large" }
   }
   if (
-    config.allowedGrantTypes.length === 0 ||
-    config.allowedGrantTypes.some((grant) => !(GRANT_TYPES as readonly string[]).includes(grant))
+    !introspectionOnly &&
+    (config.allowedGrantTypes.length === 0 ||
+      config.allowedGrantTypes.some((grant) => !(GRANT_TYPES as readonly string[]).includes(grant)))
   ) {
     return { ok: false, reason: "allowed_grant_types contains an unsupported grant" }
   }
@@ -82,6 +87,9 @@ export async function validateClientConfiguration(
   }
 
   const grants = new Set(config.allowedGrantTypes)
+  if (config.introspectionAllowed === true && config.type !== "confidential") {
+    return { ok: false, reason: "token introspection requires a confidential client" }
+  }
   if (config.type === "public" && grants.has("client_credentials")) {
     return { ok: false, reason: "public clients cannot use client_credentials" }
   }
@@ -111,6 +119,17 @@ export async function validateClientConfiguration(
       return {
         ok: false,
         reason: "device clients require device_code, no redirects, and only optional refresh_token",
+      }
+    }
+  } else if (introspectionOnly) {
+    if (
+      config.type !== "confidential" ||
+      config.redirectUris.length !== 0 ||
+      config.postLogoutRedirectUris.length !== 0
+    ) {
+      return {
+        ok: false,
+        reason: "dedicated introspection clients must be confidential and have no redirects",
       }
     }
   } else if (

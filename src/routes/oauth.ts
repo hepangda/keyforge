@@ -193,6 +193,7 @@ oauth.post("/oauth/introspect", async (c) => {
   const { client } = await authenticateClient(c, form)
   if (
     client.type !== "confidential" ||
+    !client.introspectionAllowed ||
     (client.clientKind !== "service" && client.clientKind !== "application")
   ) {
     throw new OAuthError("invalid_client", {

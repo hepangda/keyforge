@@ -105,6 +105,7 @@ async function currentAudienceClient(
       client.clientId,
       payload.aud,
       parseScopeString(typeof payload["scope"] === "string" ? payload["scope"] : ""),
+      client.metadataFingerprint,
     ))
       ? client
       : null

@@ -141,6 +141,22 @@ export function textField(
   return `<label class="field${wide}" id="${escapeHtml(fieldId)}"><span class="field__label">${escapeHtml(i18n.t(label))}</span><input class="input" type="${type}" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${req}${ph}${ro}${invalid}${describedBy}>${errorHtml}</label>`
 }
 
+export function selectField(
+  i18n: I18n,
+  label: string,
+  name: string,
+  value: string,
+  options: readonly { readonly value: string; readonly label: string }[],
+): string {
+  const choices = options
+    .map(
+      (option) =>
+        `<option value="${escapeHtml(option.value)}"${option.value === value ? " selected" : ""}>${escapeHtml(i18n.t(option.label))}</option>`,
+    )
+    .join("")
+  return `<label class="field"><span class="field__label">${escapeHtml(i18n.t(label))}</span><select class="input" name="${escapeHtml(name)}">${choices}</select></label>`
+}
+
 export function textAreaField(
   i18n: I18n,
   label: string,

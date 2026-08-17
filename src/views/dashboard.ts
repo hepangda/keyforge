@@ -4,7 +4,6 @@ import type { I18n } from "../i18n"
 import { AVATAR_TARGET_DIMENSION, MAX_AVATAR_BYTES } from "../media/avatar"
 import type { AuthMethod, User } from "../types/domain"
 import { appShell, avatarMarkup, escapeHtml, icons } from "./layout"
-import { searchPicker } from "./search-picker"
 
 export type DashboardSessionRow = {
   readonly id: string
@@ -456,35 +455,21 @@ function renderPermissionGroups(data: DashboardData): string {
     (group) =>
       `<li class="dash-list__item"><div class="dash-item__main"><div class="dash-item__title">${escapeHtml(group.name)} <span class="badge badge--warn">${escapeHtml(i18n.t("Pending review"))}</span></div><div class="dash-item__meta">${escapeHtml(group.description ?? i18n.t("No description"))}</div></div><div class="dash-item__actions"><form method="post" action="/account/groups/requests/${encodeURIComponent(group.id)}/cancel">${csrfField(data.csrfToken)}<button class="btn btn--ghost btn--sm btn--auto" type="submit">${escapeHtml(i18n.t("Cancel request"))}</button></form></div></li>`,
   )
-  const requestForm =
-    available.length === 0
-      ? `<div class="empty">${escapeHtml(i18n.t("No other permission groups are available to request."))}</div>`
-      : `<form method="post" action="/account/groups/request" class="group-request-form">${csrfField(data.csrfToken)}${searchPicker(
-          i18n,
-          {
-            id: "account-group-request",
-            name: "group_id",
-            label: "Find a permission group",
-            placeholder: "Search groups by name or description",
-            selectedLabel: "Group to request",
-            emptySelection: "Choose a group from the recommendations or search results.",
-            maxSelections: 1,
-            required: true,
-          },
-          available.map((group, index) => ({
-            value: group.id,
-            title: group.name,
-            detail: group.description ?? i18n.t("No description"),
-            meta: i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", {
-              count: group.memberCount,
-            }),
-            recommended: index < 6,
-          })),
-        )}<div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Request to join"))}</button></div></form>`
+  const suggestions = available
+    .map((group) => {
+      const description = group.description ?? i18n.t("No description")
+      const members = i18n.t(group.memberCount === 1 ? "{count} member" : "{count} members", {
+        count: group.memberCount,
+      })
+      const search = `${group.name} ${description} ${members}`
+      return `<button class="search-picker__option" type="button" data-group-request-suggestion data-group-name="${escapeHtml(group.name)}" data-search="${escapeHtml(search)}"><span class="search-picker__copy"><strong>${escapeHtml(group.name)}</strong><small>${escapeHtml(description)}</small><small class="mono">${escapeHtml(members)}</small></span><span class="search-picker__verb">${escapeHtml(i18n.t("Select"))}</span></button>`
+    })
+    .join("")
+  const requestForm = `<form method="post" action="/account/groups/request" class="group-request-form" data-group-request-form>${csrfField(data.csrfToken)}<label class="field"><span class="field__label">${escapeHtml(i18n.t("Find or enter a permission group"))}</span><input class="input" type="search" name="group_name" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${escapeHtml(i18n.t("Search or enter the complete group name"))}" aria-controls="permission-group-suggestions" data-group-request-input required></label><section class="search-picker__well group-request-suggestions" aria-labelledby="permission-group-suggestions-label"><div class="search-picker__well-head"><span id="permission-group-suggestions-label">${escapeHtml(i18n.t("Suggested permission groups"))}</span><span data-group-request-count>${escapeHtml(String(available.length))}</span></div><div class="search-picker__options" id="permission-group-suggestions" data-group-request-suggestions>${suggestions}</div><p class="search-picker__empty" data-group-request-empty${available.length === 0 ? "" : " hidden"}>${escapeHtml(i18n.t("No matching permission groups in the directory."))}</p></section><div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Request to join"))}</button></div></form>`
 
   return `<section class="dash-panel" id="groups"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Your permission groups"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Membership controls which applications and APIs can issue tokens for your account."))}</p></div></div><ul class="dash-list">${memberRows.length === 0 ? `<li class="dash-list__item--empty">${escapeHtml(i18n.t("You are not a member of any permission group."))}</li>` : memberRows.join("\n")}</ul></section>
   ${pendingRows.length === 0 ? "" : `<section class="dash-panel"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Pending requests"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("An administrator must approve these requests before access changes."))}</p></div></div><ul class="dash-list">${pendingRows.join("\n")}</ul></section>`}
-  <section class="dash-panel"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Request another group"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Search the directory, choose one group, and send it for review."))}</p></div></div><div class="dash-panel__body group-request-panel">${requestForm}</div></section>`
+  <section class="dash-panel"><div class="dash-panel__head"><div><h2 class="dash-panel__title">${escapeHtml(i18n.t("Request another group"))}</h2><p class="dash-panel__desc">${escapeHtml(i18n.t("Search for a permission group or enter its complete name."))}</p></div></div><div class="dash-panel__body group-request-panel">${requestForm}</div></section>`
 }
 
 function renderAppsOverview(data: DashboardData): string {
@@ -580,6 +565,8 @@ const NOTICES: Readonly<Record<string, string>> = {
   app_revoked: "Application access revoked.",
   device_revoked: "Device access revoked.",
   group_request_submitted: "Permission-group request submitted.",
+  group_name_request_received:
+    "Request received. If the complete name exactly matches a requestable permission group, it has been sent for review.",
   group_request_pending: "That permission-group request is already pending.",
   group_request_cancelled: "Permission-group request cancelled.",
   group_already_joined: "You already belong to that permission group.",
@@ -609,6 +596,7 @@ const SUCCESS_NOTICES = new Set([
   "app_revoked",
   "device_revoked",
   "group_request_submitted",
+  "group_name_request_received",
   "group_request_cancelled",
 ])
 
@@ -690,6 +678,7 @@ const DASHBOARD_STYLES = `
 .dash-notice--error{color:var(--danger);background:var(--danger-soft);border-color:var(--danger-line)}
 .group-request-panel{padding-top:.2rem}
 .group-request-form{display:grid;gap:1rem}
+.group-request-suggestions{min-height:11.5rem}
 @media(max-width:720px){
   .flow-panel__head{padding:1rem 1.05rem .9rem}
   .flow-panel__body{padding:1rem 1.05rem 1.1rem}

@@ -6,6 +6,7 @@ import {
   csrfField,
   dataTable,
   pager,
+  scopeTags,
   secondaryTabs,
   statusBadge,
   textAreaField,
@@ -38,7 +39,7 @@ export function renderClientsList(
     `<b>${escapeHtml(client.name)}</b>`,
     `${escapeHtml(i18n.t(label(client.type)))} · ${escapeHtml(i18n.t(label(client.clientKind)))}`,
     statusBadge(i18n, client.enabled, "Enabled", "Disabled"),
-    `<div class="actions"><a class="btn btn--ghost btn--tiny" href="/console/clients/${escapeHtml(client.clientId)}">${escapeHtml(i18n.t("Edit"))}</a></div>`,
+    `<div class="actions"><a class="btn btn--ghost btn--tiny" href="/console/clients/${encodeURIComponent(client.clientId)}">${escapeHtml(i18n.t("Edit"))}</a></div>`,
   ])
   const content = `<div class="toolbar">
     <div><h2 class="panel__title">${escapeHtml(i18n.t("Applications"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Interactive apps, devices, and services that trust this authorization server."))}</p></div>
@@ -254,7 +255,8 @@ export function renderClientDetail(
   feedback?: ClientFormFeedback,
 ): string {
   const { i18n } = chrome
-  const id = escapeHtml(client.clientId)
+  const id = encodeURIComponent(client.clientId)
+  const clientIdHtml = escapeHtml(client.clientId)
   const values = feedback?.values ?? initialClientFormValues(client)
   const errorHtml =
     feedback === undefined
@@ -273,9 +275,15 @@ export function renderClientDetail(
       active: view === "security",
     },
   ])
-  const summary = `<div class="toolbar"><div><h2 class="panel__title">${escapeHtml(client.name)}</h2><p class="panel__desc"><span class="mono">${id}</span> · ${escapeHtml(i18n.t(label(client.clientKind)))} · ${escapeHtml(i18n.t(label(client.type)))} · ${statusBadge(i18n, client.enabled, "Enabled", "Disabled")}</p></div><div class="actions"><a class="btn btn--ghost btn--sm" href="/console/audit?client_id=${encodeURIComponent(client.clientId)}">${escapeHtml(i18n.t("View audit events"))}</a><a class="btn btn--ghost btn--sm back-link" href="/console/clients">${escapeHtml(i18n.t("Back to applications"))}</a></div></div>${tabs}`
+  const summary = `<div class="toolbar"><div><h2 class="panel__title">${escapeHtml(client.name)}</h2><p class="panel__desc"><span class="mono">${clientIdHtml}</span> · ${escapeHtml(i18n.t(label(client.clientKind)))} · ${escapeHtml(i18n.t(label(client.type)))} · ${statusBadge(i18n, client.enabled, "Enabled", "Disabled")}</p></div><div class="actions"><a class="btn btn--ghost btn--sm" href="/console/audit?client_id=${encodeURIComponent(client.clientId)}">${escapeHtml(i18n.t("View audit events"))}</a><a class="btn btn--ghost btn--sm back-link" href="/console/clients">${escapeHtml(i18n.t("Back to applications"))}</a></div></div>${tabs}`
   let panel: string
-  if (view === "settings") {
+  if (client.registrationType === "client_id_metadata" && view !== "security") {
+    const redirects = scopeTags(client.redirectUris)
+    const grants = scopeTags(client.allowedGrantTypes)
+    const scopes = scopeTags(client.allowedScopes)
+    const resources = scopeTags(client.allowedResources)
+    panel = `<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Managed metadata client"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Name, redirects, and grant types are refreshed from the Client ID Metadata Document. Access remains bounded by enabled MCP resources and user consent."))}</p></div></div><div class="panel__body"><div class="callout">${escapeHtml(i18n.t("Metadata URL"))} <a class="mono" href="${clientIdHtml}" rel="noreferrer">${clientIdHtml}</a></div><p class="form-hint">${escapeHtml(i18n.t("Redirect URIs"))}</p><div>${redirects}</div><p class="form-hint">${escapeHtml(i18n.t("Grant types"))}</p><div>${grants}</div><p class="form-hint">${escapeHtml(i18n.t("Allowed scopes"))}</p><div>${scopes}</div><p class="form-hint">${escapeHtml(i18n.t("APIs"))}</p><div>${resources}</div></div></section>`
+  } else if (view === "settings") {
     panel = `<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Settings"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("Display name and registered browser redirect destinations."))}</p></div></div><div class="panel__body">${errorHtml}<form method="post" action="/console/clients/${id}/settings" class="form-grid">${csrfField(csrfToken)}${textField(i18n, "Display name", "name", values.name, { required: true })}<div class="field--wide">${textAreaField(i18n, "Redirect URIs", "redirect_uris", values.redirectUris, "One URL per line.")}</div><div class="field--wide">${textAreaField(i18n, "Post-logout redirect URIs", "post_logout_redirect_uris", values.postLogoutRedirectUris, "Exact RP-Initiated Logout destinations, one per line.")}</div><div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Save changes"))}</button></div></form></div></section>`
   } else if (view === "access") {
     panel = `<section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Access"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("OAuth grants, scopes, and API audiences."))}</p></div></div><div class="panel__body">${errorHtml}<form method="post" action="/console/clients/${id}/access" class="form-grid">${csrfField(csrfToken)}${textAreaField(i18n, "Allowed scopes", "allowed_scopes", values.allowedScopes, "One scope per line.")}${textAreaField(i18n, "Allowed grant types", "allowed_grant_types", values.allowedGrantTypes, GRANT_HINT)}<fieldset class="field-cluster field--wide"><legend>${escapeHtml(i18n.t("APIs"))}</legend>${resourceChoices(i18n, resources, values.allowedResources, true)}</fieldset><div class="field--wide">${textField(i18n, "Default resource", "default_resource", values.defaultResource)}</div><div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t("Save access"))}</button></div></form></div></section>`
@@ -302,7 +310,7 @@ export function renderClientActionConfirmation(
   const { i18n } = chrome
   const deleting = action === "delete"
   const disabling = action === "disable"
-  const id = escapeHtml(client.clientId)
+  const id = encodeURIComponent(client.clientId)
   const title = deleting
     ? "Delete application?"
     : disabling
@@ -360,7 +368,7 @@ export function renderClientSecret(
     <div class="panel__body">
       <p class="form-hint">${escapeHtml(i18n.t("Secret for {clientId}", { clientId }))}</p>
       <div class="copy-value"><code class="secret copy-value__text" data-copy-source>${escapeHtml(secret)}</code><button class="btn btn--ghost btn--tiny" type="button" data-copy-value data-copy-success="${escapeHtml(i18n.t("Client secret copied."))}" hidden>${escapeHtml(i18n.t("Copy"))}</button><span class="copy-value__status" data-copy-status role="status" hidden></span></div>
-      <p class="secret-done"><a class="btn btn--primary btn--sm btn--auto" href="/console/clients/${escapeHtml(clientId)}?view=security">${escapeHtml(i18n.t("Done"))}</a></p>
+      <p class="secret-done"><a class="btn btn--primary btn--sm btn--auto" href="/console/clients/${encodeURIComponent(clientId)}?view=security">${escapeHtml(i18n.t("Done"))}</a></p>
     </div>
   </section>`
   return consoleShell(i18n.t("Client secret"), chrome, content)

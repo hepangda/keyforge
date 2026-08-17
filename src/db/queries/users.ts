@@ -485,6 +485,8 @@ export type GroupSummary = {
   readonly name: string
   readonly description: string | null
   readonly memberCount: number
+  readonly isPublic: boolean
+  readonly priority: number
 }
 
 export function isProtectedGroupName(name: string): boolean {
@@ -496,6 +498,8 @@ const groupRowSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   member_count: z.number(),
+  is_public: z.number(),
+  priority: z.number(),
 })
 
 function mapGroup(row: unknown): GroupSummary {
@@ -505,21 +509,23 @@ function mapGroup(row: unknown): GroupSummary {
     name: parsed.name,
     description: parsed.description,
     memberCount: parsed.member_count,
+    isPublic: parsed.is_public === 1,
+    priority: parsed.priority,
   }
 }
 
 export async function listGroups(env: Env): Promise<GroupSummary[]> {
   const result = await env.DB.prepare(
-    `SELECT g.id, g.name, g.description,
+    `SELECT g.id, g.name, g.description, g.is_public, g.priority,
             (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count
-     FROM groups g ORDER BY g.name ASC`,
+     FROM groups g ORDER BY g.priority ASC, g.name ASC`,
   ).all()
   return result.results.map(mapGroup)
 }
 
 export async function getGroupByName(env: Env, name: string): Promise<GroupSummary | null> {
   const row = await env.DB.prepare(
-    `SELECT g.id, g.name, g.description,
+    `SELECT g.id, g.name, g.description, g.is_public, g.priority,
             (SELECT COUNT(*) FROM user_groups ug WHERE ug.group_id = g.id) AS member_count
      FROM groups g WHERE g.name = ?`,
   )
@@ -559,15 +565,28 @@ export async function createGroup(
   env: Env,
   name: string,
   description: string | null,
+  isPublic = true,
+  priority = 0,
 ): Promise<GroupSummary> {
   const group = {
     id: generateId(ID_PREFIX.group),
     name: name.trim().toLowerCase(),
     description,
     memberCount: 0,
+    isPublic,
+    priority,
   }
-  await env.DB.prepare("INSERT INTO groups (id, name, description, created_at) VALUES (?, ?, ?, ?)")
-    .bind(group.id, group.name, group.description, nowSeconds())
+  await env.DB.prepare(
+    "INSERT INTO groups (id, name, description, is_public, priority, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(
+      group.id,
+      group.name,
+      group.description,
+      group.isPublic ? 1 : 0,
+      group.priority,
+      nowSeconds(),
+    )
     .run()
   return group
 }
@@ -579,16 +598,26 @@ export async function updateGroup(
   id: string,
   name: string,
   description: string | null,
+  isPublic?: boolean,
+  priority?: number,
 ): Promise<GroupMutationResult> {
   const normalized = name.trim().toLowerCase()
   const current = (await listGroups(env)).find((group) => group.id === id)
   if (current === undefined) return "not_found"
   if (isProtectedGroupName(current.name) && normalized !== current.name) return "protected"
   const result = await env.DB.prepare(
-    `UPDATE groups SET name = ?, description = ?
+    `UPDATE groups SET name = ?, description = ?, is_public = ?, priority = ?
      WHERE id = ? AND NOT EXISTS (SELECT 1 FROM groups other WHERE other.name = ? AND other.id != ?)`,
   )
-    .bind(normalized, description, id, normalized, id)
+    .bind(
+      normalized,
+      description,
+      (isPublic ?? current.isPublic) ? 1 : 0,
+      priority ?? current.priority,
+      id,
+      normalized,
+      id,
+    )
     .run()
   return result.meta.changes === 1 ? "updated" : "conflict"
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { DEFAULT_I18N } from "../../src/i18n"
+import { asClientId, type OAuthClient } from "../../src/types/domain"
+import { renderClientDetail } from "../../src/views/console/clients"
 import { pager, secondaryTabs, textAreaField, textField } from "../../src/views/console/components"
 
 describe("console pager", () => {
@@ -60,5 +62,42 @@ describe("console fields", () => {
       { error: "Check the form values." },
     )
     expect(textarea).toContain('aria-describedby="allowed_scopes-error"')
+  })
+})
+
+describe("managed metadata client console", () => {
+  it("renders metadata policy read-only and keeps URL client IDs path-safe", () => {
+    const client: OAuthClient = {
+      clientId: asClientId("https://client.example.com/oauth/client.json"),
+      name: "Managed MCP Client",
+      type: "public",
+      clientKind: "application",
+      clientSecretHash: null,
+      redirectUris: ["https://client.example.com/callback"],
+      postLogoutRedirectUris: [],
+      allowedScopes: ["mcp.tools.read"],
+      allowedGrantTypes: ["authorization_code"],
+      allowedResources: ["https://mcp.example.com/mcp"],
+      defaultResource: null,
+      tokenEndpointAuthMethods: ["none"],
+      introspectionAllowed: false,
+      requirePkce: true,
+      enabled: true,
+      registrationType: "client_id_metadata",
+      metadataFingerprint: "metadata-fingerprint",
+      metadataExpiresAt: 1_800_000_000,
+      metadataJwksUri: null,
+    }
+    const html = renderClientDetail(
+      { i18n: DEFAULT_I18N, section: "clients", adminEmail: "admin@example.com" },
+      client,
+      "settings",
+      "csrf-token",
+    )
+
+    expect(html).toContain("Managed metadata client")
+    expect(html).toContain("https%3A%2F%2Fclient.example.com%2Foauth%2Fclient.json")
+    expect(html).not.toContain('action="/console/clients/https://client.example.com')
+    expect(html).not.toContain('name="name"')
   })
 })

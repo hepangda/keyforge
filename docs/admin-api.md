@@ -169,13 +169,18 @@ unknown or disabled account.
 
 ### `GET /admin/groups`
 
-Lists group IDs, names, descriptions, and current member counts.
+Lists group IDs, names, descriptions, integer priorities, request visibility,
+and current member counts. `isPublic` is `true` when the group appears in the
+self-service request directory. Priority uses nice-style ordering: smaller
+numbers win rule conflicts.
 
 ### `POST /admin/groups`
 
-Creates a group from `{ "name": "operators", "description": "..." }`. Names
+Creates a group from
+`{ "name": "operators", "description": "...", "is_public": false, "priority": 100 }`. Names
 are lowercase identifiers containing letters, digits, `.`, `_`, `:`, or `-`.
-A duplicate name returns `409`.
+`is_public` defaults to `true` and `priority` defaults to `0` in the inclusive
+range `0..1000000`. A duplicate name returns `409`.
 
 ### `GET /admin/groups/:id`
 
@@ -183,49 +188,94 @@ Returns one group including its current member count.
 
 ### `GET /admin/groups/:id/access`
 
-Returns the permission group's deterministic, sorted target assignments:
+Returns the permission group's priority and ordered rule document:
 
 ```json
 {
-  "client_ids": ["pangda_app"],
-  "resource_uris": ["https://api.pangda.app"]
+  "priority": 100,
+  "rules": [
+    {
+      "id": "prule_01K...",
+      "effect": "allow",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          { "field": "application", "operator": "equals", "value": "pangda_app" },
+          { "field": "api", "operator": "equals", "value": "https://api.pangda.app" }
+        ]
+      }
+    },
+    {
+      "id": "prule_01K...",
+      "effect": "deny",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          { "field": "api", "operator": "equals", "value": "https://api.pangda.app" },
+          { "field": "scope", "operator": "equals", "value": "api.write" }
+        ]
+      }
+    }
+  ]
 }
 ```
 
 ### `PUT /admin/groups/:id/access`
 
-Atomically replaces both target sets using the same shape as the `GET`
-response. Both arrays are required and accept at most 100 entries each. Client
-targets must be existing `application` or `device` clients; service clients and
-unknown clients or resources return `400 { "error": "invalid_access_target" }`
-without changing either set. An unknown group returns `404`.
+Atomically replaces the ordered `rules` array. A rule has `effect` `allow` or
+`deny` and one condition tree. Interior nodes use `operator` `and` or `or` with
+one or more child conditions. Leaves use `field` `application`, `api`, or
+`scope`. The `equals` and `not_equals` operators use one `value`; `in` and
+`not_in` use a non-empty, unique `values` array of at most 64 catalog values.
+At most 256 rules, five levels, 64 nodes per rule, and 16 children per logical
+node are accepted.
+Referenced applications/devices, APIs, and custom scopes must exist; service
+clients cannot be referenced. Invalid input returns
+`400 { "error": "invalid_permission_rule", "reason": "..." }` without changing
+the existing document. An unknown group returns `404`.
 
-User-token authorization is default-deny. A current user membership must match
-at least one group assigned to the application and at least one group assigned
-to the API; different memberships may satisfy those independent checks. Empty
-sets grant no access. Renaming a group preserves its assignments because rules
-reference its stable ID. The protected `admins` group can manage these target
-assignments even though its name cannot change.
+User-token authorization is default-deny and has two stages:
+
+- matching rules without a `scope` leaf decide base application/API access;
+- `openid`, `profile`, `email`, and `offline_access` follow an allowed base
+  decision directly and are rejected if used in a rule's `scope` leaf;
+- every custom scope additionally requires a matching scope-bearing `allow`;
+- only matching rules at the smallest current membership priority number are
+  used;
+- `deny` wins when matching rules share that same priority number;
+- every requested scope must pass, otherwise the whole grant is rejected.
+
+A scope-bearing rule never opens base application/API access. A rule may omit
+application or API to intentionally match every value in that dimension, but
+the OAuth client's own enabled resource/scope catalog is always checked first.
+
+Rules are rechecked during authorization, code exchange, refresh, UserInfo, and
+introspection. Removing a membership therefore makes an introspected access
+token inactive immediately. `client_credentials` has no user membership and
+is not affected by these user scope rules.
 
 ### `PATCH /admin/groups/:id`
 
-Updates `name` and/or `description`. The built-in `all` and `admins` groups
-cannot be renamed, and group names remain globally unique.
+Updates `name`, `description`, `is_public`, and/or `priority`. The built-in
+`all` and `admins` groups cannot be renamed or deleted, but their priority and
+rules remain manageable. Group names remain globally unique.
 
 ### `DELETE /admin/groups/:id`
 
-Deletes a non-protected permission group and cascades its memberships plus its
-application and API assignments. Deleting a group, client, or resource cannot
-grant access: cascaded assignments leave the affected target default-denied
-when no matching assignment remains. The built-in `all` and `admins` groups
-cannot be deleted.
+Deletes a non-protected permission group and cascades its memberships and
+rules. Deleting an application or API, or retiring an API's custom scope,
+deletes every affected rule as a whole; condition leaves are never pruned
+independently because that could broaden an `and`/`or` tree. The affected path
+remains default-denied.
 
 ## OAuth clients
 
 ### `GET /admin/clients`
 
 Lists OAuth clients and whether each client has a secret. Secret hashes and
-previous plaintext secrets are never returned.
+previous plaintext secrets are never returned. `registration_type` is
+`static` or `client_id_metadata`; a discovered client also reports its bounded
+`metadata_expires_at` cache timestamp.
 
 ### `POST /admin/clients`
 
@@ -269,6 +319,11 @@ resources, or the default resource. PKCE with `S256` is mandatory for every
 authorization-code client; `require_pkce: false` is rejected rather than
 creating a per-client downgrade.
 
+Client ID Metadata Document clients are managed by their HTTPS Client
+Identifier URL. Attempting to patch one returns
+`409 {"error":"managed_client",...}`. Disable, enable, and delete remain
+available as operator lifecycle controls.
+
 ### `DELETE /admin/clients/:id`
 
 Deletes a client and its dependent grants/consents according to D1 foreign-key
@@ -284,6 +339,17 @@ Replaces a confidential client's secret and returns the new value exactly once.
 
 Toggles issuance eligibility without deleting the client.
 
+### Metadata client Resource approvals
+
+- `GET /admin/clients/:id/metadata-approvals`
+- `POST /admin/clients/:id/metadata-approvals`
+- `DELETE /admin/clients/:id/metadata-approvals`
+
+The POST and DELETE body is `{ "resource_uri": "https://mcp.example.com/mcp" }`.
+Approvals apply only to discovered clients on Resources whose
+`metadata_client_policy` is `admin_approved`; revocation affects the next
+authorization, refresh, UserInfo, or introspection decision.
+
 ## Resources
 
 ### `GET /admin/resources`
@@ -294,25 +360,39 @@ Lists protected resource identifiers and their scope policies.
 
 ```json
 {
-  "resource_uri": "https://inventory.pangda.app",
-  "name": "Inventory API",
-  "allowed_scopes": ["api.read"]
+  "resource_uri": "https://mcp.example.com/mcp",
+  "name": "Example MCP Server",
+  "allowed_scopes": ["mcp.tools.read", "mcp.tools.execute"],
+  "mcp_enabled": true,
+  "metadata_client_policy": "consent_required"
 }
 ```
 
+`mcp_enabled` requires HTTPS outside the top-level local Worker profile; local
+development may use loopback HTTP. Queries and fragments are rejected.
+Authorization-code and refresh-token requests repeat the exact Resource.
+`metadata_client_policy` is `disabled`, `consent_required`, or
+`admin_approved`; non-disabled policy is invalid unless MCP authorization is
+enabled. Resource scopes may use any valid, unique RFC 6749 scope-token within
+the server's size bounds.
+
 ### `PATCH /admin/resources/:id`
 
-Updates `name`, `allowed_scopes`, or `enabled`. URL-encode a resource URI when
-placing it in the path.
+Updates `name`, `allowed_scopes`, `enabled`, `mcp_enabled`, or
+`metadata_client_policy`. URL-encode a resource URI when placing it in the path.
 
 ### `DELETE /admin/resources/:id`
 
 Deletes a registered API resource; URL-encode its resource URI in the path.
-Deletion cascades permission-group assignments, removes the URI from every
+Deletion removes permission rules that reference the API, removes the URI from every
 client's allowed resources, clears matching default resources and consents,
 revokes matching refresh/grant records, and denies pending or approved device
-requests. Already-issued self-contained access tokens remain valid until their
-normal expiry. An unknown resource returns `404`.
+requests. A self-contained validator could still accept an already-issued JWT
+until expiry, but KeyForge introspection marks it inactive immediately; the MCP
+adapter uses introspection. An unknown resource returns `404`.
+
+The complete resource-server and client-onboarding workflow is in the
+[MCP authorization guide](mcp.md).
 
 ## Audit and device sessions
 

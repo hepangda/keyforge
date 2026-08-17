@@ -29,6 +29,7 @@ const TARGETS = {
     database: "keyforge",
     origin: "https://auth.pangda.app",
     tokenVariable: "KEYFORGE_PRODUCTION_READINESS_TOKEN",
+    resourceFile: "scripts/resources/aaeasy-mcp.production.sql",
   },
 }
 
@@ -298,6 +299,20 @@ async function migrateAndDeploy(environment, target, commit) {
     ],
     { environment: { CI: "1" } },
   )
+  if (target.resourceFile !== undefined) {
+    await pnpm([
+      "exec",
+      "wrangler",
+      "d1",
+      "execute",
+      target.database,
+      "--env",
+      environment,
+      "--remote",
+      "--file",
+      target.resourceFile,
+    ])
+  }
 
   const message = `release ${environment} ${commit} ${new Date().toISOString()}`
   await pnpm([
@@ -413,6 +428,11 @@ function printPlan(environment, target) {
     [PNPM, ["exec", "wrangler", "d1", "export", database, "--env", environment, "--remote", "--no-data", "--skip-confirmation", "--output", "<temporary-schema-path>"]],
     [PNPM, ["exec", "wrangler", "d1", "migrations", "list", database, "--env", environment, "--remote"]],
     [PNPM, ["exec", "wrangler", "d1", "migrations", "apply", database, "--env", environment, "--remote"]],
+    ...(target.resourceFile === undefined
+      ? []
+      : [
+          [PNPM, ["exec", "wrangler", "d1", "execute", database, "--env", environment, "--remote", "--file", target.resourceFile]],
+        ]),
     [PNPM, ["exec", "wrangler", "deploy", "--strict", "--env", environment, "--message", "<release-message>"]],
   ]
   console.log(`Release plan for ${environment} (${target.origin}):`)

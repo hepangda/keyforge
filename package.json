@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:yolo": "wrangler dev --var ENVIRONMENT:dev --var YOLO_MODE:true",
+    "dev:mcp-example": "wrangler dev --config examples/mcp-server/wrangler.toml",
     "validate:deploy:dev": "node scripts/validate-deploy-config.mjs dev",
     "validate:deploy:production": "node scripts/validate-deploy-config.mjs production",
     "deploy": "pnpm validate:deploy:production && wrangler deploy --env production",
@@ -33,10 +34,10 @@
     "secrets:scan": "node scripts/scan-secrets.mjs",
     "demo:selftest": "pnpm --dir examples/demo-app install --frozen-lockfile && pnpm --dir examples/demo-app selftest",
     "cf-typegen": "wrangler types",
-    "db:migrate:local": "wrangler d1 migrations apply keyforge --local",
-    "db:migrate": "pnpm validate:deploy:production && wrangler d1 migrations apply keyforge --env production --remote",
+    "db:migrate:local": "wrangler d1 migrations apply keyforge --local && wrangler d1 execute keyforge --local --file scripts/resources/aaeasy-mcp.local.sql",
+    "db:migrate": "pnpm db:migrate:production",
     "db:migrate:dev": "pnpm validate:deploy:dev && wrangler d1 migrations apply keyforge_dev --env dev --remote",
-    "db:migrate:production": "pnpm validate:deploy:production && wrangler d1 migrations apply keyforge --env production --remote"
+    "db:migrate:production": "pnpm validate:deploy:production && wrangler d1 migrations apply keyforge --env production --remote && wrangler d1 execute keyforge --env production --remote --file scripts/resources/aaeasy-mcp.production.sql"
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0",

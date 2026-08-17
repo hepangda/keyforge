@@ -374,10 +374,16 @@ describe("admin users", () => {
     const created = await req("POST", "/admin/groups", {
       name: "test-support",
       description: "Support operators",
+      is_public: false,
     })
     expect(created.status).toBe(201)
-    const group = await created.json<{ id: string; name: string }>()
+    const group = await created.json<{ id: string; name: string; isPublic: boolean }>()
     expect(group.name).toBe("test-support")
+    expect(group.isPublic).toBe(false)
+
+    const madePublic = await req("PATCH", `/admin/groups/${group.id}`, { is_public: true })
+    expect(madePublic.status).toBe(200)
+    expect((await madePublic.json<{ isPublic: boolean }>()).isPublic).toBe(true)
 
     const assigned = await req("PUT", `/admin/users/${regularUserId}/groups`, {
       group_ids: [group.id],
@@ -493,25 +499,79 @@ describe("admin users", () => {
 })
 
 describe("admin permission-group access", () => {
-  it("round-trips sorted assignments and preserves them across rename", async () => {
+  const baseRule = (application: string, api: string, effect: "allow" | "deny" = "allow") => ({
+    effect,
+    condition: {
+      operator: "and" as const,
+      conditions: [
+        { field: "application" as const, operator: "equals" as const, value: application },
+        { field: "api" as const, operator: "equals" as const, value: api },
+      ],
+    },
+  })
+  const scopeRule = (api: string, scope: string, effect: "allow" | "deny" = "allow") => ({
+    effect,
+    condition: {
+      operator: "and" as const,
+      conditions: [
+        { field: "api" as const, operator: "equals" as const, value: api },
+        { field: "scope" as const, operator: "equals" as const, value: scope },
+      ],
+    },
+  })
+
+  it("round-trips ordered rules and preserves them across rename", async () => {
     const created = await req("POST", "/admin/groups", {
       name: "test-access-roundtrip",
       description: "Access round trip",
+      priority: 40,
     })
     const group = await created.json<{ id: string }>()
     expect(await (await req("GET", `/admin/groups/${group.id}/access`)).json()).toEqual({
-      client_ids: [],
-      resource_uris: [],
+      priority: 40,
+      rules: [],
     })
 
+    const submittedRules = [
+      baseRule("pangda_app", "https://api.pangda.app"),
+      scopeRule("https://api.pangda.app", "api.read", "deny"),
+      {
+        effect: "allow" as const,
+        condition: {
+          field: "application" as const,
+          operator: "in" as const,
+          values: ["pangda_app", "pangda_cli"],
+        },
+      },
+      {
+        effect: "deny" as const,
+        condition: {
+          field: "api" as const,
+          operator: "not_equals" as const,
+          value: "https://api.pangda.app",
+        },
+      },
+      {
+        effect: "deny" as const,
+        condition: {
+          field: "scope" as const,
+          operator: "not_in" as const,
+          values: ["api.read", "api.write"],
+        },
+      },
+    ]
     const updated = await req("PUT", `/admin/groups/${group.id}/access`, {
-      client_ids: ["pangda_cli", "pangda_app", "pangda_cli"],
-      resource_uris: ["https://app.pangda.app", "https://api.pangda.app"],
+      rules: submittedRules,
     })
     expect(updated.status).toBe(200)
-    expect(await updated.json()).toEqual({
-      client_ids: ["pangda_app", "pangda_cli"],
-      resource_uris: ["https://api.pangda.app", "https://app.pangda.app"],
+    const saved = await updated.json<{
+      priority: number
+      rules: Array<Record<string, unknown>>
+    }>()
+    expect(saved.priority).toBe(40)
+    expect(saved.rules).toHaveLength(submittedRules.length)
+    submittedRules.forEach((submitted, index) => {
+      expect(saved.rules[index]).toMatchObject({ id: expect.any(String), ...submitted })
     })
 
     expect(
@@ -521,43 +581,118 @@ describe("admin permission-group access", () => {
         })
       ).status,
     ).toBe(200)
-    expect(await (await req("GET", `/admin/groups/${group.id}/access`)).json()).toEqual({
-      client_ids: ["pangda_app", "pangda_cli"],
-      resource_uris: ["https://api.pangda.app", "https://app.pangda.app"],
-    })
+    expect(await (await req("GET", `/admin/groups/${group.id}/access`)).json()).toEqual(saved)
   })
 
-  it("rejects invalid and oversized targets without changing either set", async () => {
+  it("rejects invalid, standard-scope, and oversized rules atomically", async () => {
     const group = await (
       await req("POST", "/admin/groups", { name: "test-access-validation" })
     ).json<{ id: string }>()
     const path = `/admin/groups/${group.id}/access`
     const baseline = {
-      client_ids: ["pangda_app"],
-      resource_uris: ["https://api.pangda.app"],
+      rules: [
+        baseRule("pangda_app", "https://api.pangda.app"),
+        scopeRule("https://api.pangda.app", "api.read"),
+      ],
     }
     expect((await req("PUT", path, baseline)).status).toBe(200)
+    const baselineState = await (await req("GET", path)).json()
 
     expect((await req("GET", "/admin/groups/missing/access")).status).toBe(404)
     expect((await req("PUT", "/admin/groups/missing/access", baseline)).status).toBe(404)
     for (const invalid of [
-      { client_ids: ["missing"], resource_uris: baseline.resource_uris },
-      { client_ids: ["svc_internal_worker"], resource_uris: baseline.resource_uris },
-      { client_ids: baseline.client_ids, resource_uris: ["urn:test:missing"] },
+      { rules: [baseRule("missing", "https://api.pangda.app")] },
+      { rules: [baseRule("svc_internal_worker", "https://api.pangda.app")] },
+      { rules: [baseRule("pangda_app", "urn:test:missing")] },
+      { rules: [scopeRule("https://api.pangda.app", "missing.scope")] },
+      {
+        rules: [
+          {
+            effect: "allow",
+            condition: {
+              field: "application",
+              operator: "in",
+              values: ["pangda_app", "missing"],
+            },
+          },
+        ],
+      },
+      ...["openid", "profile", "email", "offline_access"].map((scope) => ({
+        rules: [scopeRule("https://api.pangda.app", scope, "deny")],
+      })),
+      {
+        rules: [
+          {
+            effect: "deny",
+            condition: { field: "scope", operator: "not_in", values: ["api.read", "email"] },
+          },
+        ],
+      },
+      { rules: [{ effect: "allow", condition: { operator: "and", conditions: [] } }] },
     ]) {
       const response = await req("PUT", path, invalid)
       expect(response.status).toBe(400)
-      expect(await response.json()).toEqual({ error: "invalid_access_target" })
-      expect(await (await req("GET", path)).json()).toEqual(baseline)
+      expect(await (await req("GET", path)).json()).toEqual(baselineState)
     }
 
-    const tooMany = Array.from({ length: 101 }, (_, index) => `missing-${index}`)
-    expect((await req("PUT", path, { client_ids: tooMany, resource_uris: [] })).status).toBe(400)
-    expect((await req("PUT", path, { client_ids: [], resource_uris: tooMany })).status).toBe(400)
-    expect(await (await req("GET", path)).json()).toEqual(baseline)
+    const tooManyRules = Array.from({ length: 257 }, () =>
+      scopeRule("https://api.pangda.app", "api.read"),
+    )
+    expect((await req("PUT", path, { rules: tooManyRules })).status).toBe(400)
+    expect(await (await req("GET", path)).json()).toEqual(baselineState)
   })
 
-  it("fails closed after group, client, and resource deletion cascades", async () => {
+  it("applies group priority and lets deny win equal-priority conflicts", async () => {
+    const smaller = await (
+      await req("POST", "/admin/groups", { name: "test-priority-smaller", priority: 10 })
+    ).json<{ id: string }>()
+    const larger = await (
+      await req("POST", "/admin/groups", { name: "test-priority-larger", priority: 20 })
+    ).json<{ id: string }>()
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, ?, unixepoch())",
+      ).bind(regularUserId, smaller.id),
+      env.DB.prepare(
+        "INSERT INTO user_groups (user_id, group_id, created_at) VALUES (?, ?, unixepoch())",
+      ).bind(regularUserId, larger.id),
+    ])
+    expect(
+      (
+        await req("PUT", `/admin/groups/${smaller.id}/access`, {
+          rules: [baseRule("pangda_app", "https://api.pangda.app")],
+        })
+      ).status,
+    ).toBe(200)
+    expect(
+      (
+        await req("PUT", `/admin/groups/${larger.id}/access`, {
+          rules: [baseRule("pangda_app", "https://api.pangda.app", "deny")],
+        })
+      ).status,
+    ).toBe(200)
+    const input = {
+      userId: regularUserId,
+      clientId: "pangda_app",
+      resourceUri: "https://api.pangda.app",
+      scopes: ["openid"],
+    }
+    expect(await evaluateUserTokenAccess(env, input)).toEqual({ allowed: true })
+
+    expect((await req("PATCH", `/admin/groups/${larger.id}`, { priority: 5 })).status).toBe(200)
+    expect(await evaluateUserTokenAccess(env, input)).toEqual({
+      allowed: false,
+      reason: "application_resource",
+    })
+
+    expect((await req("PATCH", `/admin/groups/${larger.id}`, { priority: 10 })).status).toBe(200)
+    expect(await evaluateUserTokenAccess(env, input)).toEqual({
+      allowed: false,
+      reason: "application_resource",
+    })
+  })
+
+  it("fails closed after group, application, and API deletion", async () => {
     const group = await (await req("POST", "/admin/groups", { name: "test-access-cascade" })).json<{
       id: string
     }>()
@@ -582,7 +717,24 @@ describe("admin permission-group access", () => {
       .bind(regularUserId, group.id)
       .run()
     const path = `/admin/groups/${group.id}/access`
-    const assignment = { client_ids: [clientId], resource_uris: [resourceUri] }
+    const assignment = {
+      rules: [
+        {
+          effect: "allow",
+          condition: {
+            operator: "and",
+            conditions: [
+              { field: "application", operator: "in", values: [clientId, "pangda_app"] },
+              {
+                field: "api",
+                operator: "in",
+                values: [resourceUri, "https://api.pangda.app"],
+              },
+            ],
+          },
+        },
+      ],
+    }
     expect((await req("PUT", path, assignment)).status).toBe(200)
     expect(
       await evaluateUserTokenAccess(env, {
@@ -604,7 +756,7 @@ describe("admin permission-group access", () => {
         resourceUri,
         scopes: ["openid"],
       }),
-    ).toEqual({ allowed: false, reason: "application" })
+    ).toEqual({ allowed: false, reason: "application_resource" })
 
     expect((await req("PUT", path, assignment)).status).toBe(200)
     await env.DB.prepare("DELETE FROM oauth_resources WHERE resource_uri = ?")
@@ -618,7 +770,7 @@ describe("admin permission-group access", () => {
         resourceUri,
         scopes: ["openid"],
       }),
-    ).toEqual({ allowed: false, reason: "resource" })
+    ).toEqual({ allowed: false, reason: "application_resource" })
 
     expect((await req("PUT", path, assignment)).status).toBe(200)
     expect((await req("DELETE", `/admin/groups/${group.id}`)).status).toBe(200)
@@ -629,11 +781,43 @@ describe("admin permission-group access", () => {
         resourceUri,
         scopes: ["openid"],
       }),
-    ).toEqual({ allowed: false, reason: "application" })
+    ).toEqual({ allowed: false, reason: "application_resource" })
   })
 })
 
 describe("admin clients", () => {
+  it("reports discovered metadata clients as managed and read-only", async () => {
+    const clientId = "https://managed-client.example.com/oauth/client.json"
+    await env.DB.prepare(
+      `INSERT INTO oauth_clients
+         (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
+          post_logout_redirect_uris_json, allowed_scopes_json, allowed_grant_types_json,
+          allowed_resources_json, default_resource, require_pkce, enabled,
+          registration_type, metadata_expires_at, created_at, updated_at)
+       VALUES (?, NULL, 'public', 'application', 'Managed MCP Client',
+               '["https://managed-client.example.com/callback"]', '[]', '["api.read"]',
+               '["authorization_code"]', '["https://api.pangda.app"]', NULL, 1, 1,
+               'client_id_metadata', unixepoch() + 600, unixepoch(), unixepoch())`,
+    )
+      .bind(clientId)
+      .run()
+
+    const list = await (await req("GET", "/admin/clients")).json<{
+      clients: Array<Record<string, unknown>>
+    }>()
+    expect(list.clients.find((client) => client["client_id"] === clientId)).toMatchObject({
+      registration_type: "client_id_metadata",
+      metadata_expires_at: expect.any(Number),
+    })
+
+    const patched = await req("PATCH", `/admin/clients/${encodeURIComponent(clientId)}`, {
+      name: "Operator override",
+    })
+    expect(patched.status).toBe(409)
+    expect(await patched.json()).toMatchObject({ error: "managed_client" })
+    expect((await req("DELETE", `/admin/clients/${encodeURIComponent(clientId)}`)).status).toBe(200)
+  })
+
   it("creates a confidential client whose secret works for client_credentials", async () => {
     const res = await req("POST", "/admin/clients", {
       client_id: "test_svc",
@@ -726,6 +910,55 @@ describe("admin clients", () => {
 })
 
 describe("admin resources", () => {
+  it("creates MCP resources with explicit metadata-client policy", async () => {
+    const resourceUri = "https://mcp-admin-test.example.com/mcp"
+    const created = await req("POST", "/admin/resources", {
+      resource_uri: resourceUri,
+      name: "MCP Admin Test",
+      allowed_scopes: ["mcp.tools.read", "mcp.tools.execute"],
+      mcp_enabled: true,
+      metadata_client_policy: "consent_required",
+    })
+    expect(created.status).toBe(201)
+
+    const list = await (await req("GET", "/admin/resources")).json<{
+      resources: Array<{
+        resource_uri: string
+        mcp_enabled: boolean
+        metadata_client_policy: string
+      }>
+    }>()
+    expect(list.resources.find((resource) => resource.resource_uri === resourceUri)).toMatchObject({
+      mcp_enabled: true,
+      metadata_client_policy: "consent_required",
+    })
+
+    expect(
+      (
+        await req("POST", "/admin/resources", {
+          resource_uri: "urn:test:mcp-invalid",
+          name: "Invalid MCP transport",
+          allowed_scopes: ["mcp.read"],
+          mcp_enabled: true,
+        })
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await req("POST", "/admin/resources", {
+          resource_uri: "https://mcp-admin-test.example.com/metadata-without-mcp",
+          name: "Invalid metadata policy",
+          allowed_scopes: ["mcp.read"],
+          metadata_client_policy: "consent_required",
+        })
+      ).status,
+    ).toBe(400)
+
+    expect(
+      (await req("DELETE", `/admin/resources/${encodeURIComponent(resourceUri)}`)).status,
+    ).toBe(200)
+  })
+
   it("creates, lists, and patches a resource", async () => {
     expect(
       (
@@ -741,11 +974,54 @@ describe("admin resources", () => {
     }>()
     expect(list.resources.some((r) => r.resource_uri === "urn:test:widget")).toBe(true)
 
+    await expect(
+      env.DB.prepare(
+        `INSERT INTO oauth_scope_permission_groups
+           (resource_uri, scope, group_id, effect, created_at)
+         VALUES ('urn:test:widget', 'widget.missing', 'grp_seed_all', 'allow', unixepoch())`,
+      ).run(),
+    ).rejects.toThrow("unavailable scope")
+
+    await expect(
+      env.DB.prepare(
+        `INSERT INTO oauth_scope_permission_groups
+           (resource_uri, scope, group_id, effect, created_at)
+         VALUES ('https://api.pangda.app', 'openid', 'grp_seed_all', 'deny', unixepoch())`,
+      ).run(),
+    ).rejects.toThrow("authorized directly by resource access")
+
+    await env.DB.prepare(
+      `INSERT INTO oauth_scope_permission_groups
+         (resource_uri, scope, group_id, effect, created_at)
+       VALUES ('urn:test:widget', 'widget.read', 'grp_seed_all', 'allow', unixepoch())`,
+    ).run()
+    await env.DB.prepare(
+      `INSERT INTO permission_group_rules
+         (id, group_id, effect, condition_json, position, created_at, updated_at)
+       VALUES (
+         'prule_test_retired_widget_scope', 'grp_seed_all', 'allow',
+         '{"operator":"and","conditions":[{"field":"api","operator":"equals","value":"urn:test:widget"},{"field":"scope","operator":"in","values":["widget.read"]}]}',
+         (SELECT COALESCE(MAX(position) + 1, 0) FROM permission_group_rules WHERE group_id = 'grp_seed_all'),
+         unixepoch(), unixepoch()
+       )`,
+    ).run()
+
     const patched = await req("PATCH", "/admin/resources/urn:test:widget", {
       name: "Widget v2",
+      allowed_scopes: ["widget.write"],
       enabled: false,
     })
     expect((await patched.json<{ name: string }>()).name).toBe("Widget v2")
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM oauth_scope_permission_groups WHERE resource_uri = 'urn:test:widget'",
+      ).first<number>("count"),
+    ).toBe(0)
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM permission_group_rules WHERE id = 'prule_test_retired_widget_scope'",
+      ).first<number>("count"),
+    ).toBe(0)
   })
 
   it("deletes a resource and retires every stored authorization path", async () => {

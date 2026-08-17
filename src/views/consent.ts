@@ -6,8 +6,14 @@ export type ConsentPageParams = {
   readonly i18n: I18n
   readonly csrfToken: string
   readonly clientName: string
+  readonly clientId: string
+  readonly metadataClient: boolean
+  readonly redirectUri: string
   readonly scopes: readonly string[]
   readonly resource: string
+  readonly resourceName: string
+  readonly consentMode: "first" | "step_up" | "metadata_changed" | "forced"
+  readonly elevatedScopes: readonly string[]
   readonly user: User
   readonly authorizationReturnTo: string
   readonly hiddenFields: Readonly<Record<string, string>>
@@ -17,6 +23,22 @@ export function renderConsentPage(params: ConsentPageParams): string {
   const { i18n } = params
   const displayName = params.user.name ?? params.user.alias
   const avatar = avatarMarkup(params.user)
+  const clientIdentity = params.metadataClient
+    ? `<div class="callout">${escapeHtml(i18n.t("Client identity"))} <a class="mono" href="${escapeHtml(params.clientId)}" rel="noreferrer">${escapeHtml(params.clientId)}</a></div>
+  <div class="callout">${escapeHtml(i18n.t("Verified client host"))} <span class="mono">${escapeHtml(new URL(params.clientId).host)}</span></div>
+  <div class="callout">${escapeHtml(i18n.t("Redirect destination"))} <span class="mono">${escapeHtml(params.redirectUri)}</span>${new URL(params.redirectUri).protocol === "http:" ? `<br><strong>${escapeHtml(i18n.t("This client will return to a local application on your device. A different local process could impersonate that callback."))}</strong>` : ""}</div>`
+    : ""
+  const consentNotice =
+    params.consentMode === "metadata_changed"
+      ? "This client's metadata changed. Review its identity, callback, and permissions again."
+      : params.consentMode === "step_up"
+        ? "This client is requesting additional permissions."
+        : params.consentMode === "forced"
+          ? "This client requested renewed confirmation."
+          : "This is the first authorization for this client and resource."
+  const elevatedConfirmation = params.scopes.includes("mcp.tools.execute")
+    ? `<div class="alert" role="alert">${icons.alert}<div><strong>${escapeHtml(i18n.t("Elevated permission"))}</strong><br>${escapeHtml(i18n.t("mcp.tools.execute can run actions and change data through this MCP server."))}</div></div><label class="checkline"><input type="checkbox" name="confirm_elevated" value="yes" required>${escapeHtml(i18n.t("I explicitly allow this client to execute MCP tools."))}</label>`
+    : ""
   const hidden = Object.entries(params.hiddenFields)
     .map(
       ([key, value]) =>
@@ -39,11 +61,14 @@ export function renderConsentPage(params: ConsentPageParams): string {
       <button class="link-button link-button--quiet" type="submit" name="intent" value="sign_out">${escapeHtml(i18n.t("Sign out"))}</button>
     </form>
   </div>
+  <div class="callout"><strong>${escapeHtml(i18n.t(consentNotice))}</strong>${params.elevatedScopes.length === 0 ? "" : `<br>${escapeHtml(i18n.t("New permissions"))}: <span class="mono">${escapeHtml(params.elevatedScopes.join(" "))}</span>`}</div>
   ${permissionList(i18n, params.scopes)}
-  <div class="callout">${escapeHtml(i18n.t("API audience"))} <span class="mono">${escapeHtml(params.resource)}</span></div>
+  ${clientIdentity}
+  <div class="callout">${escapeHtml(i18n.t("Target resource"))} <strong>${escapeHtml(params.resourceName)}</strong><br><span class="mono">${escapeHtml(params.resource)}</span></div>
   <form method="post" action="/oauth/authorize/decision">
     <input type="hidden" name="csrf_token" value="${escapeHtml(params.csrfToken)}">
     ${hidden}
+    ${elevatedConfirmation}
     <div class="btn-row">
       <button class="btn btn--ghost" type="submit" name="decision" value="deny">${escapeHtml(i18n.t("Deny"))}</button>
       <button class="btn btn--primary" type="submit" name="decision" value="approve">${escapeHtml(i18n.t("Allow access"))}</button>

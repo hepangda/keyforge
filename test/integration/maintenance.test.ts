@@ -39,6 +39,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM sessions WHERE id LIKE 'ses_maintenance_%'"),
     env.DB.prepare("DELETE FROM device_authorization_sessions WHERE id LIKE 'dvc_maintenance_%'"),
     env.DB.prepare("DELETE FROM email_verifications WHERE id LIKE 'emv_maintenance_%'"),
+    env.DB.prepare("DELETE FROM oauth_clients WHERE client_id LIKE 'https://maintenance-client.%'"),
     env.DB.prepare("DELETE FROM users WHERE id = 'usr_maintenance_test'"),
   ])
   await Promise.all([env.KV.delete("signing:active"), env.KV.delete("signing:keys")])
@@ -155,6 +156,47 @@ describe("scheduled maintenance", () => {
         `INSERT INTO audit_logs (id, event_type, detail, created_at)
          VALUES (?, 'user.logout', 'fresh row', ?)`,
       ).bind("aud_maintenance_fresh", NOW),
+      env.DB.prepare(
+        `INSERT INTO oauth_clients
+          (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
+           post_logout_redirect_uris_json, allowed_scopes_json, allowed_grant_types_json,
+           allowed_resources_json, default_resource, require_pkce, enabled,
+           registration_type, metadata_expires_at, created_at, updated_at)
+         VALUES ('https://maintenance-client.example/stale.json', NULL, 'public', 'application',
+                 'Stale metadata client', '["https://maintenance-client.example/callback"]',
+                 '[]', '["api.read"]', '["authorization_code"]',
+                 '["https://api.pangda.app"]', NULL, 1, 1, 'client_id_metadata', ?, ?, ?)`,
+      ).bind(NOW - 31 * DAY, NOW - 100 * DAY, NOW - 100 * DAY),
+      env.DB.prepare(
+        `INSERT INTO oauth_clients
+          (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
+           post_logout_redirect_uris_json, allowed_scopes_json, allowed_grant_types_json,
+           allowed_resources_json, default_resource, require_pkce, enabled,
+           registration_type, metadata_expires_at, created_at, updated_at)
+         VALUES ('https://maintenance-client.example/disabled.json', NULL, 'public',
+                 'application', 'Disabled metadata client',
+                 '["https://maintenance-client.example/disabled-callback"]', '[]',
+                 '["api.read"]', '["authorization_code"]', '["https://api.pangda.app"]',
+                 NULL, 1, 0, 'client_id_metadata', ?, ?, ?)`,
+      ).bind(NOW - 31 * DAY, NOW - 100 * DAY, NOW - 100 * DAY),
+      env.DB.prepare(
+        `INSERT INTO oauth_clients
+          (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
+           post_logout_redirect_uris_json, allowed_scopes_json, allowed_grant_types_json,
+           allowed_resources_json, default_resource, require_pkce, enabled,
+           registration_type, metadata_expires_at, created_at, updated_at)
+         VALUES ('https://maintenance-client.example/consented.json', NULL, 'public',
+                 'application', 'Consented metadata client',
+                 '["https://maintenance-client.example/consented-callback"]', '[]',
+                 '["api.read"]', '["authorization_code"]', '["https://api.pangda.app"]',
+                 NULL, 1, 1, 'client_id_metadata', ?, ?, ?)`,
+      ).bind(NOW - 31 * DAY, NOW - 100 * DAY, NOW - 100 * DAY),
+      env.DB.prepare(
+        `INSERT INTO consents (id, user_id, client_id, scope, resource, created_at, updated_at)
+         VALUES ('con_maintenance_metadata', 'usr_maintenance_test',
+                 'https://maintenance-client.example/consented.json', 'api.read',
+                 'https://api.pangda.app', ?, ?)`,
+      ).bind(NOW - 31 * DAY, NOW - 31 * DAY),
     ])
 
     const result = await runScheduledMaintenance(env, NOW)
@@ -168,6 +210,7 @@ describe("scheduled maintenance", () => {
     expect(result.deletedRows["device_authorization_sessions"]).toBe(1)
     expect(result.deletedRows["email_verifications"]).toBe(1)
     expect(result.deletedRows["password_reset_tokens"]).toBe(1)
+    expect(result.deletedRows["oauth_metadata_clients"]).toBe(1)
     expect(
       await env.DB.prepare("SELECT id FROM sessions WHERE id = 'ses_maintenance_expired'").first(),
     ).toBeNull()
@@ -186,6 +229,21 @@ describe("scheduled maintenance", () => {
     ).not.toBeNull()
     expect(
       await env.DB.prepare("SELECT id FROM audit_logs WHERE id = 'aud_maintenance_fresh'").first(),
+    ).not.toBeNull()
+    expect(
+      await env.DB.prepare(
+        "SELECT client_id FROM oauth_clients WHERE client_id = 'https://maintenance-client.example/stale.json'",
+      ).first(),
+    ).toBeNull()
+    expect(
+      await env.DB.prepare(
+        "SELECT client_id FROM oauth_clients WHERE client_id = 'https://maintenance-client.example/disabled.json'",
+      ).first(),
+    ).not.toBeNull()
+    expect(
+      await env.DB.prepare(
+        "SELECT client_id FROM oauth_clients WHERE client_id = 'https://maintenance-client.example/consented.json'",
+      ).first(),
     ).not.toBeNull()
   })
 

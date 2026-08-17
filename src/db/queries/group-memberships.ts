@@ -41,7 +41,7 @@ export async function listPermissionGroupsForUser(
               ELSE 'available'
             END AS state
      FROM groups g
-     WHERE g.name != 'admins'
+     WHERE (g.is_public = 1 AND g.name != 'admins')
         OR EXISTS (
           SELECT 1 FROM user_groups membership
           WHERE membership.user_id = ? AND membership.group_id = g.id
@@ -91,7 +91,7 @@ export async function requestPermissionGroupMembership(
               WHERE user_id = ? AND group_id = g.id
             ) AS is_pending
      FROM groups g
-     WHERE g.id = ?`,
+     WHERE g.id = ? AND g.is_public = 1`,
   )
     .bind(userId, userId, groupId)
     .first()
@@ -105,7 +105,7 @@ export async function requestPermissionGroupMembership(
     `INSERT OR IGNORE INTO group_membership_requests (user_id, group_id, requested_at)
      SELECT ?, g.id, unixepoch()
      FROM groups g
-     WHERE g.id = ? AND g.name NOT IN ('admins', 'all')
+     WHERE g.id = ? AND g.is_public = 1 AND g.name NOT IN ('admins', 'all')
        AND NOT EXISTS (
          SELECT 1 FROM user_groups
          WHERE user_id = ? AND group_id = g.id
@@ -114,6 +114,45 @@ export async function requestPermissionGroupMembership(
     .bind(userId, groupId, userId)
     .run()
   return inserted.meta.changes === 1 ? "requested" : "not_found"
+}
+
+export async function findPublicPermissionGroupIdByExactName(
+  env: Env,
+  exactGroupName: string,
+): Promise<string | null> {
+  const group = await env.DB.prepare(
+    `SELECT id
+     FROM groups
+     WHERE name COLLATE BINARY = ? AND is_public = 1`,
+  )
+    .bind(exactGroupName)
+    .first<{ id: string }>()
+  return group?.id ?? null
+}
+
+/**
+ * Request a hidden group without revealing whether an exact name existed or a
+ * row was inserted. Callers must return the same response for every result.
+ */
+export async function requestHiddenPermissionGroupMembership(
+  env: Env,
+  userId: string,
+  exactGroupName: string,
+): Promise<string | null> {
+  const inserted = await env.DB.prepare(
+    `INSERT OR IGNORE INTO group_membership_requests (user_id, group_id, requested_at)
+     SELECT ?, g.id, unixepoch()
+     FROM groups g
+     WHERE g.name COLLATE BINARY = ? AND g.is_public = 0 AND g.name NOT IN ('admins', 'all')
+       AND NOT EXISTS (
+         SELECT 1 FROM user_groups
+         WHERE user_id = ? AND group_id = g.id
+       )
+     RETURNING group_id`,
+  )
+    .bind(userId, exactGroupName, userId)
+    .first<{ group_id: string }>()
+  return inserted?.group_id ?? null
 }
 
 export async function cancelPermissionGroupMembershipRequest(

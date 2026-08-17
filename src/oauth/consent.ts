@@ -8,11 +8,12 @@ export async function consentCoversScopes(
   clientId: string,
   resource: string,
   requestedScopes: readonly string[],
+  metadataFingerprint: string | null = null,
 ): Promise<boolean> {
   // YOLO mode treats every request as already consented.
   if (yoloAllow(env, "consent")) return true
   const consent = await getConsent(env, userId, clientId, resource)
-  if (consent === null) {
+  if (consent === null || consent.metadataFingerprint !== metadataFingerprint) {
     return false
   }
   const granted = new Set(parseScopeString(consent.scope))

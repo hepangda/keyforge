@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { setUserPassword } from "../../src/auth/password"
 import { getSessionByToken } from "../../src/auth/session"
 import { removeUserFromPermissionGroup } from "../../src/db/queries/group-memberships"
-import { getPermissionGroupAccess } from "../../src/db/queries/permission-group-access"
+import { getPermissionGroupPolicy } from "../../src/db/queries/permission-group-rules"
 import {
   createGroup,
   createUser,
@@ -109,15 +109,13 @@ describe("permission-group membership workflow", () => {
     ).toBe("protected")
     expect(await deleteGroup(env, universalGroup?.id ?? "missing")).toBe("protected")
 
-    expect(await getPermissionGroupAccess(env, universalGroup?.id ?? "missing")).toEqual(
-      expect.objectContaining({ clientIds: expect.arrayContaining(["pangda_admin"]) }),
-    )
-    expect(await getPermissionGroupAccess(env, admins?.id ?? "missing")).toEqual(
-      expect.objectContaining({
-        clientIds: expect.not.arrayContaining(["pangda_admin"]),
-        resourceUris: expect.arrayContaining(["https://admin.pangda.app"]),
-      }),
-    )
+    const universalPolicy = await getPermissionGroupPolicy(env, universalGroup?.id ?? "missing")
+    const adminPolicy = await getPermissionGroupPolicy(env, admins?.id ?? "missing")
+    // Legacy cross-group composition is intentionally not migrated: `all`
+    // held only the application half of the old administrator path.
+    expect(universalPolicy?.rules).toEqual([])
+    expect(JSON.stringify(adminPolicy?.rules)).toContain("pangda_admin")
+    expect(JSON.stringify(adminPolicy?.rules)).toContain("https://admin.pangda.app")
   })
 
   it("lets users request groups and administrators review or directly manage membership", async () => {
@@ -134,20 +132,27 @@ describe("permission-group membership workflow", () => {
     const accountPage = await pageCsrf("/?section=groups", applicantSession)
     expect(accountPage.html).toContain("Your permission groups")
     expect(accountPage.html).toContain('action="/account/groups/request"')
-    expect(accountPage.html).toContain("data-search-picker")
-    expect(accountPage.html).toContain(`value="${group.id}"`)
-    expect(accountPage.html).not.toContain('value="grp_seed_admins"')
+    expect(accountPage.html).toContain('name="group_name"')
+    expect(accountPage.html).toContain("search-picker__well group-request-suggestions")
+    expect(accountPage.html).toContain("data-group-request-suggestion")
+    expect(accountPage.html).toContain(
+      `type="button" data-group-request-suggestion data-group-name="${group.name}"`,
+    )
+    expect(accountPage.html).not.toContain('name="suggested_group_name"')
+    expect(accountPage.html).not.toContain("data-search-picker")
+    expect(accountPage.html).not.toContain('value="admins"')
+    expect(accountPage.html.match(/action="\/account\/groups\/request"/g)).toHaveLength(1)
 
     const requested = await postForm(
       "/account/groups/request",
       applicantSession,
       accountPage.csrf,
       {
-        group_id: group.id,
+        group_name: group.name,
       },
     )
     expect(requested.headers.get("location")).toBe(
-      "/?section=groups&notice=group_request_submitted",
+      "/?section=groups&notice=group_name_request_received",
     )
     expect(await requestCount(applicant.id, group.id)).toBe(1)
 
@@ -158,9 +163,11 @@ describe("permission-group membership workflow", () => {
       "/account/groups/request",
       applicantSession,
       pendingPage.csrf,
-      { group_id: group.id },
+      { group_name: group.name },
     )
-    expect(duplicate.headers.get("location")).toBe("/?section=groups&notice=group_request_pending")
+    expect(duplicate.headers.get("location")).toBe(
+      "/?section=groups&notice=group_name_request_received",
+    )
     expect(await requestCount(applicant.id, group.id)).toBe(1)
 
     const admins = await getGroupByName(env, "admins")
@@ -169,10 +176,10 @@ describe("permission-group membership workflow", () => {
       "/account/groups/request",
       applicantSession,
       pendingPage.csrf,
-      { group_id: admins?.id ?? "missing" },
+      { group_name: admins?.name ?? "missing" },
     )
     expect(protectedRequest.headers.get("location")).toBe(
-      "/?section=groups&notice=group_request_unavailable",
+      "/?section=groups&notice=group_name_request_received",
     )
 
     const adminSession = await loginAs("admin", "test-admin-password-2026")
@@ -230,7 +237,7 @@ describe("permission-group membership workflow", () => {
     )
     const requestAgainPage = await pageCsrf("/?section=groups", applicantSession)
     await postForm("/account/groups/request", applicantSession, requestAgainPage.csrf, {
-      group_id: group.id,
+      group_name: group.name,
     })
     const cancelPage = await pageCsrf("/?section=groups", applicantSession)
     const cancelled = await postForm(
@@ -245,7 +252,7 @@ describe("permission-group membership workflow", () => {
 
     const thirdRequestPage = await pageCsrf("/?section=groups", applicantSession)
     await postForm("/account/groups/request", applicantSession, thirdRequestPage.csrf, {
-      group_id: group.id,
+      group_name: group.name,
     })
     const rejectPage = await pageCsrf(`/console/groups/${group.id}?view=members`, adminSession)
     const rejected = await postForm(
@@ -256,6 +263,86 @@ describe("permission-group membership workflow", () => {
     expect(rejected.headers.get("location")).toContain("flash=group_request_rejected")
     expect(await requestCount(applicant.id, group.id)).toBe(0)
     expect(await getUserGroupNames(env, applicant.id)).not.toContain(group.name)
+  })
+
+  it("keeps hidden groups undiscoverable and accepts only an exact full-name request", async () => {
+    const hidden = await createGroup(
+      env,
+      "classified-reviewers",
+      "Unlisted release reviewers",
+      false,
+    )
+    const applicant = await createUser(env, {
+      email: "hidden.group.applicant@example.test",
+      alias: "hiddengroupapplicant",
+      name: "Hidden Group Applicant",
+      emailVerified: true,
+    })
+    await setUserPassword(env, applicant.id, "hidden-group-password-2026")
+    const applicantSession = await loginAs(applicant.alias, "hidden-group-password-2026")
+
+    const directory = await pageCsrf("/?section=groups", applicantSession)
+    expect(directory.html).toContain('name="group_name"')
+    expect(directory.html).toContain("Find or enter a permission group")
+    expect(directory.html).toContain("search-picker__well group-request-suggestions")
+    expect(directory.html).not.toContain("data-search-picker")
+    expect(directory.html).not.toContain(
+      "Choose a suggestion or enter the complete name. Names entered manually must match exactly.",
+    )
+    expect(directory.html).not.toContain(
+      "To protect group privacy, every submission shows the same notice.",
+    )
+    expect(directory.html.match(/action="\/account\/groups\/request"/g)).toHaveLength(1)
+    expect(directory.html).not.toContain(hidden.id)
+    expect(directory.html).not.toContain(hidden.name)
+    expect(directory.html).not.toContain("Unlisted release reviewers")
+
+    const genericLocation = "/?section=groups&notice=group_name_request_received"
+    for (const groupName of [
+      "missing-classified-reviewers",
+      "Classified-reviewers",
+      "classified-reviewers ",
+    ]) {
+      const response = await postForm("/account/groups/request", applicantSession, directory.csrf, {
+        group_name: groupName,
+      })
+      expect(response.headers.get("location")).toBe(genericLocation)
+      expect(await requestCount(applicant.id, hidden.id)).toBe(0)
+    }
+
+    const requested = await postForm("/account/groups/request", applicantSession, directory.csrf, {
+      group_name: hidden.name,
+    })
+    expect(requested.headers.get("location")).toBe(genericLocation)
+    expect(await requestCount(applicant.id, hidden.id)).toBe(1)
+
+    const duplicate = await postForm("/account/groups/request", applicantSession, directory.csrf, {
+      group_name: hidden.name,
+    })
+    expect(duplicate.headers.get("location")).toBe(genericLocation)
+    expect(await requestCount(applicant.id, hidden.id)).toBe(1)
+
+    const pending = await pageCsrf(genericLocation, applicantSession)
+    expect(pending.html).toContain(
+      "Request received. If the complete name exactly matches a requestable permission group, it has been sent for review.",
+    )
+    expect(pending.html).not.toContain(hidden.id)
+    expect(pending.html).not.toContain(hidden.name)
+    expect(pending.html).not.toContain("Unlisted release reviewers")
+
+    const adminSession = await loginAs("admin", "test-admin-password-2026")
+    const review = await pageCsrf(`/console/groups/${hidden.id}?view=members`, adminSession)
+    expect(review.html).toContain(`/console/groups/${hidden.id}/requests/${applicant.id}/approve`)
+    const approved = await postForm(
+      `/console/groups/${hidden.id}/requests/${applicant.id}/approve`,
+      adminSession,
+      review.csrf,
+    )
+    expect(approved.headers.get("location")).toContain("flash=group_request_approved")
+
+    const membership = await pageCsrf("/?section=groups", applicantSession)
+    expect(membership.html).toContain(hidden.name)
+    expect(await getUserGroupNames(env, applicant.id)).toContain(hidden.name)
   })
 
   it("keeps the sole active administrator when membership is managed from a group", async () => {

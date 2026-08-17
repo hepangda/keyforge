@@ -265,9 +265,13 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
   app.post("/console/clients/:id/settings", async (c) => {
     const id = c.req.param("id")
     const form = await readVerifiedForm(c)
-    if (form === null) return c.redirect(`/console/clients/${id}?view=settings&flash=invalid`)
+    if (form === null)
+      return c.redirect(`/console/clients/${encodeURIComponent(id)}?view=settings&flash=invalid`)
     const current = await getClientById(c.env, id)
     if (current === null) return c.redirect("/console/clients?flash=not_found")
+    if (current.registrationType === "client_id_metadata") {
+      return c.redirect(`/console/clients/${encodeURIComponent(id)}?view=settings`)
+    }
     const values = {
       ...clientValues(current),
       name: readFormField(form, "name"),
@@ -289,7 +293,7 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
     })
     return c.redirect(
       withClearedDraft(
-        `/console/clients/${id}?view=settings&flash=client_updated`,
+        `/console/clients/${encodeURIComponent(id)}?view=settings&flash=client_updated`,
         `keyforge:form:client:${id}:settings`,
       ),
     )
@@ -298,9 +302,13 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
   app.post("/console/clients/:id/access", async (c) => {
     const id = c.req.param("id")
     const form = await readVerifiedForm(c)
-    if (form === null) return c.redirect(`/console/clients/${id}?view=access&flash=invalid`)
+    if (form === null)
+      return c.redirect(`/console/clients/${encodeURIComponent(id)}?view=access&flash=invalid`)
     const current = await getClientById(c.env, id)
     if (current === null) return c.redirect("/console/clients?flash=not_found")
+    if (current.registrationType === "client_id_metadata") {
+      return c.redirect(`/console/clients/${encodeURIComponent(id)}?view=access`)
+    }
     const values = {
       ...clientValues(current),
       allowedScopes: readFormField(form, "allowed_scopes"),
@@ -326,7 +334,7 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
     })
     return c.redirect(
       withClearedDraft(
-        `/console/clients/${id}?view=access&flash=client_updated`,
+        `/console/clients/${encodeURIComponent(id)}?view=access&flash=client_updated`,
         `keyforge:form:client:${id}:access`,
       ),
     )
@@ -338,7 +346,9 @@ export function registerConsoleClients(app: Hono<AppBindings>): void {
     const client = await getClientById(c.env, c.req.param("id"))
     if (client === null) return c.redirect("/console/clients?flash=not_found")
     if (!client.enabled) {
-      return c.redirect(`/console/clients/${client.clientId}?view=security&flash=not_found`)
+      return c.redirect(
+        `/console/clients/${encodeURIComponent(client.clientId)}?view=security&flash=not_found`,
+      )
     }
     return c.html(
       renderClientActionConfirmation(chrome(c, "clients"), client, issueCsrfToken(c), "disable"),
@@ -444,7 +454,7 @@ async function setEnabled(c: Context<AppBindings>, enabled: boolean): Promise<Re
   }
   const form = await readVerifiedForm(c)
   if (form === null) {
-    return c.redirect(`/console/clients/${id}?view=security&flash=invalid`)
+    return c.redirect(`/console/clients/${encodeURIComponent(id)}?view=security&flash=invalid`)
   }
   if (!(await setClientEnabled(c.env, id, enabled))) {
     return c.redirect("/console/clients?flash=not_found")
@@ -457,6 +467,6 @@ async function setEnabled(c: Context<AppBindings>, enabled: boolean): Promise<Re
     success: true,
   })
   return c.redirect(
-    `/console/clients/${id}?view=security&flash=${enabled ? "client_enabled" : "client_disabled"}`,
+    `/console/clients/${encodeURIComponent(id)}?view=security&flash=${enabled ? "client_enabled" : "client_disabled"}`,
   )
 }

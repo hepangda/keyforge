@@ -33,6 +33,15 @@ operators for destructive production restore or legacy-bucket deletion.
 D1, KV, the avatar R2 bucket, and both Queue/DLQ pairs are separate in dev and
 production. The only R2 binding is `AVATARS`, which stores user-uploaded
 profile photos; KeyForge still creates no audit archive outside D1.
+
+AAEasy MCP Resource data is environment-owned rather than a cross-environment
+D1 migration. `pnpm db:migrate:local` applies
+`scripts/resources/aaeasy-mcp.local.sql`; production migration and release
+apply `scripts/resources/aaeasy-mcp.production.sql`. Both scripts are
+idempotent, preserve an existing introspection secret while renaming
+`aaeasy_mcp_resource_server` to `aaeasy_mcp_introspector`, and configure only
+`mcp.tools.read` plus `mcp.tools.execute`. Production runtime policy rejects
+loopback HTTP Resources even if one is inserted directly into D1.
 Any all-zero D1/KV IDs are deliberate placeholders; the current production
 profile still has both. Resource identifiers are not secrets and should replace
 the matching placeholders in `wrangler.toml` after provisioning so every
@@ -51,23 +60,36 @@ and TOML shape without proving that provisioned resources exist.
 
 ### Permission-group authorization
 
-User-backed token flows are default-deny. A user's current memberships must
-match an assignment for the requesting application or device and independently
-match an assignment for the selected API. Two different memberships may
-satisfy those checks. Custom clients and resources start unassigned and cannot
-receive user tokens until an operator configures both sides under **Permission
-groups** in the administration console or through `PUT /admin/groups/:id/access`.
-Service clients using `client_credentials` do not carry a user grant and are not
-subject to permission-group assignments.
+User-backed token flows use a default-deny permission rule engine. Each group
+has an integer priority and ordered allow/deny rules containing nested `and` or
+`or` conditions over application, API, and scope. Leaves support `equals` and
+`not_equals` with one value, or `in` and `not_in` with a non-empty value set.
+Base rules omit scope; no matching base allow denies the application/API
+request. Every custom scope then requires a matching scope-bearing allow. Only
+rules at the smallest matching membership priority number participate, and
+deny wins a tie. Priority follows nice semantics: a larger number means a lower
+priority.
 
-Signed-in users can review their current memberships under **Permission groups**
-and request any non-built-in group. The protected `all` membership is assigned
-to every existing and future account and cannot be removed; it does not consume
-one of the 100 assignable memberships. Requests do not grant access until an
-administrator approves them. Administrators review the queue, search for users,
-and add or remove members directly from the group's **Members** tab. Approval or
-any other membership assignment clears the matching pending request. The
-`admins` group is never self-requestable, and every removal path preserves at
+`openid`, `profile`, `email`, and `offline_access` follow allowed base access
+directly and cannot be configured as scope leaves. Every requested custom scope
+must pass independently. Service clients using `client_credentials` do not
+carry a user membership and remain outside this rule engine. KeyForge rechecks
+current membership, priority, and rules during authorization, code exchange,
+refresh, UserInfo, and introspection, so MCP online validation observes changes
+on the next request.
+
+Signed-in users can review their current memberships under **Permission groups**.
+Public non-built-in groups appear in the self-service request directory. Hidden
+groups never appear in that directory and accept requests only when a user
+manually enters the complete, exact name; the response is deliberately the same
+whether the group exists or a request was inserted. Hidden pending requests are
+also omitted from the user's pending list. The protected `all` membership is
+assigned to every existing and future account and cannot be removed; it does not
+consume one of the 100 assignable memberships. Requests do not grant access until
+an administrator approves them. Administrators review the queue, search for
+users, and add or remove members directly from the group's **Members** tab.
+Approval or any other membership assignment clears the matching pending request.
+The `admins` group is never self-requestable, and every removal path preserves at
 least one active administrator.
 
 Granting `admins` membership is a security transition: KeyForge atomically
@@ -75,18 +97,13 @@ revokes the user's existing sessions and refresh-token families and advances the
 account security version. The user must sign in again with a passkey or an
 administrator-eligible password before using administrative surfaces.
 
-The `pangda_admin` application is assigned to `all`, while
-`https://admin.pangda.app` remains assigned to `admins`. Membership therefore
-authorizes requesting a user token for that API; it does not act as an Admin API
-credential itself. `/admin/*` accepts only a current, user-backed token for that
-audience, with `admin.read` for reads and `admin.write` for mutations. Cookie
-sessions continue to authenticate the separate built-in HTML console but are
-not accepted by the JSON API.
-
-Application, device, API, and group selectors use a bounded recommendation list
-plus local search instead of rendering the full catalog as visible checkbox
-grids. Only selected targets remain in the persistent selection tray; the
-original form field names and server-side validation remain unchanged.
+The protected `admins` group has explicit base and scope rules for
+`pangda_admin` and `https://admin.pangda.app`. Membership authorizes requesting
+a user token for that API; it does not act as an Admin API credential itself.
+`/admin/*` accepts only a current, user-backed token for that audience, with
+`admin.read` for reads and `admin.write` for mutations. Cookie sessions continue
+to authenticate the separate built-in HTML console but are not accepted by the
+JSON API.
 
 Migration `0018_permission_group_access.sql` seeds `employees` for `pangda_app`,
 `cloudflare_one`, `pangda_cli`, and `hermes_dashboard`, together with their four
@@ -101,6 +118,22 @@ separately assigns `demo_local` to `employees`. Operators that removed an
 optional seeded target before the migration do not have it recreated. Deleting
 a group, client, or resource cascades its assignments and therefore leaves the
 affected authorization path denied rather than widening access.
+Migration `0023_permission_group_scope_policies.sql` adds resource-qualified
+scope allow/deny rules without seeding any policy, preserving existing access
+until an operator opts into scope-level restrictions. D1 triggers reject rules
+for scopes the resource does not offer and prune rules when a scope is removed.
+Migration `0024_resource_authorized_scopes.sql` removes any rules for `openid`,
+`profile`, and `offline_access` and prevents them from being recreated. Those
+identity/session scopes follow application and resource access directly.
+Migration `0025_permission_group_rule_engine.sql` adds group priority and the
+nested rule document, translates legacy targets and custom-scope policies, adds
+`email` to the directly authorized standard scopes, and preserves the built-in
+administrator path explicitly. Legacy cross-group application/API composition
+is intentionally not widened during translation: only same-group target pairs
+become base rules, with the administrator split migrated as a reviewed special
+case. Deleting a referenced application or API, or retiring an API's custom
+scope, deletes the complete containing rule so a partial condition cannot
+broaden access or silently reactivate later.
 
 ### YOLO mode (dev only)
 
@@ -121,7 +154,7 @@ With YOLO mode on, the server skips:
 | Client authentication | Confidential clients must present a valid secret | Any credential shape accepted |
 | Consent | Stored grant must cover requested scopes | Treated as already consented |
 | Scope/resource policy | Client *and* resource must allow each scope | Every requested scope granted |
-| Permission-group token access | Current membership must match assigned application and API groups | Every user-to-target check allowed |
+| Permission-group token access | Matching rules at the smallest priority number allow base access and every custom scope | Every user-to-target check allowed |
 | Administrator access | `admins` group plus recent authentication | Any signed-in user, no reauth |
 | Password policy | 6/12-character minimum by role | Length floor dropped |
 | Password login | Verified against stored scrypt hash | Accepted when the password repeats the login name |
@@ -507,7 +540,10 @@ successive invocations:
   dev or 365 days in production, without creating an archive copy;
 - removes expired/revoked sessions, refresh tokens, device sessions, grant
   history, and one-time token rows after the configured terminal retention
-  window (14 days in dev and 30 days in production).
+  window (14 days in dev and 30 days in production);
+- removes expired, enabled Client ID Metadata Document client records only
+  when they have no consent, refresh-token, or grant history. Disabled records
+  are retained so an operator block cannot be bypassed by rediscovery.
 
 The deployment validator and remote runtime both enforce the environment's
 exact audit limit. Each delete statement selects the oldest indexed candidates

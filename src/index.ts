@@ -129,6 +129,7 @@ app.use(
 
 // Identity and administration responses carry personal data, CSRF values, or
 // one-time capabilities. Public metadata/assets opt into their own policy.
+const publicRootAssets = new Set(["/favicon.ico", "/favicon.svg", "/apple-touch-icon.png"])
 app.use("*", async (c, next) => {
   await next()
   const path = new URL(c.req.url).pathname
@@ -137,7 +138,8 @@ app.use("*", async (c, next) => {
   if (
     !path.startsWith("/assets/") &&
     !path.startsWith("/.well-known/") &&
-    !path.startsWith("/avatars/")
+    !path.startsWith("/avatars/") &&
+    !publicRootAssets.has(path)
   ) {
     c.header("cache-control", "no-store")
     c.header("pragma", "no-cache")

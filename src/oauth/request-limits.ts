@@ -1,14 +1,23 @@
+import {
+  CLIENT_IDENTIFIER_URL_MAX_BYTES,
+  isValidOAuthClientId,
+  STATIC_CLIENT_ID_PATTERN,
+} from "./client-identifier"
+
 export const OAUTH_FORM_MAX_PARAMETERS = 32
 export const OAUTH_FORM_MAX_BODY_BYTES = 64 * 1024
 export const OAUTH_PARAMETER_NAME_MAX_BYTES = 64
 export const OAUTH_PARAMETER_DEFAULT_MAX_BYTES = 2048
-export const OAUTH_CLIENT_ID_MAX_BYTES = 128
+export const OAUTH_CLIENT_ID_MAX_BYTES = CLIENT_IDENTIFIER_URL_MAX_BYTES
+export const OAUTH_STATIC_CLIENT_ID_MAX_BYTES = 128
 export const OAUTH_CLIENT_SECRET_MAX_BYTES = 512
 
 const OAUTH_PARAMETER_MAX_BYTES: Readonly<Record<string, number>> = {
   client_id: OAUTH_CLIENT_ID_MAX_BYTES,
   client_secret: OAUTH_CLIENT_SECRET_MAX_BYTES,
   grant_type: 128,
+  client_assertion_type: 128,
+  client_assertion: 16 * 1024,
   code: 512,
   redirect_uri: 2048,
   code_verifier: 128,
@@ -32,10 +41,10 @@ const OAUTH_PARAMETER_MAX_BYTES: Readonly<Record<string, number>> = {
 
 /** Largest Base64 payload that can contain a bounded `client_id:client_secret` pair. */
 export const OAUTH_BASIC_CREDENTIALS_MAX_ENCODED_BYTES =
-  4 * Math.ceil((OAUTH_CLIENT_ID_MAX_BYTES + 1 + OAUTH_CLIENT_SECRET_MAX_BYTES) / 3)
+  4 * Math.ceil((OAUTH_STATIC_CLIENT_ID_MAX_BYTES + 1 + OAUTH_CLIENT_SECRET_MAX_BYTES) / 3)
 
 const OAUTH_PARAMETER_NAME = /^[A-Za-z0-9._-]+$/
-export const OAUTH_CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/
+export const OAUTH_CLIENT_ID_PATTERN = STATIC_CLIENT_ID_PATTERN
 const REAUTH_CONTINUATION_PATTERN = /^[A-Za-z0-9_-]{32}$/
 const encoder = new TextEncoder()
 
@@ -53,7 +62,7 @@ export function validateOAuthParameter(
   ) {
     return "invalid_name"
   }
-  if (name === "client_id" && !OAUTH_CLIENT_ID_PATTERN.test(value)) {
+  if (name === "client_id" && !isValidOAuthClientId(value)) {
     return "invalid_value"
   }
   if (name === "_keyforge_reauth" && !REAUTH_CONTINUATION_PATTERN.test(value)) {

@@ -602,11 +602,10 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "分配成员，并控制每个权限组可访问的应用和 API。",
     ja: "メンバーを割り当て、各権限グループがアクセスできるアプリケーションと API を管理します。",
   },
-  "Members can receive user tokens only for applications and APIs assigned to this permission group.":
-    {
-      "zh-CN": "成员只能为分配给此权限组的应用和 API 获取用户令牌。",
-      ja: "メンバーは、この権限グループに割り当てられたアプリケーションと API に対してのみユーザートークンを取得できます。",
-    },
+  "Membership activates this group's rules; access still requires matching allow rules.": {
+    "zh-CN": "成员身份会启用此权限组的规则；访问仍需匹配允许规则。",
+    ja: "メンバーシップによりこのグループのルールが有効になりますが、アクセスには一致する許可ルールが必要です。",
+  },
   "No access is granted until at least one application and one API are selected.": {
     "zh-CN": "至少选择一个应用和一个 API 后才会授予访问权限。",
     ja: "アプリケーションと API を少なくとも 1 つずつ選択するまで、アクセスは許可されません。",
@@ -1265,11 +1264,11 @@ export const MESSAGE_CATALOG = {
   "Delete API?": { "zh-CN": "删除 API？", ja: "APIを削除しますか？" },
   "Back to API": { "zh-CN": "返回 API", ja: "APIに戻る" },
   "Confirm API deletion": { "zh-CN": "确认删除 API", ja: "API削除の確認" },
-  "This removes the API registration, permission-group assignments, client references, and stored authorizations. Existing access tokens remain valid until they expire.":
+  "This removes the API registration, permission rules that reference it, client references, and stored authorizations. Existing access tokens remain valid until they expire.":
     {
       "zh-CN":
-        "这将移除 API 注册、权限组分配、客户端引用和已存储的授权。已签发的访问令牌在过期前仍然有效。",
-      ja: "API登録、権限グループの割り当て、クライアント参照、保存済みの認可を削除します。発行済みアクセストークンは有効期限まで有効です。",
+        "这将移除 API 注册、引用它的权限规则、客户端引用和已存储的授权。已签发的访问令牌在过期前仍然有效。",
+      ja: "API登録、それを参照する権限ルール、クライアント参照、保存済みの認可を削除します。発行済みアクセストークンは有効期限まで有効です。",
     },
   Active: { "zh-CN": "活动", ja: "有効" },
   Manage: { "zh-CN": "管理", ja: "管理" },
@@ -1297,6 +1296,11 @@ export const MESSAGE_CATALOG = {
   "Search results": { "zh-CN": "搜索结果", ja: "検索結果" },
   "Nothing selected yet.": { "zh-CN": "尚未选择任何项目。", ja: "まだ何も選択されていません。" },
   "No matches found.": { "zh-CN": "未找到匹配项。", ja: "一致する項目がありません。" },
+  "{count} matches": { "zh-CN": "{count} 个匹配项", ja: "{count}件一致" },
+  "Showing first {shown} of {count} matches": {
+    "zh-CN": "显示 {count} 个匹配项中的前 {shown} 个",
+    ja: "{count}件中、先頭の{shown}件を表示",
+  },
   "Choose at least one item.": {
     "zh-CN": "请至少选择一项。",
     ja: "少なくとも1つ選択してください。",
@@ -1317,6 +1321,7 @@ export const MESSAGE_CATALOG = {
     "zh-CN": "按名称或资源 URI 搜索 API",
     ja: "名前またはリソースURIでAPIを検索",
   },
+  "Search scopes": { "zh-CN": "搜索作用域", ja: "スコープを検索" },
   "No APIs selected.": { "zh-CN": "尚未选择 API。", ja: "APIが選択されていません。" },
   "Search permission groups": { "zh-CN": "搜索权限组", ja: "権限グループを検索" },
   "No permission groups selected.": {
@@ -1326,21 +1331,24 @@ export const MESSAGE_CATALOG = {
   Member: { "zh-CN": "成员", ja: "メンバー" },
   "Pending review": { "zh-CN": "等待审核", ja: "承認待ち" },
   "Cancel request": { "zh-CN": "取消申请", ja: "申請を取り消す" },
-  "No other permission groups are available to request.": {
-    "zh-CN": "目前没有其他可申请的权限组。",
-    ja: "現在申請できる他の権限グループはありません。",
-  },
-  "Find a permission group": { "zh-CN": "查找权限组", ja: "権限グループを探す" },
-  "Search groups by name or description": {
-    "zh-CN": "按名称或描述搜索权限组",
-    ja: "名前または説明でグループを検索",
-  },
-  "Group to request": { "zh-CN": "要申请的权限组", ja: "申請するグループ" },
-  "Choose a group from the recommendations or search results.": {
-    "zh-CN": "请从推荐或搜索结果中选择一个权限组。",
-    ja: "おすすめまたは検索結果からグループを選択してください。",
-  },
   "Request to join": { "zh-CN": "申请加入", ja: "参加を申請" },
+  "Find or enter a permission group": {
+    "zh-CN": "查找或输入权限组",
+    ja: "グループを検索または入力",
+  },
+  "Search or enter the complete group name": {
+    "zh-CN": "搜索或输入权限组完整名称",
+    ja: "グループの完全な名前を検索または入力",
+  },
+  "Suggested permission groups": {
+    "zh-CN": "权限组建议",
+    ja: "グループ候補",
+  },
+  Select: { "zh-CN": "选择", ja: "選択" },
+  "No matching permission groups in the directory.": {
+    "zh-CN": "目录中没有匹配的权限组。",
+    ja: "一覧に一致するグループはありません。",
+  },
   "Your permission groups": { "zh-CN": "您的权限组", ja: "あなたの権限グループ" },
   "Membership controls which applications and APIs can issue tokens for your account.": {
     "zh-CN": "成员身份决定哪些应用和 API 可以为您的账户签发令牌。",
@@ -1356,14 +1364,19 @@ export const MESSAGE_CATALOG = {
     ja: "アクセスが変更される前に、管理者の承認が必要です。",
   },
   "Request another group": { "zh-CN": "申请其他权限组", ja: "別のグループを申請" },
-  "Search the directory, choose one group, and send it for review.": {
-    "zh-CN": "搜索目录，选择一个权限组并提交审核。",
-    ja: "ディレクトリを検索し、グループを1つ選んで審査に送信します。",
+  "Search for a permission group or enter its complete name.": {
+    "zh-CN": "搜索权限组，或输入其完整名称。",
+    ja: "グループを検索するか、完全な名前を入力してください。",
   },
   "Permission-group request submitted.": {
     "zh-CN": "权限组申请已提交。",
     ja: "権限グループへの申請を送信しました。",
   },
+  "Request received. If the complete name exactly matches a requestable permission group, it has been sent for review.":
+    {
+      "zh-CN": "已接收输入。仅当完整名称与可申请的权限组完全匹配时，申请才会被提交审核。",
+      ja: "入力を受け付けました。完全な名前が申請可能なグループと完全一致する場合にのみ、審査へ送信されています。",
+    },
   "That permission-group request is already pending.": {
     "zh-CN": "该权限组申请已在等待审核。",
     ja: "その権限グループへの申請はすでに承認待ちです。",
@@ -1381,9 +1394,25 @@ export const MESSAGE_CATALOG = {
     ja: "その権限グループは申請できません。",
   },
   "Group sections": { "zh-CN": "权限组部分", ja: "権限グループのセクション" },
+  Visibility: { "zh-CN": "可见性", ja: "公開範囲" },
+  "Request visibility": { "zh-CN": "申请可见性", ja: "申請時の公開範囲" },
+  "Public group": { "zh-CN": "公开权限组", ja: "公開グループ" },
+  "Hidden group": { "zh-CN": "隐藏权限组", ja: "非公開グループ" },
+  "Listed in the request directory and searchable by name or description.": {
+    "zh-CN": "显示在申请目录中，并可按名称或描述搜索。",
+    ja: "申請ディレクトリに表示され、名前または説明で検索できます。",
+  },
+  "Not listed; users must enter the complete group name exactly.": {
+    "zh-CN": "不会显示在目录中；用户必须完全准确地输入权限组完整名称。",
+    ja: "一覧には表示されず、ユーザーはグループの完全な名前を正確に入力する必要があります。",
+  },
   "Name and description for this permission group.": {
     "zh-CN": "此权限组的名称和描述。",
     ja: "この権限グループの名前と説明です。",
+  },
+  "Name, description, and request visibility for this permission group.": {
+    "zh-CN": "此权限组的名称、描述和申请可见性。",
+    ja: "このグループの名前、説明、申請時の公開範囲です。",
   },
   "Applications and devices": { "zh-CN": "应用和设备", ja: "アプリケーションとデバイス" },
   "No user applications or devices are registered.": {
@@ -1412,9 +1441,9 @@ export const MESSAGE_CATALOG = {
     ja: "申請を承認するとユーザーがすぐに追加され、却下してもメンバーシップは変更されません。",
   },
   "No pending requests.": { "zh-CN": "没有待审核申请。", ja: "承認待ちの申請はありません。" },
-  "People who currently receive this group's application and API access.": {
-    "zh-CN": "当前拥有此权限组应用和 API 访问权限的人员。",
-    ja: "現在このグループのアプリケーションとAPIへのアクセスを持つユーザーです。",
+  "People whose authorization includes this group's rules.": {
+    "zh-CN": "授权判定中会包含此权限组规则的人员。",
+    ja: "認可判定にこのグループのルールが含まれるユーザーです。",
   },
   "This group has no members.": {
     "zh-CN": "此权限组没有成员。",
@@ -1472,10 +1501,10 @@ export const MESSAGE_CATALOG = {
     ja: "{group} には現在{count}人のメンバーがいます。",
   },
   "Confirm group deletion": { "zh-CN": "确认删除权限组", ja: "グループ削除の確認" },
-  "This permanently removes the group, every membership, and every application or API assignment. User accounts are not deleted.":
+  "This permanently removes the group, every membership, and every permission rule. User accounts are not deleted.":
     {
-      "zh-CN": "这将永久移除该权限组、所有成员身份以及所有应用或 API 分配，但不会删除用户账户。",
-      ja: "権限グループ、すべてのメンバーシップ、アプリケーションまたは API の割り当てを完全に削除します。ユーザーアカウントは削除されません。",
+      "zh-CN": "这将永久移除该权限组、所有成员身份和所有权限规则，但不会删除用户账户。",
+      ja: "権限グループ、すべてのメンバーシップ、すべての権限ルールを完全に削除します。ユーザーアカウントは削除されません。",
     },
   "Delete group": { "zh-CN": "删除权限组", ja: "グループを削除" },
   "Delete group?": { "zh-CN": "删除权限组？", ja: "グループを削除しますか？" },
@@ -1996,4 +2025,198 @@ export const MESSAGE_CATALOG = {
       "zh-CN": "服务客户端必须为机密客户端，仅使用 client_credentials，并排除用户作用域和重定向",
       ja: "サービスクライアントはコンフィデンシャルで、client_credentialsのみを使用し、ユーザースコープとリダイレクトを含めない必要があります",
     },
+  "Enable MCP authorization": {
+    "zh-CN": "启用 MCP 授权",
+    ja: "MCP認可を有効にする",
+  },
+  "Allow Client ID Metadata Document clients": {
+    "zh-CN": "允许 Client ID Metadata Document 客户端",
+    ja: "Client ID Metadata Documentクライアントを許可する",
+  },
+  "MCP resources require the resource parameter during token exchange. Metadata clients are admitted only after interactive consent and resource permission checks.":
+    {
+      "zh-CN":
+        "MCP 资源要求在令牌交换时提供 resource 参数。元数据客户端只有通过交互式同意和资源权限检查后才会被接纳。",
+      ja: "MCPリソースではトークン交換時にresourceパラメーターが必要です。メタデータクライアントは、対話型の同意とリソース権限チェックを通過した場合のみ許可されます。",
+    },
+  "Scopes must be unique valid OAuth scope tokens.": {
+    "zh-CN": "作用域必须是唯一且有效的 OAuth scope-token。",
+    ja: "スコープは重複のない有効なOAuth scope-tokenである必要があります。",
+  },
+  "Client ID Metadata Documents require MCP authorization to be enabled.": {
+    "zh-CN": "使用 Client ID Metadata Document 前必须启用 MCP 授权。",
+    ja: "Client ID Metadata Documentを使用するにはMCP認可を有効にする必要があります。",
+  },
+  "Client identity": { "zh-CN": "客户端身份", ja: "クライアントID" },
+  "Metadata client policy": { "zh-CN": "元数据客户端策略", ja: "メタデータクライアントポリシー" },
+  "Consent required": { "zh-CN": "需要用户同意", ja: "ユーザー同意が必要" },
+  "Admin approved": { "zh-CN": "需要管理员批准", ja: "管理者の承認が必要" },
+  "MCP resources require the resource parameter during token exchange. Metadata clients also require resource admission, user entitlement, and consent.":
+    {
+      "zh-CN":
+        "MCP 资源要求在令牌交换时提供 resource 参数。元数据客户端还必须通过资源准入、用户资格和用户同意检查。",
+      ja: "MCPリソースではトークン交換時にresourceパラメーターが必要です。メタデータクライアントにはリソース許可、ユーザー権限、同意も必要です。",
+    },
+  "Verified client host": { "zh-CN": "已验证的客户端主机", ja: "検証済みクライアントホスト" },
+  "This client will return to a local application on your device. A different local process could impersonate that callback.":
+    {
+      "zh-CN": "此客户端将返回您设备上的本地应用。其他本地进程可能冒充该回调。",
+      ja: "このクライアントは端末上のローカルアプリに戻ります。別のローカルプロセスがコールバックを偽装する可能性があります。",
+    },
+  "This client's metadata changed. Review its identity, callback, and permissions again.": {
+    "zh-CN": "此客户端的元数据已更改。请重新检查其身份、回调和权限。",
+    ja: "このクライアントのメタデータが変更されました。ID、コールバック、権限を再確認してください。",
+  },
+  "This client is requesting additional permissions.": {
+    "zh-CN": "此客户端正在请求更多权限。",
+    ja: "このクライアントは追加の権限を要求しています。",
+  },
+  "This client requested renewed confirmation.": {
+    "zh-CN": "此客户端要求重新确认授权。",
+    ja: "このクライアントは同意の再確認を要求しています。",
+  },
+  "This is the first authorization for this client and resource.": {
+    "zh-CN": "这是此客户端首次请求访问该资源。",
+    ja: "このクライアントがこのリソースへの認可を要求するのは初めてです。",
+  },
+  "Elevated permission": { "zh-CN": "高权限操作", ja: "昇格権限" },
+  "mcp.tools.execute can run actions and change data through this MCP server.": {
+    "zh-CN": "mcp.tools.execute 可以通过此 MCP 服务器执行操作并更改数据。",
+    ja: "mcp.tools.executeは、このMCPサーバーを通じて操作を実行し、データを変更できます。",
+  },
+  "I explicitly allow this client to execute MCP tools.": {
+    "zh-CN": "我明确允许此客户端执行 MCP 工具。",
+    ja: "このクライアントによるMCPツールの実行を明示的に許可します。",
+  },
+  "New permissions": { "zh-CN": "新增权限", ja: "追加される権限" },
+  "Target resource": { "zh-CN": "目标资源", ja: "対象リソース" },
+  "View tools and data exposed by this MCP server": {
+    "zh-CN": "查看此 MCP 服务器提供的工具和数据",
+    ja: "このMCPサーバーが提供するツールとデータを表示",
+  },
+  "Run actions through this MCP server": {
+    "zh-CN": "通过此 MCP 服务器执行操作",
+    ja: "このMCPサーバーを通じて操作を実行",
+  },
+  "allowed_scopes is duplicated, malformed, or too large": {
+    "zh-CN": "allowed_scopes 包含重复项、格式错误或过大",
+    ja: "allowed_scopesが重複、形式不正、または大きすぎます",
+  },
+  "token introspection requires a confidential client": {
+    "zh-CN": "令牌内省需要机密客户端",
+    ja: "トークンイントロスペクションにはコンフィデンシャルクライアントが必要です",
+  },
+  "dedicated introspection clients must be confidential and have no redirects": {
+    "zh-CN": "专用内省客户端必须为机密客户端且不得设置重定向",
+    ja: "専用イントロスペクションクライアントはコンフィデンシャルで、リダイレクトを持たない必要があります",
+  },
+  "Redirect destination": { "zh-CN": "重定向目标", ja: "リダイレクト先" },
+  "This client will return to a local application on your device.": {
+    "zh-CN": "此客户端将返回到您设备上的本地应用。",
+    ja: "このクライアントは端末上のローカルアプリケーションに戻ります。",
+  },
+  "allowed_scopes is empty, duplicated, malformed, or too large": {
+    "zh-CN": "allowed_scopes 为空、包含重复项、格式错误或过大",
+    ja: "allowed_scopesが空、重複、形式不正、または大きすぎます",
+  },
+  "MCP resources must use HTTPS, or loopback HTTP for local development, without a query or fragment.":
+    {
+      "zh-CN": "MCP 资源必须使用 HTTPS；本地开发可使用回环 HTTP，且不得包含查询或片段。",
+      ja: "MCPリソースにはHTTPSを使用してください。ローカル開発ではループバックHTTPを使用でき、クエリやフラグメントは含められません。",
+    },
+  "Managed metadata client": {
+    "zh-CN": "受管元数据客户端",
+    ja: "管理対象メタデータクライアント",
+  },
+  "Name, redirects, and grant types are refreshed from the Client ID Metadata Document. Access remains bounded by enabled MCP resources and user consent.":
+    {
+      "zh-CN":
+        "名称、重定向和许可类型会从 Client ID Metadata Document 刷新。访问仍受已启用的 MCP 资源与用户同意约束。",
+      ja: "名前、リダイレクト、グラント種別はClient ID Metadata Documentから更新されます。アクセスは有効なMCPリソースとユーザー同意によって引き続き制限されます。",
+    },
+  "Metadata URL": { "zh-CN": "元数据 URL", ja: "メタデータURL" },
+  "Assign memberships and evaluate ordered application, API, and scope rules.": {
+    "zh-CN": "分配成员，并按顺序评估应用、API 与作用域规则。",
+    ja: "メンバーシップを割り当て、アプリケーション、API、スコープのルールを順序付きで評価します。",
+  },
+  "Smaller priority numbers win; deny wins ties.": {
+    "zh-CN": "优先级数字越小越优先；数值相同时拒绝优先。",
+    ja: "優先度の数値が小さいほど優先され、同じ数値では拒否が優先されます。",
+  },
+  Priority: { "zh-CN": "优先级", ja: "優先度" },
+  "Like nice values, smaller numbers have higher priority.": {
+    "zh-CN": "采用 nice 语义：数字越小，优先级越高。",
+    ja: "nice値と同様に、数値が小さいほど優先度が高くなります。",
+  },
+  "Create an ordered rule container. Rules are configured after creation.": {
+    "zh-CN": "创建一个有优先级的规则容器；创建后再配置规则。",
+    ja: "優先度付きルールコンテナを作成します。ルールは作成後に設定します。",
+  },
+  "Name, priority, description, and request visibility for this permission group.": {
+    "zh-CN": "设置此权限组的名称、优先级、描述和申请可见性。",
+    ja: "この権限グループの名前、優先度、説明、申請の公開範囲を設定します。",
+  },
+  "Built-in permission groups cannot be deleted or renamed.": {
+    "zh-CN": "内置权限组不能删除或重命名。",
+    ja: "組み込み権限グループは削除または名前変更できません。",
+  },
+  Rules: { "zh-CN": "规则", ja: "ルール" },
+  Rule: { "zh-CN": "规则", ja: "ルール" },
+  Condition: { "zh-CN": "条件", ja: "条件" },
+  "Add rule": { "zh-CN": "添加规则", ja: "ルールを追加" },
+  "Add condition": { "zh-CN": "添加条件", ja: "条件を追加" },
+  "Advanced JSON": { "zh-CN": "高级 JSON", ja: "高度なJSON" },
+  "Apply JSON": { "zh-CN": "应用 JSON", ja: "JSONを適用" },
+  "No rules configured. Access is denied by default.": {
+    "zh-CN": "尚未配置规则，默认拒绝所有访问。",
+    ja: "ルールが設定されていないため、アクセスは既定で拒否されます。",
+  },
+  "Rules match the application, API, and scope authorization context.": {
+    "zh-CN": "规则会匹配应用、API 和作用域授权上下文。",
+    ja: "ルールはアプリケーション、API、スコープの認可コンテキストに一致します。",
+  },
+  "Priority {priority}": { "zh-CN": "优先级 {priority}", ja: "優先度 {priority}" },
+  "Rules without a scope condition decide base application/API access. Custom scopes require a separate matching allow rule. Smaller priority numbers win; deny wins ties.":
+    {
+      "zh-CN":
+        "不含 scope 条件的规则决定应用/API 基础访问。自定义作用域还必须匹配单独的允许规则。优先级数字越小越优先；数值相同时拒绝优先。",
+      ja: "scope条件のないルールがアプリケーション/APIの基本アクセスを決定します。カスタムスコープには別の一致する許可ルールが必要です。優先度の数値が小さいほど優先され、同じ数値では拒否が優先されます。",
+    },
+  "Configurable scopes": { "zh-CN": "可配置作用域", ja: "設定可能なスコープ" },
+  "Available rule values": { "zh-CN": "可用规则值", ja: "利用可能なルール値" },
+  "None available": { "zh-CN": "暂无可用项", ja: "利用可能な項目はありません" },
+  "Rule document (JSON)": { "zh-CN": "规则文档（JSON）", ja: "ルールドキュメント（JSON）" },
+  'Each rule has effect "allow" or "deny" and a condition. Conditions use "and"/"or" groups; leaves use =, !=, IN, or NOT IN for application, api, or scope. Empty rules deny everything.':
+    {
+      "zh-CN":
+        "每条规则包含 allow 或 deny 效果及一个条件。条件可使用 and/or 组；application、api、scope 叶节点支持 =、!=、IN 和 NOT IN。空规则集拒绝所有访问。",
+      ja: "各ルールにはallowまたはdenyの効果と条件があります。条件にはand/orグループを使用し、application、api、scopeのリーフでは=、!=、IN、NOT INを使用できます。空のルールセットはすべて拒否します。",
+    },
+  "openid, profile, email, and offline_access follow base application/API access and cannot appear in scope rules.":
+    {
+      "zh-CN":
+        "openid、profile、email 和 offline_access 直接沿用应用/API 基础访问结果，不能出现在作用域规则中。",
+      ja: "openid、profile、email、offline_accessは基本のアプリケーション/APIアクセスに従い、スコープルールには指定できません。",
+    },
+  "Save rules": { "zh-CN": "保存规则", ja: "ルールを保存" },
+  "Enter a valid rule document using existing applications, APIs, and scopes.": {
+    "zh-CN": "请输入使用现有应用、API 和作用域的有效规则文档。",
+    ja: "既存のアプリケーション、API、スコープを使用した有効なルールドキュメントを入力してください。",
+  },
+  "Rule document must be valid JSON.": {
+    "zh-CN": "规则文档必须是有效的 JSON。",
+    ja: "ルールドキュメントは有効なJSONである必要があります。",
+  },
+  "Enter valid rules using existing applications, APIs, and configurable scopes.": {
+    "zh-CN": "请使用现有应用、API 和可配置作用域输入有效规则。",
+    ja: "既存のアプリケーション、API、設定可能なスコープを使用した有効なルールを入力してください。",
+  },
+  "openid, profile, email, and offline_access cannot be configured in scope rules.": {
+    "zh-CN": "openid、profile、email 和 offline_access 不能在作用域规则中单独配置。",
+    ja: "openid、profile、email、offline_accessはスコープルールで個別設定できません。",
+  },
+  "Priority must be a whole number from 0 to 1000000.": {
+    "zh-CN": "优先级必须是 0 到 1000000 之间的整数。",
+    ja: "優先度は0から1000000までの整数である必要があります。",
+  },
 } as const satisfies Readonly<Record<string, LocalizedMessage>>

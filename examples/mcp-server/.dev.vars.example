@@ -1,0 +1,3 @@
+# Copy to examples/mcp-server/.dev.vars for local development.
+# The value is returned once when the confidential introspection client is created or rotated.
+MCP_INTROSPECTION_CLIENT_SECRET="replace-with-the-keyforge-client-secret"

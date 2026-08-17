@@ -1,6 +1,8 @@
+import { isMetadataClientApproved } from "../db/queries/clients"
 import { getResourceByUri } from "../db/queries/resources"
 import { isYoloEnabled } from "../operations/yolo"
 import { OAuthError } from "../security/errors"
+import { isMcpResourceUriAllowed } from "../security/redirect-uri"
 import { asResourceUri, type OAuthClient, type OAuthResource } from "../types/domain"
 import { validateRequestedScopes } from "./scopes"
 
@@ -47,12 +49,41 @@ async function resolveResourceRecord(
         name: registered?.name ?? resource,
         allowedScopes: registered?.allowedScopes ?? client.allowedScopes,
         enabled: true,
+        mcpEnabled: registered?.mcpEnabled ?? false,
+        metadataClientPolicy: registered?.metadataClientPolicy ?? "disabled",
       }
     }
     throw new OAuthError("invalid_target", {
       description: "Unknown or disabled resource",
       detail: `resource ${resource} not registered or disabled`,
     })
+  }
+  if (registered.mcpEnabled && !isMcpResourceUriAllowed(env.ENVIRONMENT, registered.resourceUri)) {
+    throw new OAuthError("invalid_target", {
+      description: "The requested resource is not available in this environment",
+      detail: `resource ${resource} violates the ${env.ENVIRONMENT ?? "unknown"} transport policy`,
+    })
+  }
+  if (!yolo && registered.mcpEnabled && requestedResource === null) {
+    throw new OAuthError("invalid_target", {
+      description: "The resource parameter is required for this protected resource",
+      detail: `MCP resource ${resource} was selected only through client default_resource`,
+    })
+  }
+  if (!yolo && client.registrationType === "client_id_metadata") {
+    const approved =
+      registered.metadataClientPolicy === "admin_approved" &&
+      (await isMetadataClientApproved(env, client.clientId, registered.resourceUri))
+    if (
+      !registered.mcpEnabled ||
+      registered.metadataClientPolicy === "disabled" ||
+      (registered.metadataClientPolicy === "admin_approved" && !approved)
+    ) {
+      throw new OAuthError("invalid_target", {
+        description: "The requested resource does not admit this client",
+        detail: `metadata client ${client.clientId} is not admitted to resource ${resource}`,
+      })
+    }
   }
   return registered
 }

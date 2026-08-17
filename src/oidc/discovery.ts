@@ -30,10 +30,15 @@ export type DiscoveryMetadata = {
   readonly code_challenge_methods_supported: readonly string[]
   readonly token_endpoint_auth_methods_supported: readonly string[]
   readonly prompt_values_supported: readonly string[]
+  readonly client_id_metadata_document_supported: true
+  readonly authorization_response_iss_parameter_supported: true
 }
 
 /** Build the discovery document for a given issuer origin (no trailing slash). */
-export function buildDiscoveryMetadata(issuer: string): DiscoveryMetadata {
+export function buildDiscoveryMetadata(
+  issuer: string,
+  scopesSupported: readonly string[] = SUPPORTED_SCOPES,
+): DiscoveryMetadata {
   return {
     issuer,
     authorization_endpoint: `${issuer}/oauth/authorize`,
@@ -48,10 +53,12 @@ export function buildDiscoveryMetadata(issuer: string): DiscoveryMetadata {
     grant_types_supported: GRANT_TYPES,
     subject_types_supported: SUBJECT_TYPES,
     id_token_signing_alg_values_supported: ID_TOKEN_SIGNING_ALG,
-    scopes_supported: SUPPORTED_SCOPES,
+    scopes_supported: scopesSupported,
     claims_supported: SUPPORTED_CLAIMS,
     code_challenge_methods_supported: CODE_CHALLENGE_METHODS,
     token_endpoint_auth_methods_supported: TOKEN_ENDPOINT_AUTH_METHODS,
     prompt_values_supported: AUTHORIZE_PROMPTS,
+    client_id_metadata_document_supported: true,
+    authorization_response_iss_parameter_supported: true,
   }
 }

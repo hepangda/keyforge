@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { APPLE_TOUCH_ICON, FAVICON_ICO, FAVICON_SVG } from "../assets/web-icons"
 import type { AppBindings } from "../types/app"
 import {
   ACCOUNT_BROWSER_SCRIPT,
@@ -10,26 +11,34 @@ import {
 
 export const assets = new Hono<AppBindings>()
 
-const scriptEtags = new Map<string, Promise<string>>()
+type AssetBody = string | Uint8Array
 
-function scriptEtag(body: string): Promise<string> {
-  const cached = scriptEtags.get(body)
+const assetEtags = new Map<AssetBody, Promise<string>>()
+
+function assetEtag(body: AssetBody): Promise<string> {
+  const cached = assetEtags.get(body)
   if (cached !== undefined) return cached
+  const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body
   const digest = crypto.subtle
-    .digest("SHA-256", new TextEncoder().encode(body))
+    .digest("SHA-256", bytes)
     .then(
       (value) =>
         `"${Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, "0")).join("")}"`,
     )
-  scriptEtags.set(body, digest)
+  assetEtags.set(body, digest)
   return digest
 }
 
-async function script(body: string, ifNoneMatch: string | undefined): Promise<Response> {
-  const etag = await scriptEtag(body)
+async function asset(
+  body: AssetBody,
+  contentType: string,
+  cacheControl: string,
+  ifNoneMatch: string | undefined,
+): Promise<Response> {
+  const etag = await assetEtag(body)
   const headers = {
-    "content-type": "application/javascript; charset=utf-8",
-    "cache-control": "public, no-cache",
+    "content-type": contentType,
+    "cache-control": cacheControl,
     etag,
   }
   const matches =
@@ -40,9 +49,11 @@ async function script(body: string, ifNoneMatch: string | undefined): Promise<Re
   if (matches) {
     return new Response(null, { status: 304, headers })
   }
-  return new Response(body, {
-    headers,
-  })
+  return new Response(typeof body === "string" ? body : body.slice(), { headers })
+}
+
+function script(body: string, ifNoneMatch: string | undefined): Promise<Response> {
+  return asset(body, "application/javascript; charset=utf-8", "public, no-cache", ifNoneMatch)
 }
 
 assets.get("/assets/login.js", (c) => script(LOGIN_BROWSER_SCRIPT, c.req.header("if-none-match")))
@@ -53,4 +64,21 @@ assets.get("/assets/avatar.js", (c) => script(AVATAR_BROWSER_SCRIPT, c.req.heade
 assets.get("/assets/forms.js", (c) => script(FORMS_BROWSER_SCRIPT, c.req.header("if-none-match")))
 assets.get("/assets/console.js", (c) =>
   script(CONSOLE_BROWSER_SCRIPT, c.req.header("if-none-match")),
+)
+
+const ICON_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=604800"
+
+assets.get("/favicon.svg", (c) =>
+  asset(
+    FAVICON_SVG,
+    "image/svg+xml; charset=utf-8",
+    ICON_CACHE_CONTROL,
+    c.req.header("if-none-match"),
+  ),
+)
+assets.get("/favicon.ico", (c) =>
+  asset(FAVICON_ICO, "image/x-icon", ICON_CACHE_CONTROL, c.req.header("if-none-match")),
+)
+assets.get("/apple-touch-icon.png", (c) =>
+  asset(APPLE_TOUCH_ICON, "image/png", ICON_CACHE_CONTROL, c.req.header("if-none-match")),
 )

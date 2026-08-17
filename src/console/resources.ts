@@ -6,11 +6,13 @@ import {
   listResources,
   updateResource,
 } from "../db/queries/resources"
+import { validateScopeCatalog } from "../oauth/scopes"
 import { recordAudit } from "../security/audit"
 import { issueCsrfToken } from "../security/csrf"
-import { isSafeResourceUri } from "../security/redirect-uri"
+import { isMcpResourceUriAllowed, isSafeResourceUri } from "../security/redirect-uri"
 import { safeLocalPath } from "../security/return-to"
 import type { AppBindings } from "../types/app"
+import { METADATA_CLIENT_POLICIES, type MetadataClientPolicy } from "../types/domain"
 import { readFormField } from "../utils/form"
 import {
   type ResourceFormFeedback,
@@ -21,12 +23,18 @@ import {
 } from "../views/console/resources"
 import { chrome, parseLines, readVerifiedForm, withClearedDraft } from "./shared"
 
+function parseMetadataClientPolicy(value: string): MetadataClientPolicy {
+  return METADATA_CLIENT_POLICIES.find((policy) => policy === value) ?? "disabled"
+}
+
 function resourceValues(form: FormData, currentUri = ""): ResourceFormValues {
   return {
     resourceUri: currentUri || readFormField(form, "resource_uri"),
     name: readFormField(form, "name"),
     allowedScopes: readFormField(form, "allowed_scopes"),
     enabled: form.get("enabled") !== null,
+    mcpEnabled: form.get("mcp_enabled") !== null,
+    metadataClientPolicy: parseMetadataClientPolicy(readFormField(form, "metadata_client_policy")),
   }
 }
 
@@ -65,6 +73,7 @@ export function registerConsoleResources(app: Hono<AppBindings>): void {
     const values = resourceValues(form)
     const uri = values.resourceUri.trim()
     const name = values.name.trim()
+    const allowedScopes = parseLines(values.allowedScopes)
     if (!isSafeResourceUri(uri)) {
       return resourceError(c, null, returnTo, {
         values,
@@ -79,6 +88,28 @@ export function registerConsoleResources(app: Hono<AppBindings>): void {
         error: "API names cannot be empty.",
       })
     }
+    if (!validateScopeCatalog(allowedScopes).ok) {
+      return resourceError(c, null, returnTo, {
+        values,
+        field: "allowed_scopes",
+        error: "Scopes must be unique valid OAuth scope tokens.",
+      })
+    }
+    if (values.metadataClientPolicy !== "disabled" && !values.mcpEnabled) {
+      return resourceError(c, null, returnTo, {
+        values,
+        field: null,
+        error: "Client ID Metadata Documents require MCP authorization to be enabled.",
+      })
+    }
+    if (values.mcpEnabled && !isMcpResourceUriAllowed(c.env.ENVIRONMENT, uri)) {
+      return resourceError(c, null, returnTo, {
+        values,
+        field: "resource_uri",
+        error:
+          "MCP resources must use HTTPS, or loopback HTTP for local development, without a query or fragment.",
+      })
+    }
     if ((await getResourceByUri(c.env, uri)) !== null) {
       return resourceError(c, null, returnTo, {
         values,
@@ -89,7 +120,9 @@ export function registerConsoleResources(app: Hono<AppBindings>): void {
     await createResource(c.env, {
       resourceUri: uri,
       name,
-      allowedScopes: parseLines(values.allowedScopes),
+      allowedScopes,
+      mcpEnabled: values.mcpEnabled,
+      metadataClientPolicy: values.metadataClientPolicy,
     })
     await recordAudit(c.env, {
       type: "admin.resource.created",
@@ -174,6 +207,7 @@ export function registerConsoleResources(app: Hono<AppBindings>): void {
     if (current === null) return c.redirect("/console/resources?flash=not_found")
     const values = resourceValues(form, current.resourceUri)
     const name = values.name.trim()
+    const allowedScopes = parseLines(values.allowedScopes)
     if (name === "") {
       return resourceError(c, current, "/", {
         values,
@@ -181,10 +215,34 @@ export function registerConsoleResources(app: Hono<AppBindings>): void {
         error: "API names cannot be empty.",
       })
     }
+    if (!validateScopeCatalog(allowedScopes).ok) {
+      return resourceError(c, current, "/", {
+        values,
+        field: "allowed_scopes",
+        error: "Scopes must be unique valid OAuth scope tokens.",
+      })
+    }
+    if (values.metadataClientPolicy !== "disabled" && !values.mcpEnabled) {
+      return resourceError(c, current, "/", {
+        values,
+        field: null,
+        error: "Client ID Metadata Documents require MCP authorization to be enabled.",
+      })
+    }
+    if (values.mcpEnabled && !isMcpResourceUriAllowed(c.env.ENVIRONMENT, uri)) {
+      return resourceError(c, current, "/", {
+        values,
+        field: null,
+        error:
+          "MCP resources must use HTTPS, or loopback HTTP for local development, without a query or fragment.",
+      })
+    }
     const updated = await updateResource(c.env, uri, {
       name,
-      allowedScopes: parseLines(values.allowedScopes),
+      allowedScopes,
       enabled: values.enabled,
+      mcpEnabled: values.mcpEnabled,
+      metadataClientPolicy: values.metadataClientPolicy,
     })
     if (updated === null) return c.redirect("/console/resources?flash=not_found")
     await recordAudit(c.env, {

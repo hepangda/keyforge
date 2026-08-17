@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { setUserPassword, verifyUserPassword } from "../../src/auth/password"
 import { createSession, getSessionByToken } from "../../src/auth/session"
 import { createClient, getClientById } from "../../src/db/queries/clients"
-import { getResourceByUri } from "../../src/db/queries/resources"
+import { createResource, getResourceByUri } from "../../src/db/queries/resources"
 import {
   createUser,
   getGroupByName,
@@ -23,6 +23,9 @@ beforeEach(async () => {
     ),
     env.DB.prepare(
       "DELETE FROM oauth_resource_permission_groups WHERE group_id = 'grp_seed_employees'",
+    ),
+    env.DB.prepare(
+      "DELETE FROM oauth_scope_permission_groups WHERE group_id = 'grp_seed_employees'",
     ),
     env.DB.prepare(
       `INSERT INTO oauth_client_permission_groups (client_id, group_id, created_at)
@@ -56,12 +59,6 @@ function escapedPattern(value: string): string {
 
 function expectSelectedOption(html: string, value: string): void {
   expect(html).toMatch(new RegExp(`<option value="${escapedPattern(value)}"[^>]* selected>`))
-}
-
-function expectUnselectedOption(html: string, value: string): void {
-  expect(html).toMatch(
-    new RegExp(`<option value="${escapedPattern(value)}"(?![^>]* selected)[^>]*>`),
-  )
 }
 
 async function loginAs(email: string, password: string): Promise<string> {
@@ -239,7 +236,12 @@ describe("console users", () => {
     expect(await duplicate.text()).toContain("already exists")
   })
 
-  it("renders, saves, and validates application and API assignments", async () => {
+  it("renders, saves, and validates permission rules", async () => {
+    await createResource(env, {
+      resourceUri: "urn:test:shared-scope-catalog",
+      name: "Shared Scope API",
+      allowedScopes: ["api.read"],
+    })
     const employees = await getGroupByName(env, "employees")
     expect(employees).not.toBeNull()
     const session = await loginAs("admin", "test-admin-password-2026")
@@ -258,16 +260,51 @@ describe("console users", () => {
       "urn:pangda:cloudflare-one",
       "urn:pangda:hermes-agent",
     ]) {
-      expectSelectedOption(html, value)
+      expect(html).toContain(value)
     }
-    expect(html).toContain("data-search-picker")
-    expect(html).toContain('type="search"')
+    expect(html).toContain('name="rules_json"')
+    expect(html).toContain("data-permission-rule-editor")
+    expect(html).toContain("data-permission-rule-add")
+    expect(html).toContain("data-permission-rule-apply-json")
+    expect(html).toContain("data-search-application-label")
+    expect(html).toContain("data-search-api-label")
+    expect(html).toContain("data-search-scope-label")
+    expect(html).toContain("Available rule values")
+    expect(html).toContain("Smaller priority numbers win; deny wins ties.")
+    expect(html).toContain("&quot;detail&quot;:&quot;Pangda API · Shared Scope API&quot;")
+    expect(html).toContain("&quot;operator&quot;: &quot;and&quot;")
     expect(html).not.toContain('value="svc_internal_worker"')
+    expect(html).toContain("openid, profile, email, and offline_access")
     const csrf = cookieValue(page.headers.getSetCookie(), "__Host-keyforge_csrf")
 
+    const rules = [
+      {
+        effect: "allow",
+        condition: {
+          operator: "and",
+          conditions: [
+            { field: "application", operator: "equals", value: "pangda_app" },
+            { field: "api", operator: "equals", value: "https://api.pangda.app" },
+          ],
+        },
+      },
+      {
+        effect: "allow",
+        condition: {
+          operator: "and",
+          conditions: [
+            { field: "api", operator: "equals", value: "https://api.pangda.app" },
+            { field: "scope", operator: "equals", value: "api.read" },
+          ],
+        },
+      },
+      {
+        effect: "deny",
+        condition: { field: "scope", operator: "not_in", values: ["api.read", "api.write"] },
+      },
+    ]
     const saved = await postForm(`${path}/access`, session, csrf, {
-      client_ids: ["pangda_app"],
-      resource_uris: ["https://api.pangda.app"],
+      rules_json: JSON.stringify(rules),
     })
     expect(saved.status).toBe(302)
     expect(saved.headers.get("location")).toContain("flash=group_access_updated")
@@ -276,21 +313,43 @@ describe("console users", () => {
     })
     const reloadedHtml = await reloaded.text()
     expect(reloadedHtml).toContain("Permission-group access updated.")
-    expectSelectedOption(reloadedHtml, "pangda_app")
-    expectSelectedOption(reloadedHtml, "https://api.pangda.app")
-    expectUnselectedOption(reloadedHtml, "pangda_cli")
+    expect(reloadedHtml).toContain("&quot;value&quot;: &quot;pangda_app&quot;")
+    expect(reloadedHtml).toContain("&quot;value&quot;: &quot;api.read&quot;")
+    expect(reloadedHtml).toContain("&quot;operator&quot;: &quot;not_in&quot;")
+    expect(reloadedHtml).toContain("&quot;values&quot;: [")
+    expect(reloadedHtml).toContain("&quot;effect&quot;: &quot;deny&quot;")
 
     const invalid = await postForm(`${path}/access`, session, csrf, {
-      client_ids: ["pangda_app", "missing-client"],
-      resource_uris: ["https://api.pangda.app", "urn:missing"],
+      rules_json: JSON.stringify([
+        {
+          effect: "allow",
+          condition: { field: "application", operator: "equals", value: "missing-client" },
+        },
+      ]),
     })
     expect(invalid.status).toBe(400)
     const invalidHtml = await invalid.text()
-    expect(invalidHtml).toContain("Choose only existing user applications and APIs.")
-    expectSelectedOption(invalidHtml, "pangda_app")
-    expectSelectedOption(invalidHtml, "https://api.pangda.app")
-    expect(invalidHtml).not.toContain("missing-client")
-    expect(invalidHtml).not.toContain("urn:missing")
+    expect(invalidHtml).toContain("Enter valid rules using existing applications")
+    expect(invalidHtml).toContain("missing-client")
+
+    const invalidScope = await postForm(`${path}/access`, session, csrf, {
+      rules_json: "not-json",
+    })
+    expect(invalidScope.status).toBe(400)
+    expect(await invalidScope.text()).toContain("Rule document must be valid JSON.")
+
+    const directScope = await postForm(`${path}/access`, session, csrf, {
+      rules_json: JSON.stringify([
+        {
+          effect: "deny",
+          condition: { field: "scope", operator: "equals", value: "email" },
+        },
+      ]),
+    })
+    expect(directScope.status).toBe(400)
+    expect(await directScope.text()).toContain(
+      "openid, profile, email, and offline_access cannot be configured in scope rules.",
+    )
   })
 
   it("creates a group and a password user with that membership", async () => {
@@ -299,10 +358,14 @@ describe("console users", () => {
     const groupResponse = await postForm("/console/groups", session, csrf, {
       name: "console-operators",
       description: "Console-created operators",
+      visibility: "hidden",
+      priority: "75",
     })
     expect(groupResponse.status).toBe(302)
     const group = await getGroupByName(env, "console-operators")
     expect(group).not.toBeNull()
+    expect(group?.isPublic).toBe(false)
+    expect(group?.priority).toBe(75)
 
     const createResponse = await postForm("/console/users", session, csrf, {
       email: "console.user@pangda.app",
@@ -365,7 +428,7 @@ describe("console users", () => {
     expect(await getGroupByName(env, "temporary-reviewers")).toBeNull()
   })
 
-  it("keeps admins resource access management while protecting built-in settings", async () => {
+  it("keeps admins rule management while protecting its identity", async () => {
     const admins = await getGroupByName(env, "admins")
     expect(admins).not.toBeNull()
     const session = await loginAs("admin", "test-admin-password-2026")
@@ -377,14 +440,36 @@ describe("console users", () => {
     expect(access.status).toBe(200)
     const accessHtml = await access.text()
     expect(accessHtml).toContain(`action="${detailPath}/access"`)
-    expectUnselectedOption(accessHtml, "pangda_admin")
-    expectSelectedOption(accessHtml, "https://admin.pangda.app")
+    expect(accessHtml).toContain("pangda_admin")
+    expect(accessHtml).toContain("https://admin.pangda.app")
     expect(accessHtml).not.toContain(`href="${detailPath}/delete"`)
     expect(accessHtml).not.toContain('name="name"')
 
     const saved = await postForm(`${detailPath}/access`, session, csrf, {
-      client_ids: [],
-      resource_uris: ["https://admin.pangda.app"],
+      rules_json: JSON.stringify([
+        {
+          effect: "allow",
+          condition: {
+            operator: "and",
+            conditions: [
+              { field: "application", operator: "equals", value: "pangda_admin" },
+              {
+                field: "api",
+                operator: "equals",
+                value: "https://admin.pangda.app",
+              },
+            ],
+          },
+        },
+        {
+          effect: "allow",
+          condition: { field: "scope", operator: "equals", value: "admin.read" },
+        },
+        {
+          effect: "allow",
+          condition: { field: "scope", operator: "equals", value: "admin.write" },
+        },
+      ]),
     })
     expect(saved.status).toBe(302)
     expect(saved.headers.get("location")).toContain("flash=group_access_updated")
@@ -393,9 +478,12 @@ describe("console users", () => {
       headers: { cookie: `__Host-keyforge_session=${session}` },
       redirect: "manual",
     })
-    expect(settings.status).toBe(302)
-    expect(settings.headers.get("location")).toContain("view=access")
-    expect(settings.headers.get("location")).toContain("flash=protected_group")
+    expect(settings.status).toBe(200)
+    const settingsHtml = await settings.text()
+    expect(settingsHtml).toContain('name="priority"')
+    expect(settingsHtml).toContain("Like nice values, smaller numbers have higher priority.")
+    expect(settingsHtml).toMatch(/name="name"[^>]*readonly/)
+    expect(settingsHtml).not.toContain(`href="${detailPath}/delete"`)
     const path = `/console/groups/${admins?.id ?? "missing"}/delete`
 
     const confirmation = await SELF.fetch(`${ISSUER}${path}`, {

@@ -43,6 +43,8 @@ const REQUIRED_TABLES = [
   "oauth_resources",
   "oauth_client_permission_groups",
   "oauth_resource_permission_groups",
+  "oauth_scope_permission_groups",
+  "permission_group_rules",
   "group_membership_requests",
   "sessions",
   "refresh_tokens",
@@ -76,6 +78,8 @@ const REQUIRED_INDEXES = [
   "idx_password_credentials_user",
   "idx_oauth_client_permission_groups_group",
   "idx_oauth_resource_permission_groups_group",
+  "idx_oauth_scope_permission_groups_group",
+  "idx_permission_group_rules_group",
   "idx_group_membership_requests_group",
   "idx_group_membership_requests_user",
 ] as const
@@ -127,10 +131,42 @@ async function checkDatabaseSchema(db: D1Database): Promise<void> {
                 WHERE name = 'idx_users_alias_canonical' AND [unique] = 1) AS canonical_alias_index,
          EXISTS(SELECT 1 FROM pragma_index_list('groups')
                 WHERE name = 'idx_groups_name_canonical' AND [unique] = 1) AS canonical_group_index,
+         EXISTS(SELECT 1 FROM pragma_table_info('groups')
+                WHERE name = 'priority') AS group_priority_column,
          EXISTS(SELECT 1 FROM groups WHERE name = 'all') AS all_group,
          EXISTS(SELECT 1 FROM sqlite_master
                 WHERE type = 'trigger'
                   AND name = 'add_all_group_membership_after_user_insert') AS all_group_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'validate_oauth_scope_permission_insert') AS scope_insert_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'validate_oauth_scope_permission_update') AS scope_update_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'prune_oauth_scope_permissions_after_resource_scope_update') AS scope_prune_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'reject_resource_authorized_scope_permission_insert') AS direct_scope_insert_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'reject_resource_authorized_scope_permission_update') AS direct_scope_update_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'reject_standard_scope_rule_insert') AS standard_rule_insert_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'reject_standard_scope_rule_update') AS standard_rule_update_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'prune_permission_rules_after_client_delete') AS rule_client_prune_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'prune_permission_rules_after_resource_delete') AS rule_resource_prune_trigger,
+         EXISTS(SELECT 1 FROM sqlite_master
+                WHERE type = 'trigger'
+                  AND name = 'prune_permission_rules_after_resource_scope_update') AS rule_scope_prune_trigger,
          EXISTS(SELECT 1 FROM groups WHERE name = 'admins') AS admin_group,
          EXISTS(SELECT 1 FROM oauth_resources
                 WHERE resource_uri = 'https://admin.pangda.app') AS admin_resource,

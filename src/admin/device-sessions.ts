@@ -11,11 +11,13 @@ import { listAuditLogs } from "../db/queries/audit"
 import {
   createResource,
   deleteResource,
+  getResourceByUri,
   listResources,
   updateResource,
 } from "../db/queries/resources"
+import { validateScopeCatalog } from "../oauth/scopes"
 import { recordAudit } from "../security/audit"
-import { isSafeResourceUri } from "../security/redirect-uri"
+import { isMcpResourceUriAllowed, isSafeResourceUri } from "../security/redirect-uri"
 import type { AppBindings } from "../types/app"
 import type { OAuthResource } from "../types/domain"
 import { parsePagination, readJsonBody } from "../utils/http"
@@ -24,15 +26,27 @@ const createResourceSchema = z.object({
   resource_uri: z.string().refine(isSafeResourceUri),
   name: z.string().min(1),
   allowed_scopes: z.array(z.string()).default([]),
+  mcp_enabled: z.boolean().default(false),
+  metadata_client_policy: z
+    .enum(["disabled", "consent_required", "admin_approved"])
+    .default("disabled"),
 })
 
 const patchResourceSchema = z.object({
   name: z.string().optional(),
   allowed_scopes: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
+  mcp_enabled: z.boolean().optional(),
+  metadata_client_policy: z.enum(["disabled", "consent_required", "admin_approved"]).optional(),
 })
 
-type MutableResourcePatch = { name?: string; allowedScopes?: string[]; enabled?: boolean }
+type MutableResourcePatch = {
+  name?: string
+  allowedScopes?: string[]
+  enabled?: boolean
+  mcpEnabled?: boolean
+  metadataClientPolicy?: "disabled" | "consent_required" | "admin_approved"
+}
 
 function serializeResource(resource: OAuthResource): Record<string, unknown> {
   return {
@@ -40,6 +54,8 @@ function serializeResource(resource: OAuthResource): Record<string, unknown> {
     name: resource.name,
     allowed_scopes: resource.allowedScopes,
     enabled: resource.enabled,
+    mcp_enabled: resource.mcpEnabled,
+    metadata_client_policy: resource.metadataClientPolicy,
   }
 }
 
@@ -87,10 +103,20 @@ export function registerAdminCatalog(app: Hono<AppBindings>): void {
     if (!parsed.success) {
       return c.json({ error: "invalid_request" }, 400)
     }
+    if (
+      !validateScopeCatalog(parsed.data.allowed_scopes).ok ||
+      (parsed.data.metadata_client_policy !== "disabled" && !parsed.data.mcp_enabled) ||
+      (parsed.data.mcp_enabled &&
+        !isMcpResourceUriAllowed(c.env.ENVIRONMENT, parsed.data.resource_uri))
+    ) {
+      return c.json({ error: "invalid_request" }, 400)
+    }
     await createResource(c.env, {
       resourceUri: parsed.data.resource_uri,
       name: parsed.data.name,
       allowedScopes: parsed.data.allowed_scopes,
+      mcpEnabled: parsed.data.mcp_enabled,
+      metadataClientPolicy: parsed.data.metadata_client_policy,
     })
     await recordAudit(c.env, {
       type: "admin.resource.created",
@@ -111,6 +137,22 @@ export function registerAdminCatalog(app: Hono<AppBindings>): void {
     if (parsed.data.name !== undefined) patch.name = parsed.data.name
     if (parsed.data.allowed_scopes !== undefined) patch.allowedScopes = parsed.data.allowed_scopes
     if (parsed.data.enabled !== undefined) patch.enabled = parsed.data.enabled
+    if (parsed.data.mcp_enabled !== undefined) patch.mcpEnabled = parsed.data.mcp_enabled
+    if (parsed.data.metadata_client_policy !== undefined) {
+      patch.metadataClientPolicy = parsed.data.metadata_client_policy
+    }
+    const current = await getResourceByUri(c.env, c.req.param("id"))
+    if (current === null) return c.json({ error: "not_found" }, 404)
+    const nextScopes = patch.allowedScopes ?? current.allowedScopes
+    const nextMcpEnabled = patch.mcpEnabled ?? current.mcpEnabled
+    const nextMetadataPolicy = patch.metadataClientPolicy ?? current.metadataClientPolicy
+    if (
+      !validateScopeCatalog(nextScopes).ok ||
+      (nextMetadataPolicy !== "disabled" && !nextMcpEnabled) ||
+      (nextMcpEnabled && !isMcpResourceUriAllowed(c.env.ENVIRONMENT, current.resourceUri))
+    ) {
+      return c.json({ error: "invalid_request" }, 400)
+    }
     const updated = await updateResource(c.env, c.req.param("id"), patch)
     if (updated === null) {
       return c.json({ error: "not_found" }, 404)

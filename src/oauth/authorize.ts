@@ -1,5 +1,5 @@
 import { TOKEN_TTL } from "../config"
-import { getClientById } from "../db/queries/clients"
+import { getResourceByUri } from "../db/queries/resources"
 import { isYoloEnabled } from "../operations/yolo"
 import type { OAuthErrorCode } from "../security/errors"
 import { OAuthError } from "../security/errors"
@@ -7,6 +7,7 @@ import { hashOpaqueToken } from "../tokens/token-hash"
 import type { OAuthClient, User } from "../types/domain"
 import type { AuthorizationCodePayload } from "../types/tokens"
 import { randomToken } from "../utils/random"
+import { ClientIdMetadataError, resolveAuthorizationClient } from "./client-id-metadata"
 import { isValidS256Challenge } from "./pkce"
 import { isRegisteredRedirectUri } from "./redirect"
 import { validateOAuthParameterSet } from "./request-limits"
@@ -110,7 +111,22 @@ export async function validateAuthorizeRequest(
       clientId: null,
     }
   }
-  const client = await getClientById(env, clientId)
+  let client: OAuthClient | null
+  try {
+    client = await resolveAuthorizationClient(
+      env,
+      clientId,
+      query.getAll("resource").length === 1 ? query.get("resource") : null,
+    )
+  } catch (error) {
+    if (!(error instanceof ClientIdMetadataError)) throw error
+    return {
+      kind: "invalid_request_page",
+      description: "The client metadata document could not be validated.",
+      reason: "invalid_client",
+      clientId,
+    }
+  }
   if (client === null || !client.enabled) {
     return {
       kind: "invalid_request_page",
@@ -246,13 +262,17 @@ export async function issueAuthorizationCode(
   params: AuthorizeParams,
   subject: AuthorizationSubject,
 ): Promise<string> {
+  const resource = await getResourceByUri(env, params.resource)
   const code = randomToken(32)
   const payload: AuthorizationCodePayload = {
+    issuer: env.ISSUER,
     clientId: params.clientId,
     userId: subject.user.id,
     redirectUri: params.redirectUri,
     scope: serializeScopes(params.scopes),
     resource: params.resource,
+    resourceRequired: resource?.mcpEnabled === true,
+    metadataFingerprint: params.client.metadataFingerprint,
     codeChallenge: params.codeChallenge,
     codeChallengeMethod: "S256",
     nonce: params.nonce,

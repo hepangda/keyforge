@@ -1,5 +1,31 @@
 import { OAuthError } from "../security/errors"
 
+export const OAUTH_SCOPE_MAX_COUNT = 64
+export const OAUTH_SCOPE_MAX_BYTES = 128
+const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/
+const encoder = new TextEncoder()
+
+export type ScopeCatalogValidation =
+  | { readonly ok: true; readonly scopes: readonly string[] }
+  | { readonly ok: false; readonly reason: "too_many" | "duplicate" | "invalid" }
+
+/** Validate RFC 6749 scope-token syntax and operational size bounds. */
+export function validateScopeCatalog(scopes: readonly string[]): ScopeCatalogValidation {
+  if (scopes.length > OAUTH_SCOPE_MAX_COUNT) return { ok: false, reason: "too_many" }
+  if (new Set(scopes).size !== scopes.length) return { ok: false, reason: "duplicate" }
+  if (
+    scopes.some(
+      (scope) =>
+        !SCOPE_TOKEN.test(scope) ||
+        encoder.encode(scope).byteLength === 0 ||
+        encoder.encode(scope).byteLength > OAUTH_SCOPE_MAX_BYTES,
+    )
+  ) {
+    return { ok: false, reason: "invalid" }
+  }
+  return { ok: true, scopes: [...scopes] }
+}
+
 export function parseScopeString(raw: string | null | undefined): string[] {
   if (raw === null || raw === undefined) {
     return []

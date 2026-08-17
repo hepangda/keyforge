@@ -1,5 +1,5 @@
 import * as z from "zod"
-import type { OAuthResource } from "../../types/domain"
+import type { MetadataClientPolicy, OAuthResource } from "../../types/domain"
 import { asResourceUri } from "../../types/domain"
 import { nowSeconds } from "../../utils/time"
 
@@ -8,11 +8,14 @@ const resourceRowSchema = z.object({
   name: z.string(),
   allowed_scopes_json: z.string(),
   enabled: z.number(),
+  mcp_enabled: z.number(),
+  metadata_client_policy: z.enum(["disabled", "consent_required", "admin_approved"]),
 })
 
 const stringArraySchema = z.array(z.string())
 
-const RESOURCE_COLUMNS = "resource_uri, name, allowed_scopes_json, enabled"
+const RESOURCE_COLUMNS =
+  "resource_uri, name, allowed_scopes_json, enabled, mcp_enabled, metadata_client_policy"
 
 function mapResource(row: unknown): OAuthResource {
   const parsed = resourceRowSchema.parse(row)
@@ -22,6 +25,8 @@ function mapResource(row: unknown): OAuthResource {
     name: parsed.name,
     allowedScopes: scopes.success ? scopes.data : [],
     enabled: parsed.enabled === 1,
+    mcpEnabled: parsed.mcp_enabled === 1,
+    metadataClientPolicy: parsed.metadata_client_policy,
   }
 }
 
@@ -48,15 +53,27 @@ export type CreateResourceInput = {
   readonly resourceUri: string
   readonly name: string
   readonly allowedScopes: readonly string[]
+  readonly mcpEnabled?: boolean
+  readonly metadataClientPolicy?: MetadataClientPolicy
 }
 
 export async function createResource(env: Env, input: CreateResourceInput): Promise<void> {
   const now = nowSeconds()
   await env.DB.prepare(
-    `INSERT INTO oauth_resources (resource_uri, name, allowed_scopes_json, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, 1, ?, ?)`,
+    `INSERT INTO oauth_resources
+       (resource_uri, name, allowed_scopes_json, enabled, mcp_enabled,
+        metadata_client_policy, created_at, updated_at)
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
   )
-    .bind(input.resourceUri, input.name, JSON.stringify(input.allowedScopes), now, now)
+    .bind(
+      input.resourceUri,
+      input.name,
+      JSON.stringify(input.allowedScopes),
+      input.mcpEnabled === true ? 1 : 0,
+      input.metadataClientPolicy ?? "disabled",
+      now,
+      now,
+    )
     .run()
 }
 
@@ -64,6 +81,8 @@ export type ResourcePatch = {
   readonly name?: string
   readonly allowedScopes?: readonly string[]
   readonly enabled?: boolean
+  readonly mcpEnabled?: boolean
+  readonly metadataClientPolicy?: MetadataClientPolicy
 }
 
 export async function updateResource(
@@ -80,13 +99,49 @@ export async function updateResource(
     name: patch.name ?? current.name,
     allowedScopes: patch.allowedScopes ?? current.allowedScopes,
     enabled: patch.enabled ?? current.enabled,
+    mcpEnabled: patch.mcpEnabled ?? current.mcpEnabled,
+    metadataClientPolicy: patch.metadataClientPolicy ?? current.metadataClientPolicy,
   }
-  await env.DB.prepare(
-    "UPDATE oauth_resources SET name = ?, allowed_scopes_json = ?, enabled = ?, updated_at = ? WHERE resource_uri = ?",
-  )
-    .bind(next.name, JSON.stringify(next.allowedScopes), next.enabled ? 1 : 0, nowSeconds(), uri)
-    .run()
+  const allowedScopesJson = JSON.stringify(next.allowedScopes)
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE oauth_resources
+         SET name = ?, allowed_scopes_json = ?, enabled = ?, mcp_enabled = ?,
+             metadata_client_policy = ?, updated_at = ?
+         WHERE resource_uri = ?`,
+    ).bind(
+      next.name,
+      allowedScopesJson,
+      next.enabled ? 1 : 0,
+      next.mcpEnabled ? 1 : 0,
+      next.metadataClientPolicy,
+      nowSeconds(),
+      uri,
+    ),
+    env.DB.prepare(
+      `DELETE FROM oauth_scope_permission_groups
+       WHERE resource_uri = ?
+         AND scope NOT IN (SELECT CAST(value AS TEXT) FROM json_each(?))`,
+    ).bind(uri, allowedScopesJson),
+  ])
   return next
+}
+
+/** Distinct scope vocabulary currently offered by enabled resources. */
+export async function listEnabledResourceScopes(env: Env): Promise<string[]> {
+  const result = await env.DB.prepare(
+    `SELECT oauth_resources.allowed_scopes_json
+       FROM oauth_resources
+       WHERE enabled = 1
+       ORDER BY created_at, resource_uri`,
+  ).all<{ allowed_scopes_json: string }>()
+  const scopes = new Set<string>()
+  for (const row of result.results) {
+    const parsed = stringArraySchema.safeParse(JSON.parse(row.allowed_scopes_json))
+    if (!parsed.success) continue
+    for (const scope of parsed.data) scopes.add(scope)
+  }
+  return [...scopes]
 }
 
 /** Delete an API and retire every D1 authorization path that references it. */

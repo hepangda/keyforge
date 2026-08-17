@@ -1,10 +1,11 @@
-import type { OAuthResource } from "../../types/domain"
+import type { MetadataClientPolicy, OAuthResource } from "../../types/domain"
 import { escapeHtml } from "../layout"
 import {
   checkboxField,
   csrfField,
   dataTable,
   scopeTags,
+  selectField,
   statusBadge,
   textAreaField,
   textField,
@@ -32,6 +33,8 @@ export type ResourceFormValues = {
   readonly name: string
   readonly allowedScopes: string
   readonly enabled: boolean
+  readonly mcpEnabled: boolean
+  readonly metadataClientPolicy: MetadataClientPolicy
 }
 
 export type ResourceFormFeedback = {
@@ -54,6 +57,8 @@ export function renderResourceForm(
     name: resource?.name ?? "",
     allowedScopes: (resource?.allowedScopes ?? []).join("\n"),
     enabled: resource?.enabled ?? true,
+    mcpEnabled: resource?.mcpEnabled ?? false,
+    metadataClientPolicy: resource?.metadataClientPolicy ?? "disabled",
   }
   const action = isNew
     ? "/console/resources"
@@ -74,7 +79,19 @@ export function renderResourceForm(
   const deleteAction = isNew
     ? ""
     : `<a class="btn btn--danger btn--auto" href="/console/resources/${encodeURIComponent(resource.resourceUri)}/delete">${escapeHtml(i18n.t("Delete API"))}</a>`
-  const content = `<div class="toolbar"><div><h2 class="panel__title">${escapeHtml(i18n.t(isNew ? "Create API" : resource.name))}</h2><p class="panel__desc">${escapeHtml(i18n.t(isNew ? "Register a protected API." : "Edit API configuration."))}</p></div><a class="btn btn--ghost btn--sm back-link" href="/console/resources">${escapeHtml(i18n.t("Back to APIs"))}</a></div><section class="panel"><div class="panel__body">${errorHtml}<form method="post" action="${action}" class="form-grid">${csrfField(csrfToken)}<input type="hidden" name="return_to" value="${escapeHtml(returnTo)}">${identity}${textField(i18n, "Display name", "name", values.name, { required: true, error: fieldError("name") })}<div class="field--wide">${textAreaField(i18n, "Allowed scopes", "allowed_scopes", values.allowedScopes, "One scope per line.", { error: fieldError("allowed_scopes") })}</div><div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t(isNew ? "Create API" : "Save changes"))}</button>${deleteAction}</div></form></div></section>`
+  const metadataPolicy = selectField(
+    i18n,
+    "Metadata client policy",
+    "metadata_client_policy",
+    values.metadataClientPolicy,
+    [
+      { value: "disabled", label: "Disabled" },
+      { value: "consent_required", label: "Consent required" },
+      { value: "admin_approved", label: "Admin approved" },
+    ],
+  )
+  const mcpFields = `<div class="field--wide">${checkboxField(i18n, "Enable MCP authorization", "mcp_enabled", values.mcpEnabled)}${metadataPolicy}<p class="form-hint">${escapeHtml(i18n.t("MCP resources require the resource parameter during token exchange. Metadata clients also require resource admission, user entitlement, and consent."))}</p></div>`
+  const content = `<div class="toolbar"><div><h2 class="panel__title">${escapeHtml(i18n.t(isNew ? "Create API" : resource.name))}</h2><p class="panel__desc">${escapeHtml(i18n.t(isNew ? "Register a protected API." : "Edit API configuration."))}</p></div><a class="btn btn--ghost btn--sm back-link" href="/console/resources">${escapeHtml(i18n.t("Back to APIs"))}</a></div><section class="panel"><div class="panel__body">${errorHtml}<form method="post" action="${action}" class="form-grid">${csrfField(csrfToken)}<input type="hidden" name="return_to" value="${escapeHtml(returnTo)}">${identity}${textField(i18n, "Display name", "name", values.name, { required: true, error: fieldError("name") })}<div class="field--wide">${textAreaField(i18n, "Allowed scopes", "allowed_scopes", values.allowedScopes, "One scope per line.", { error: fieldError("allowed_scopes") })}</div>${mcpFields}<div class="form-actions"><button class="btn btn--primary btn--auto" type="submit">${escapeHtml(i18n.t(isNew ? "Create API" : "Save changes"))}</button>${deleteAction}</div></form></div></section>`
   const auditLink = isNew
     ? ""
     : `<div class="actions actions--start"><a class="btn btn--ghost btn--auto" href="/console/audit?resource_uri=${encodeURIComponent(resource.resourceUri)}">${escapeHtml(i18n.t("View audit events"))}</a></div>`
@@ -97,6 +114,6 @@ export function renderResourceDeleteConfirmation(
     error === undefined
       ? ""
       : `<div class="flash flash--warn" role="alert">${escapeHtml(i18n.t(error))}</div>`
-  const content = `<div class="toolbar"><div><h2 class="panel__title">${escapeHtml(i18n.t("Delete API?"))}</h2><p class="panel__desc">${escapeHtml(resource.name)}</p></div><a class="btn btn--ghost btn--sm back-link" href="/console/resources/${id}">${escapeHtml(i18n.t("Back to API"))}</a></div><section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Confirm API deletion"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("This removes the API registration, permission-group assignments, client references, and stored authorizations. Existing access tokens remain valid until they expire."))}</p></div></div><div class="panel__body">${errorHtml}<form method="post" action="/console/resources/${id}/delete" class="form-grid form-grid--single">${csrfField(csrfToken)}${textField(i18n, i18n.t("Type {value} to confirm", { value: resource.resourceUri }), "confirmation", "", { required: true })}<div class="form-actions"><button class="btn btn--danger btn--auto" type="submit">${escapeHtml(i18n.t("Delete API"))}</button></div></form></div></section>`
+  const content = `<div class="toolbar"><div><h2 class="panel__title">${escapeHtml(i18n.t("Delete API?"))}</h2><p class="panel__desc">${escapeHtml(resource.name)}</p></div><a class="btn btn--ghost btn--sm back-link" href="/console/resources/${id}">${escapeHtml(i18n.t("Back to API"))}</a></div><section class="panel"><div class="panel__head"><div><h2 class="panel__title">${escapeHtml(i18n.t("Confirm API deletion"))}</h2><p class="panel__desc">${escapeHtml(i18n.t("This removes the API registration, permission rules that reference it, client references, and stored authorizations. Existing access tokens remain valid until they expire."))}</p></div></div><div class="panel__body">${errorHtml}<form method="post" action="/console/resources/${id}/delete" class="form-grid form-grid--single">${csrfField(csrfToken)}${textField(i18n, i18n.t("Type {value} to confirm", { value: resource.resourceUri }), "confirmation", "", { required: true })}<div class="form-actions"><button class="btn btn--danger btn--auto" type="submit">${escapeHtml(i18n.t("Delete API"))}</button></div></form></div></section>`
   return consoleShell(i18n.t("Delete API?"), chrome, content)
 }

@@ -264,6 +264,41 @@ async function cleanupTerminalRows(
       ],
       batchSize,
     ),
+    boundedCleanupStatement(
+      "oauth_client_assertion_jtis",
+      "oauth_client_assertion_jtis",
+      "jti_hash",
+      [{ terminalColumn: "expires_at", predicate: "expires_at < ?", values: [now] }],
+      batchSize,
+    ),
+    boundedCleanupStatement(
+      "oauth_metadata_clients",
+      "oauth_clients",
+      "client_id",
+      [
+        {
+          terminalColumn: "metadata_expires_at",
+          predicate: `registration_type = 'client_id_metadata'
+            AND enabled = 1
+            AND metadata_expires_at IS NOT NULL
+            AND metadata_expires_at < ?
+            AND NOT EXISTS (
+              SELECT 1 FROM consents
+              WHERE consents.client_id = oauth_clients.client_id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM refresh_tokens
+              WHERE refresh_tokens.client_id = oauth_clients.client_id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM authorization_grants
+              WHERE authorization_grants.client_id = oauth_clients.client_id
+            )`,
+          values: [cutoff],
+        },
+      ],
+      batchSize,
+    ),
   ]
 
   const results: Record<string, number> = {}

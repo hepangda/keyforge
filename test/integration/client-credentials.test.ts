@@ -44,10 +44,11 @@ beforeEach(async () => {
     `INSERT OR REPLACE INTO oauth_clients
        (client_id, client_secret_hash, type, client_kind, name, redirect_uris_json,
         allowed_scopes_json, allowed_grant_types_json, allowed_resources_json,
-        default_resource, require_pkce, enabled, created_at, updated_at)
+        default_resource, require_pkce, enabled, token_endpoint_auth_methods_json,
+        created_at, updated_at)
      VALUES ('pub_cc_test', NULL, 'public', 'application', 'Public CC', '[]',
              '["api.read"]', '["client_credentials"]', '["https://api.pangda.app"]',
-             'https://api.pangda.app', 0, 1, unixepoch(), unixepoch())`,
+             'https://api.pangda.app', 0, 1, '["none"]', unixepoch(), unixepoch())`,
   ).run()
 })
 

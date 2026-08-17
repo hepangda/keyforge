@@ -1,10 +1,13 @@
 import type { Context, Hono } from "hono"
 import * as z from "zod"
 import {
+  approveMetadataClient,
   createClient,
   deleteClient,
   getClientById,
   listClients,
+  listMetadataClientApprovals,
+  revokeMetadataClientApproval,
   setClientEnabled,
   setClientSecretHash,
   updateClient,
@@ -23,6 +26,8 @@ const postLogoutRedirectUriSchema = z
   .refine(isSafePostLogoutRedirectUri, "Unsafe post-logout redirect URI")
 const redirectUriSchema = z.string().refine(isSafeOAuthRedirectUri, "Unsafe OAuth redirect URI")
 
+const metadataApprovalSchema = z.object({ resource_uri: z.string().min(1).max(2048) })
+
 const createSchema = z.object({
   client_id: z.string().min(1),
   name: z.string().min(1),
@@ -35,6 +40,7 @@ const createSchema = z.object({
   allowed_resources: z.array(z.string()).default([]),
   default_resource: z.string().nullable().default(null),
   require_pkce: z.literal(true).default(true),
+  introspection_allowed: z.boolean().default(false),
 })
 
 const patchSchema = z.object({
@@ -46,6 +52,7 @@ const patchSchema = z.object({
   allowed_resources: z.array(z.string()).optional(),
   default_resource: z.string().nullable().optional(),
   require_pkce: z.literal(true).optional(),
+  introspection_allowed: z.boolean().optional(),
 })
 
 type MutableClientPatch = {
@@ -57,6 +64,7 @@ type MutableClientPatch = {
   allowedResources?: string[]
   defaultResource?: string | null
   requirePkce?: boolean
+  introspectionAllowed?: boolean
 }
 
 function serializeClient(client: OAuthClient): Record<string, unknown> {
@@ -74,6 +82,12 @@ function serializeClient(client: OAuthClient): Record<string, unknown> {
     require_pkce: client.requirePkce,
     enabled: client.enabled,
     has_secret: client.clientSecretHash !== null,
+    registration_type: client.registrationType,
+    metadata_expires_at: client.metadataExpiresAt,
+    token_endpoint_auth_methods: client.tokenEndpointAuthMethods,
+    introspection_allowed: client.introspectionAllowed,
+    metadata_fingerprint: client.metadataFingerprint,
+    metadata_jwks_uri: client.metadataJwksUri,
   }
 }
 
@@ -99,6 +113,7 @@ export function registerAdminClients(app: Hono<AppBindings>): void {
       allowedGrantTypes: body.allowed_grant_types,
       allowedResources: body.allowed_resources,
       defaultResource: body.default_resource,
+      introspectionAllowed: body.introspection_allowed,
     }
     const validation = await validateClientConfiguration(c.env, configuration)
     if (!validation.ok) {
@@ -140,6 +155,15 @@ export function registerAdminClients(app: Hono<AppBindings>): void {
     const id = c.req.param("id")
     const current = await getClientById(c.env, id)
     if (current === null) return c.json({ error: "not_found" }, 404)
+    if (current.registrationType === "client_id_metadata") {
+      return c.json(
+        {
+          error: "managed_client",
+          error_description: "Client metadata is managed by its Client Identifier URL",
+        },
+        409,
+      )
+    }
     const patch: MutableClientPatch = {}
     if (body.name !== undefined) patch.name = body.name
     if (body.redirect_uris !== undefined) patch.redirectUris = body.redirect_uris
@@ -151,6 +175,9 @@ export function registerAdminClients(app: Hono<AppBindings>): void {
     if (body.allowed_resources !== undefined) patch.allowedResources = body.allowed_resources
     if (body.default_resource !== undefined) patch.defaultResource = body.default_resource
     if (body.require_pkce !== undefined) patch.requirePkce = true
+    if (body.introspection_allowed !== undefined) {
+      patch.introspectionAllowed = body.introspection_allowed
+    }
 
     const validation = await validateClientConfiguration(c.env, {
       clientId: current.clientId,
@@ -164,6 +191,7 @@ export function registerAdminClients(app: Hono<AppBindings>): void {
       allowedResources: patch.allowedResources ?? current.allowedResources,
       defaultResource:
         patch.defaultResource === undefined ? current.defaultResource : patch.defaultResource,
+      introspectionAllowed: patch.introspectionAllowed ?? current.introspectionAllowed,
     })
     if (!validation.ok) {
       return c.json(
@@ -222,6 +250,57 @@ export function registerAdminClients(app: Hono<AppBindings>): void {
       success: true,
     })
     return c.json({ client_id: id, client_secret: secret })
+  })
+
+  app.get("/admin/clients/:id/metadata-approvals", async (c) => {
+    const client = await getClientById(c.env, c.req.param("id"))
+    if (client === null || client.registrationType !== "client_id_metadata") {
+      return c.json({ error: "not_found" }, 404)
+    }
+    return c.json({ resource_uris: await listMetadataClientApprovals(c.env, client.clientId) })
+  })
+
+  app.post("/admin/clients/:id/metadata-approvals", async (c) => {
+    const parsed = metadataApprovalSchema.safeParse(await readJsonBody(c))
+    if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
+    const clientId = c.req.param("id")
+    if (
+      !(await approveMetadataClient(
+        c.env,
+        clientId,
+        parsed.data.resource_uri,
+        c.get("user")?.id ?? null,
+      ))
+    ) {
+      return c.json({ error: "not_found" }, 404)
+    }
+    await recordAudit(c.env, {
+      type: "admin.metadata_client.approved",
+      actorUserId: c.get("user")?.id ?? null,
+      clientId,
+      resourceUri: parsed.data.resource_uri,
+      requestId: c.get("requestId"),
+      success: true,
+    })
+    return c.json({ client_id: clientId, resource_uri: parsed.data.resource_uri }, 201)
+  })
+
+  app.delete("/admin/clients/:id/metadata-approvals", async (c) => {
+    const parsed = metadataApprovalSchema.safeParse(await readJsonBody(c))
+    if (!parsed.success) return c.json({ error: "invalid_request" }, 400)
+    const clientId = c.req.param("id")
+    if (!(await revokeMetadataClientApproval(c.env, clientId, parsed.data.resource_uri))) {
+      return c.json({ error: "not_found" }, 404)
+    }
+    await recordAudit(c.env, {
+      type: "admin.metadata_client.approval_revoked",
+      actorUserId: c.get("user")?.id ?? null,
+      clientId,
+      resourceUri: parsed.data.resource_uri,
+      requestId: c.get("requestId"),
+      success: true,
+    })
+    return c.json({ revoked: true })
   })
 
   app.post("/admin/clients/:id/disable", (c) => setEnabled(c, c.req.param("id"), false))

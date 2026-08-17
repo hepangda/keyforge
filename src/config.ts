@@ -60,7 +60,7 @@ export const SESSION_TTL = {
  */
 export const SCRYPT_PARAMS = { N: 2 ** 15, r: 8, p: 1, dkLen: 32 } as const
 
-/** Every scope this server understands. */
+/** Built-in scopes; enabled resources may add their own scope vocabulary in D1. */
 export const SUPPORTED_SCOPES = [
   "openid",
   "profile",
@@ -111,6 +111,7 @@ export const TOKEN_ENDPOINT_AUTH_METHODS = [
   "client_secret_basic",
   "client_secret_post",
   "none",
+  "private_key_jwt",
 ] as const
 
 /** JWT `typ` header values (RFC 9068 for access tokens). */

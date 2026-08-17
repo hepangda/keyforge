@@ -26,6 +26,12 @@
     "moduleDetection": "force",
     "allowJs": false
   },
-  "include": ["src", "test", "worker-configuration.d.ts", "vitest.config.ts"],
+  "include": [
+    "src",
+    "test",
+    "examples/mcp-server/src",
+    "worker-configuration.d.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist", ".wrangler"]
 }

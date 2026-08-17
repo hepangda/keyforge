@@ -1,5 +1,10 @@
 import * as z from "zod"
-import type { ClientKind, ClientType, OAuthClient } from "../../types/domain"
+import type {
+  ClientKind,
+  ClientType,
+  OAuthClient,
+  TokenEndpointAuthMethod,
+} from "../../types/domain"
 import { asClientId } from "../../types/domain"
 import { nowSeconds } from "../../utils/time"
 
@@ -17,9 +22,18 @@ const clientRowSchema = z.object({
   default_resource: z.string().nullable(),
   require_pkce: z.number(),
   enabled: z.number(),
+  registration_type: z.enum(["static", "client_id_metadata"]),
+  metadata_expires_at: z.number().nullable(),
+  metadata_fingerprint: z.string().nullable(),
+  token_endpoint_auth_methods_json: z.string(),
+  metadata_jwks_uri: z.string().nullable(),
+  introspection_allowed: z.number(),
 })
 
 const stringArraySchema = z.array(z.string())
+const tokenEndpointAuthMethodsSchema = z.array(
+  z.enum(["client_secret_basic", "client_secret_post", "none", "private_key_jwt"]),
+)
 
 function parseJsonStringArray(raw: string): string[] {
   const result = stringArraySchema.safeParse(JSON.parse(raw))
@@ -29,7 +43,9 @@ function parseJsonStringArray(raw: string): string[] {
 const CLIENT_COLUMNS = `client_id, name, client_secret_hash, type, client_kind, redirect_uris_json,
   post_logout_redirect_uris_json,
   allowed_scopes_json, allowed_grant_types_json, allowed_resources_json,
-  default_resource, require_pkce, enabled`
+  default_resource, require_pkce, enabled, registration_type, metadata_expires_at,
+  metadata_fingerprint, token_endpoint_auth_methods_json, metadata_jwks_uri,
+  introspection_allowed`
 
 function mapClient(row: unknown): OAuthClient {
   const parsed = clientRowSchema.parse(row)
@@ -49,7 +65,15 @@ function mapClient(row: unknown): OAuthClient {
     // Keep parsing the legacy column for migration compatibility, but never
     // expose a per-client downgrade switch.
     requirePkce: true,
+    tokenEndpointAuthMethods: tokenEndpointAuthMethodsSchema.parse(
+      JSON.parse(parsed.token_endpoint_auth_methods_json),
+    ),
+    introspectionAllowed: parsed.introspection_allowed === 1,
     enabled: parsed.enabled === 1,
+    registrationType: parsed.registration_type,
+    metadataFingerprint: parsed.metadata_fingerprint,
+    metadataExpiresAt: parsed.metadata_expires_at,
+    metadataJwksUri: parsed.metadata_jwks_uri,
   }
 }
 
@@ -94,6 +118,7 @@ export type CreateClientInput = {
   readonly allowedResources: readonly string[]
   readonly defaultResource: string | null
   readonly requirePkce: boolean
+  readonly introspectionAllowed?: boolean
 }
 
 export async function createClient(
@@ -107,8 +132,9 @@ export async function createClient(
        (client_id, name, client_secret_hash, type, client_kind, redirect_uris_json,
         post_logout_redirect_uris_json,
         allowed_scopes_json, allowed_grant_types_json, allowed_resources_json,
-        default_resource, require_pkce, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        default_resource, require_pkce, enabled, token_endpoint_auth_methods_json,
+        introspection_allowed, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
   )
     .bind(
       input.clientId,
@@ -123,6 +149,15 @@ export async function createClient(
       JSON.stringify(input.allowedResources),
       input.defaultResource,
       1,
+      JSON.stringify(
+        input.type === "public"
+          ? (["none"] satisfies readonly TokenEndpointAuthMethod[])
+          : ([
+              "client_secret_basic",
+              "client_secret_post",
+            ] satisfies readonly TokenEndpointAuthMethod[]),
+      ),
+      input.introspectionAllowed === true ? 1 : 0,
       now,
       now,
     )
@@ -138,6 +173,7 @@ export type ClientPatch = {
   readonly allowedResources?: readonly string[]
   readonly defaultResource?: string | null
   readonly requirePkce?: boolean
+  readonly introspectionAllowed?: boolean
 }
 
 export async function updateClient(env: Env, id: string, patch: ClientPatch): Promise<boolean> {
@@ -155,12 +191,13 @@ export async function updateClient(env: Env, id: string, patch: ClientPatch): Pr
     defaultResource:
       patch.defaultResource === undefined ? current.defaultResource : patch.defaultResource,
     requirePkce: true,
+    introspectionAllowed: patch.introspectionAllowed ?? current.introspectionAllowed,
   }
   await env.DB.prepare(
     `UPDATE oauth_clients SET name = ?, redirect_uris_json = ?, post_logout_redirect_uris_json = ?,
        allowed_scopes_json = ?,
        allowed_grant_types_json = ?, allowed_resources_json = ?, default_resource = ?,
-       require_pkce = ?, updated_at = ? WHERE client_id = ?`,
+       require_pkce = ?, introspection_allowed = ?, updated_at = ? WHERE client_id = ?`,
   )
     .bind(
       next.name,
@@ -171,6 +208,7 @@ export async function updateClient(env: Env, id: string, patch: ClientPatch): Pr
       JSON.stringify(next.allowedResources),
       next.defaultResource,
       1,
+      next.introspectionAllowed ? 1 : 0,
       nowSeconds(),
       id,
     )
@@ -205,4 +243,192 @@ export async function setClientSecretHash(
     .bind(secretHash, nowSeconds(), id)
     .run()
   return result.meta.changes === 1
+}
+
+const MAX_METADATA_CLIENT_RECORDS = 10_000
+
+export type UpsertMetadataClientInput = {
+  readonly clientId: string
+  readonly name: string
+  readonly redirectUris: readonly string[]
+  readonly allowedGrantTypes: readonly string[]
+  readonly tokenEndpointAuthMethods: readonly TokenEndpointAuthMethod[]
+  readonly metadataJwksUri: string | null
+  readonly metadataFingerprint: string
+  readonly resourceUri: string
+  readonly resourceScopes: readonly string[]
+  readonly metadataExpiresAt: number
+}
+
+/**
+ * Persist the runtime projection of a discovered metadata document. The
+ * registration type and fingerprint keep external metadata distinct from
+ * administrator-managed clients; resource policy, approval, user entitlement,
+ * and consent remain independent gates.
+ */
+export async function upsertMetadataClient(
+  env: Env,
+  input: UpsertMetadataClientInput,
+): Promise<OAuthClient> {
+  const existing = await getClientById(env, input.clientId)
+  if (existing !== null && existing.registrationType !== "client_id_metadata") {
+    throw new Error("Client Identifier URL conflicts with a static client registration")
+  }
+  if (existing === null) {
+    const count =
+      (await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM oauth_clients WHERE registration_type = 'client_id_metadata'",
+      ).first<number>("count")) ?? 0
+    if (count >= MAX_METADATA_CLIENT_RECORDS) {
+      throw new Error("Metadata client record capacity reached")
+    }
+  }
+
+  const now = nowSeconds()
+  const clientType = input.tokenEndpointAuthMethods.includes("none") ? "public" : "confidential"
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO oauth_clients
+       (client_id, name, client_secret_hash, type, client_kind, redirect_uris_json,
+        post_logout_redirect_uris_json, allowed_scopes_json, allowed_grant_types_json,
+        allowed_resources_json, default_resource, require_pkce, enabled,
+        registration_type, metadata_expires_at, metadata_fingerprint,
+        token_endpoint_auth_methods_json, metadata_jwks_uri, introspection_allowed,
+        created_at, updated_at)
+     VALUES (?, ?, NULL, ?, 'application', ?, '[]', ?, ?, ?, NULL, 1, 1,
+             'client_id_metadata', ?, ?, ?, ?, 0, ?, ?)`,
+  )
+    .bind(
+      input.clientId,
+      input.name,
+      clientType,
+      JSON.stringify(input.redirectUris),
+      JSON.stringify(input.resourceScopes),
+      JSON.stringify(input.allowedGrantTypes),
+      JSON.stringify([input.resourceUri]),
+      input.metadataExpiresAt,
+      input.metadataFingerprint,
+      JSON.stringify(input.tokenEndpointAuthMethods),
+      input.metadataJwksUri,
+      now,
+      now,
+    )
+    .run()
+
+  const current = await getClientById(env, input.clientId)
+  if (current === null || current.registrationType !== "client_id_metadata") {
+    throw new Error("Metadata client could not be persisted")
+  }
+  const allowedResources = [...new Set([...current.allowedResources, input.resourceUri])]
+  const allowedScopes = [...new Set([...current.allowedScopes, ...input.resourceScopes])]
+  const metadataChanged = current.metadataFingerprint !== input.metadataFingerprint
+
+  const statements = [
+    env.DB.prepare(
+      `UPDATE oauth_clients
+         SET name = ?, type = ?, redirect_uris_json = ?, allowed_scopes_json = ?,
+             allowed_grant_types_json = ?, allowed_resources_json = ?,
+             metadata_expires_at = ?, metadata_fingerprint = ?,
+             token_endpoint_auth_methods_json = ?, metadata_jwks_uri = ?, updated_at = ?
+         WHERE client_id = ? AND registration_type = 'client_id_metadata'`,
+    ).bind(
+      input.name,
+      clientType,
+      JSON.stringify(input.redirectUris),
+      JSON.stringify(allowedScopes),
+      JSON.stringify(input.allowedGrantTypes),
+      JSON.stringify(allowedResources),
+      input.metadataExpiresAt,
+      input.metadataFingerprint,
+      JSON.stringify(input.tokenEndpointAuthMethods),
+      input.metadataJwksUri,
+      now,
+      input.clientId,
+    ),
+  ]
+  if (metadataChanged) {
+    statements.push(
+      env.DB.prepare(
+        `UPDATE refresh_tokens SET revoked_at = ?
+         WHERE client_id = ? AND revoked_at IS NULL`,
+      ).bind(now, input.clientId),
+      env.DB.prepare(
+        `UPDATE authorization_grants SET revoked_at = ?
+         WHERE client_id = ? AND revoked_at IS NULL`,
+      ).bind(now, input.clientId),
+    )
+  }
+  await env.DB.batch(statements)
+  const updated = await getClientById(env, input.clientId)
+  if (updated === null) throw new Error("Metadata client disappeared after registration")
+  return updated
+}
+
+export async function isMetadataClientApproved(
+  env: Env,
+  clientId: string,
+  resourceUri: string,
+): Promise<boolean> {
+  return (
+    (await env.DB.prepare(
+      `SELECT 1 FROM oauth_metadata_client_approvals
+       WHERE client_id = ? AND resource_uri = ?`,
+    )
+      .bind(clientId, resourceUri)
+      .first()) !== null
+  )
+}
+
+export async function approveMetadataClient(
+  env: Env,
+  clientId: string,
+  resourceUri: string,
+  approvedByUserId: string | null,
+): Promise<boolean> {
+  const result = await env.DB.prepare(
+    `INSERT INTO oauth_metadata_client_approvals
+       (client_id, resource_uri, approved_by_user_id, approved_at)
+     SELECT client.client_id, resource.resource_uri, ?, ?
+     FROM oauth_clients AS client
+     JOIN oauth_resources AS resource ON resource.resource_uri = ?
+     WHERE client.client_id = ?
+       AND client.registration_type = 'client_id_metadata'
+       AND resource.metadata_client_policy = 'admin_approved'
+       AND EXISTS (
+         SELECT 1 FROM json_each(client.allowed_resources_json)
+         WHERE CAST(value AS TEXT) = resource.resource_uri
+       )
+     ON CONFLICT(client_id, resource_uri) DO UPDATE SET
+       approved_by_user_id = excluded.approved_by_user_id,
+       approved_at = excluded.approved_at`,
+  )
+    .bind(approvedByUserId, nowSeconds(), resourceUri, clientId)
+    .run()
+  return result.meta.changes >= 1
+}
+
+export async function revokeMetadataClientApproval(
+  env: Env,
+  clientId: string,
+  resourceUri: string,
+): Promise<boolean> {
+  const result = await env.DB.prepare(
+    `DELETE FROM oauth_metadata_client_approvals
+     WHERE client_id = ? AND resource_uri = ?`,
+  )
+    .bind(clientId, resourceUri)
+    .run()
+  return result.meta.changes >= 1
+}
+
+export async function listMetadataClientApprovals(
+  env: Env,
+  clientId: string,
+): Promise<readonly string[]> {
+  const result = await env.DB.prepare(
+    `SELECT resource_uri FROM oauth_metadata_client_approvals
+     WHERE client_id = ? ORDER BY resource_uri`,
+  )
+    .bind(clientId)
+    .all<{ resource_uri: string }>()
+  return result.results.map((row) => row.resource_uri)
 }

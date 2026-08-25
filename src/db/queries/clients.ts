@@ -256,7 +256,7 @@ export type UpsertMetadataClientInput = {
   readonly metadataJwksUri: string | null
   readonly metadataFingerprint: string
   readonly resourceUri: string
-  readonly resourceScopes: readonly string[]
+  readonly allowedScopes: readonly string[]
   readonly metadataExpiresAt: number
 }
 
@@ -302,7 +302,7 @@ export async function upsertMetadataClient(
       input.name,
       clientType,
       JSON.stringify(input.redirectUris),
-      JSON.stringify(input.resourceScopes),
+      JSON.stringify(input.allowedScopes),
       JSON.stringify(input.allowedGrantTypes),
       JSON.stringify([input.resourceUri]),
       input.metadataExpiresAt,
@@ -319,7 +319,7 @@ export async function upsertMetadataClient(
     throw new Error("Metadata client could not be persisted")
   }
   const allowedResources = [...new Set([...current.allowedResources, input.resourceUri])]
-  const allowedScopes = [...new Set([...current.allowedScopes, ...input.resourceScopes])]
+  const allowedScopes = [...new Set([...current.allowedScopes, ...input.allowedScopes])]
   const metadataChanged = current.metadataFingerprint !== input.metadataFingerprint
 
   const statements = [

@@ -1,6 +1,7 @@
 import { DEVICE_CODE_GRANT, GRANT_TYPES, USER_ONLY_SCOPES } from "../config"
 import { listResources } from "../db/queries/resources"
 import type { ClientKind, ClientType } from "../types/domain"
+import { isPermissionGroupControlledScope } from "./scope-policy"
 import { validateScopeCatalog } from "./scopes"
 
 export type ClientConfiguration = {
@@ -82,7 +83,11 @@ export async function validateClientConfiguration(
     return { ok: false, reason: "every allowed resource must be registered and enabled" }
   }
   const resourceScopes = new Set(selected.flatMap((resource) => resource.allowedScopes))
-  if (config.allowedScopes.some((scope) => !resourceScopes.has(scope))) {
+  if (
+    config.allowedScopes.some(
+      (scope) => isPermissionGroupControlledScope(scope) && !resourceScopes.has(scope),
+    )
+  ) {
     return { ok: false, reason: "one or more scopes are not offered by an allowed resource" }
   }
 

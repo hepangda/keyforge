@@ -205,8 +205,11 @@ and replay-checked.
 
 The `client_id` must exactly equal the document URL. Wildcards, credentials,
 query, fragment, and dot segments are rejected. Redirect URIs may be HTTPS or
-loopback HTTP. Consent displays the complete client identity, callback,
-Resource, permissions, metadata changes, and localhost warning.
+loopback HTTP. Redirect matching is exact except that CIMD loopback IP
+callbacks may choose an ephemeral port as required by RFC 8252 section 7.3;
+the scheme, IP literal, path, query, and fragment must still match. Consent
+displays the complete client identity, callback, Resource, permissions,
+metadata changes, and localhost warning.
 
 Discovery is protected by a per-source rate limit, a 10,000-record cap, bounded
 cache TTL, and scheduled cleanup. `registration_type=client_id_metadata`, a

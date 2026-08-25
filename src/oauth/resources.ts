@@ -4,6 +4,7 @@ import { isYoloEnabled } from "../operations/yolo"
 import { OAuthError } from "../security/errors"
 import { isMcpResourceUriAllowed } from "../security/redirect-uri"
 import { asResourceUri, type OAuthClient, type OAuthResource } from "../types/domain"
+import { isPermissionGroupControlledScope } from "./scope-policy"
 import { validateRequestedScopes } from "./scopes"
 
 /**
@@ -103,8 +104,9 @@ export async function resolveResourceForScopes(
   // YOLO mode grants every requested scope regardless of client or resource policy.
   if (isYoloEnabled(env)) return resource
   validateRequestedScopes(requestedScopes, client.allowedScopes)
+  const resourceSpecificScopes = requestedScopes.filter(isPermissionGroupControlledScope)
   try {
-    validateRequestedScopes(requestedScopes, registered.allowedScopes)
+    validateRequestedScopes(resourceSpecificScopes, registered.allowedScopes)
   } catch (error) {
     if (error instanceof OAuthError && error.code === "invalid_scope") {
       throw new OAuthError("invalid_scope", {

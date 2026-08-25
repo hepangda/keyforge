@@ -19,7 +19,7 @@ const ISSUER = "https://auth.pangda.app"
 const RESOURCE = "https://mcp.example.com/v1/mcp"
 const CLIENT_ID = "https://client.example.com/oauth/client.json"
 const REDIRECT_URI = "https://client.example.com/oauth/callback"
-const SCOPES = ["mcp.tools.read", "mcp.tools.execute", "offline_access"] as const
+const SCOPES = ["mcp.tools.read", "mcp.tools.execute"] as const
 const REQUESTED_SCOPE = "mcp.tools.read offline_access"
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
@@ -216,7 +216,7 @@ describe("MCP authorization integration", () => {
       registrationType: "client_id_metadata",
       requirePkce: true,
       allowedResources: [RESOURCE],
-      allowedScopes: SCOPES,
+      allowedScopes: [...SCOPES, "openid", "profile", "email", "offline_access"],
     })
     expect(
       await env.DB.prepare(

@@ -9,6 +9,7 @@ import { sha256Hex } from "../security/crypto"
 import type { OAuthClient, TokenEndpointAuthMethod } from "../types/domain"
 import { nowSeconds } from "../utils/time"
 import { parseClientIdentifierUrl } from "./client-identifier"
+import { RESOURCE_AUTHORIZED_SCOPES } from "./scope-policy"
 
 const CLIENT_METADATA_MAX_BYTES = 5 * 1024
 const DNS_RESPONSE_MAX_BYTES = 16 * 1024
@@ -466,6 +467,7 @@ export async function resolveAuthorizationClient(
   ) {
     return null
   }
+  const allowedScopes = [...new Set([...resource.allowedScopes, ...RESOURCE_AUTHORIZED_SCOPES])]
 
   let resolved: OAuthClient
   try {
@@ -483,7 +485,7 @@ export async function resolveAuthorizationClient(
         metadataJwksUri: current.metadataJwksUri,
         metadataFingerprint: current.metadataFingerprint,
         resourceUri,
-        resourceScopes: resource.allowedScopes,
+        allowedScopes,
         metadataExpiresAt: current.metadataExpiresAt ?? nowSeconds(),
       })
     } else {
@@ -497,7 +499,7 @@ export async function resolveAuthorizationClient(
         metadataJwksUri: metadata.jwksUri,
         metadataFingerprint: metadata.fingerprint,
         resourceUri,
-        resourceScopes: resource.allowedScopes,
+        allowedScopes,
         metadataExpiresAt: metadata.expiresAt,
       })
     }

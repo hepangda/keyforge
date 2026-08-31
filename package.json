@@ -40,12 +40,12 @@
     "db:migrate:production": "pnpm validate:deploy:production && wrangler d1 migrations apply keyforge --env production --remote && wrangler d1 execute keyforge --env production --remote --file scripts/resources/aaeasy-mcp.production.sql"
   },
   "dependencies": {
-    "@noble/hashes": "^2.2.0",
-    "@simplewebauthn/server": "^13.3.2",
-    "hono": "^4.13.1",
-    "jose": "^6.2.3",
+    "@noble/hashes": "^2.4.0",
+    "@simplewebauthn/server": "^13.3.3",
+    "hono": "^4.13.5",
+    "jose": "^6.2.10",
     "ulidx": "^2.4.1",
-    "zod": "^4.4.3"
+    "zod": "^4.5.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",

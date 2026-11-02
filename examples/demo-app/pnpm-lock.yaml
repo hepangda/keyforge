@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       jose:
-        specifier: ^6.2.3
-        version: 6.2.3
+        specifier: ^6.2.14
+        version: 6.2.14
 
 packages:
 
-  jose@6.2.3:
-    resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
+  jose@6.2.14:
+    resolution: {integrity: sha512-3JasLuki1NRLQvY4wCoC37KZk4qxoBx2k2aFqLxT84IezqW0bkJKnNtxnZj/Fu1xsQivoc/lytxaRHJoGLjJ1A==}
 
 snapshots:
 
-  jose@6.2.3: {}
+  jose@6.2.14: {}
